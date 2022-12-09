@@ -25,9 +25,6 @@ public class RunETruckGenerator {
 
 		EvConfigGroup evConfigGroup = new EvConfigGroup();
 		// using the Population of the EV example for comparison reason
-
-//		String pathToConfig = "contribs\\ev\\test\\input\\org\\matsim\\contrib\\ev\\example\\RunEvExample\\config.xml";
-		// the config file couldn't be found so I had to change this (I am working on a Mac)
 		String pathToConfig = "contribs/ev/test/input/org/matsim/contrib/ev/example/RunEvExample/config.xml";
 		Config config = ConfigUtils.loadConfig( IOUtils.getFileUrl( pathToConfig ), evConfigGroup);
 		config.qsim().setVehiclesSource(QSimConfigGroup.VehiclesSource.fromVehiclesData);
@@ -36,26 +33,19 @@ public class RunETruckGenerator {
 
 		VehiclesFactory vehicleFactory = scenario.getVehicles().getFactory();
 
+		VehicleType carVehicleType = vehicleFactory.createVehicleType(Id.create("600kWh_Long_Haul_Truck",
+				VehicleType.class));
+		VehicleUtils.setHbefaTechnology(carVehicleType.getEngineInformation(), "electricity");
+		VehicleUtils.setEnergyCapacity(carVehicleType.getEngineInformation(), CAR_BATTERY_CAPACITY_kWh);
+		ElectricVehicleSpecifications.setChargerTypes(carVehicleType.getEngineInformation(), Arrays.asList( TRUCK_CHARGERS_TYPE, "default" ));
+		scenario.getVehicles().addVehicleType(carVehicleType);
+
 		for (Person person : scenario.getPopulation().getPersons().values()) {
 
-			VehicleType carVehicleType = vehicleFactory.createVehicleType(Id.create(person.getId().toString(),
-					VehicleType.class));
-			VehicleUtils.setHbefaTechnology(carVehicleType.getEngineInformation(), "electricity");
-			VehicleUtils.setEnergyCapacity(carVehicleType.getEngineInformation(), CAR_BATTERY_CAPACITY_kWh);
-			// TODO why do I need collection.singleton?
-			// you don't necessarily...
-//			ElectricVehicleSpecifications.setChargerTypes(carVehicleType.getEngineInformation(), Collections.singleton(TRUCK_CHARGERS_TYPE));
-			// you can do this too:
-			ElectricVehicleSpecifications.setChargerTypes(carVehicleType.getEngineInformation(), Arrays.asList( TRUCK_CHARGERS_TYPE, "default" ));
-			scenario.getVehicles().addVehicleType(carVehicleType);
 			Vehicle carVehicle = vehicleFactory.createVehicle(VehicleUtils.createVehicleId(person, TransportMode.truck),
 					carVehicleType);
 			ElectricVehicleSpecifications.setInitialSoc(carVehicle, CAR_INITIAL_SOC);
 			scenario.getVehicles().addVehicle(carVehicle);
-
-			//TODO How to create evehicles.xml?
-			// With MatsimVehicleWriter.java
-			// MatsimVehicleWriter(carVehicle)
 
 			MatsimVehicleWriter vehicleWriter = new MatsimVehicleWriter( scenario.getVehicles() );
 			vehicleWriter.writeFile( "contribs/ev/src/main/java/org/matsim/contrib/ev/eTruckTraffic/lib/evehicles.xml" );
