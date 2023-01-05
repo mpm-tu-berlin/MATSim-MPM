@@ -21,11 +21,14 @@ public class RunETruckGenerator {
 	static final double CAR_INITIAL_SOC = 1;
 	static final String TRUCK_CHARGERS_TYPE = "DC";
 
+	static final String CONFIG_PATH = "input/EvTruckTraffic/config.xml";
+	static final String ETRUCK_FILE_PATH = "input/EvTruckTraffic/eTrucks.xml";
+
 	public static void main(String[] args) {
 
 		EvConfigGroup evConfigGroup = new EvConfigGroup();
 		// using the Population of the EV example for comparison reason
-		String pathToConfig = "contribs/ev/test/input/org/matsim/contrib/ev/example/RunEvExample/config.xml";
+		String pathToConfig = CONFIG_PATH;
 		Config config = ConfigUtils.loadConfig( IOUtils.getFileUrl( pathToConfig ), evConfigGroup);
 		config.qsim().setVehiclesSource(QSimConfigGroup.VehiclesSource.fromVehiclesData);
 
@@ -40,7 +43,12 @@ public class RunETruckGenerator {
 		ElectricVehicleSpecifications.setChargerTypes(carVehicleType.getEngineInformation(), Arrays.asList( TRUCK_CHARGERS_TYPE, "default" ));
 		scenario.getVehicles().addVehicleType(carVehicleType);
 
+		Random rn = new Random();
 		for (Person person : scenario.getPopulation().getPersons().values()) {
+			if (rn.nextInt(10) != 0){
+				// first attempt 10% of trucks are electric
+				continue;
+			}
 
 			Vehicle carVehicle = vehicleFactory.createVehicle(VehicleUtils.createVehicleId(person, TransportMode.truck),
 					carVehicleType);
@@ -48,7 +56,7 @@ public class RunETruckGenerator {
 			scenario.getVehicles().addVehicle(carVehicle);
 
 			MatsimVehicleWriter vehicleWriter = new MatsimVehicleWriter( scenario.getVehicles() );
-			vehicleWriter.writeFile( "contribs/ev/src/main/java/org/matsim/contrib/ev/eTruckTraffic/lib/evehicles.xml" );
+			vehicleWriter.writeFile(ETRUCK_FILE_PATH);
 		}
 	}
 }
