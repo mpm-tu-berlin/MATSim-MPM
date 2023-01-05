@@ -11,7 +11,6 @@ import org.matsim.contrib.ev.infrastructure.ImmutableChargerSpecification;
 import org.matsim.core.network.NetworkUtils;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.FileReader;
 import java.util.ArrayList;
 
@@ -22,17 +21,16 @@ import org.matsim.core.utils.geometry.CoordinateTransformation;
 import org.matsim.core.utils.geometry.transformations.TransformationFactory;
 
 
-public class RunChargersGenerator {
+public class 	RunChargersGenerator {
 
-	public static void main(String[] args, Network network) throws Exception{
+	public static void run(String chargers_config, String chargers_file, String networkFile) throws Exception{
 
 		ArrayList<ChargerSpecification> chargers = new ArrayList<>();
+		Network network = NetworkUtils.readNetwork(networkFile);
 
-		// TODO: define Filename, bzw network übergeben
-		// Network network = NetworkUtils.readNetwork("input\\EvTruckTraffic\\germany-europe-network.xml.gz");
 
 		BufferedReader br = new BufferedReader(
-				new FileReader("input\\EvTruckTraffic\\raw_data\\chargersConfiguration.csv")
+				new FileReader(chargers_config)
 		);
 
 		// read chargers configuration file
@@ -72,7 +70,7 @@ public class RunChargersGenerator {
 
 			chargers.add(charger);
 		}
-		new ChargerWriter(chargers.stream()).write("input\\EvTruckTraffic\\eTruckChargers.xml");
+		new ChargerWriter(chargers.stream()).write(chargers_file);
 
 	}
 }

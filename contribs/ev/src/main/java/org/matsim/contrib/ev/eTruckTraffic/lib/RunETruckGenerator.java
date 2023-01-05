@@ -20,16 +20,11 @@ public class RunETruckGenerator {
 	static final double CAR_BATTERY_CAPACITY_kWh = 600.;
 	static final double CAR_INITIAL_SOC = 1;
 	static final String TRUCK_CHARGERS_TYPE = "DC";
-
-	static final String CONFIG_PATH = "input/EvTruckTraffic/config.xml";
-	static final String ETRUCK_FILE_PATH = "input/EvTruckTraffic/eTrucks.xml";
-
-	public static void main(String[] args) {
+	public static void run(Config config, String eVehicleFile) {
 
 		EvConfigGroup evConfigGroup = new EvConfigGroup();
 		// using the Population of the EV example for comparison reason
-		String pathToConfig = CONFIG_PATH;
-		Config config = ConfigUtils.loadConfig( IOUtils.getFileUrl( pathToConfig ), evConfigGroup);
+		// Config config = ConfigUtils.loadConfig( IOUtils.getFileUrl( pathToConfig ), evConfigGroup);
 		config.qsim().setVehiclesSource(QSimConfigGroup.VehiclesSource.fromVehiclesData);
 
 		Scenario scenario = ScenarioUtils.loadScenario(config);
@@ -45,10 +40,10 @@ public class RunETruckGenerator {
 
 		Random rn = new Random();
 		for (Person person : scenario.getPopulation().getPersons().values()) {
-			if (rn.nextInt(10) != 0){
-				// first attempt 10% of trucks are electric
-				continue;
-			}
+//			if (rn.nextInt(10) != 0){
+//				// first attempt 10% of trucks are electric
+//				continue;
+//			}
 
 			Vehicle carVehicle = vehicleFactory.createVehicle(VehicleUtils.createVehicleId(person, TransportMode.truck),
 					carVehicleType);
@@ -56,7 +51,9 @@ public class RunETruckGenerator {
 			scenario.getVehicles().addVehicle(carVehicle);
 
 			MatsimVehicleWriter vehicleWriter = new MatsimVehicleWriter( scenario.getVehicles() );
-			vehicleWriter.writeFile(ETRUCK_FILE_PATH);
+			vehicleWriter.writeFile(eVehicleFile);
 		}
+
+
 	}
 }

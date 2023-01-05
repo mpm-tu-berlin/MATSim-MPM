@@ -18,24 +18,12 @@ import org.matsim.api.core.v01.population.PopulationWriter;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.scenario.ScenarioUtils;
 public class RunETruckPoplationGenerator {
-	static final String PATH = "C:/Users/josef/tubCloud/HoLa - Data/" +
-			"00_PreProcessing_Data/Plans/HoLaPlans_OD_BMDV_minDist_300.csv";
 
-	static final String TEST_PATH = "C:/Users/josef/tubCloud/HoLa - Data/" +
-			"00_PreProcessing_Data/Plans/Test.csv";
+	public static void run(String rawPlansFile, String plansFile) {
 
-	public static void main(String args[]) {
-
-		/*
-		 * Create population from sample input data.
-		 */
-		Scenario scenario = createPopulationFromFile(TEST_PATH);
-
-		/*
-		 * Write population to file.
-		 */
+		Scenario scenario = createPopulationFromFile(rawPlansFile);
 		PopulationWriter populationWriter = new PopulationWriter(scenario.getPopulation(), scenario.getNetwork());
-		populationWriter.write("./input/populationTEST.xml");
+		populationWriter.write(plansFile);
 
 	}
 
