@@ -81,7 +81,7 @@ public class RunETruckPoplationGenerator {
 			person.addPlan(plan);
 
 			Coord homeCoord =  new Coord(entry.o_x, entry.o_y);
-			Activity homeActivity = populationFactory.createActivityFromCoord("ETruck_Start", homeCoord);
+			Activity homeActivity = populationFactory.createActivityFromCoord("Start_" + entry.tripmode, homeCoord);
 			homeActivity.setEndTime(entry.starttime * 60 * 60);
 			plan.addActivity(homeActivity);
 
@@ -89,10 +89,10 @@ public class RunETruckPoplationGenerator {
 			Coord endCoord = new Coord(entry.d_x, entry.d_y);
 
 			// Create a new Leg using the PopulationFactory and set its parameters.
-			Leg leg = populationFactory.createLeg(entry.tripmode);
+			Leg leg = populationFactory.createLeg("car");
 
 			// Create a new Activity using the Population Factory and set its parameters.
-			Activity activity = populationFactory.createActivityFromCoord("ETruck_End", endCoord);
+			Activity activity = populationFactory.createActivityFromCoord("End_" + entry.tripmode, endCoord);
 
 			// Add the Leg and the Activity to the plan.
 			plan.addLeg(leg);

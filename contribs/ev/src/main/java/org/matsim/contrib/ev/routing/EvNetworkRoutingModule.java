@@ -114,24 +114,24 @@ public final class EvNetworkRoutingModule implements RoutingModule {
 		} else {
 			Leg basicLeg = (Leg)basicRoute.get(0);
 			ElectricVehicleSpecification ev = electricFleet.getVehicleSpecifications().get(evId);
+			double overallDistance = basicLeg.getRoute().getDistance();
+			double rangePerTripWithoutStop = 150 * Math.pow(10, 3);
+			double numberOfStops = Math.floor(overallDistance / rangePerTripWithoutStop); // Stop after 300km
 
-			Map<Link, Double> estimatedEnergyConsumption = estimateConsumption(ev, basicLeg);
-			double estimatedOverallConsumption = estimatedEnergyConsumption.values()
-					.stream()
-					.mapToDouble(Number::doubleValue)
-					.sum();
-			double capacity = ev.getBatteryCapacity() * (0.8 + random.nextDouble() * 0.18);
-			double numberOfStops = Math.floor(estimatedOverallConsumption / capacity);
 			if (numberOfStops < 1) {
 				return basicRoute;
 			} else {
 				List<Link> stopLocations = new ArrayList<>();
-				double currentConsumption = 0;
-				for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) {
-					currentConsumption += e.getValue();
-					if (currentConsumption > capacity) {
-						stopLocations.add(e.getKey());
-						currentConsumption = 0;
+				NetworkRoute route = (NetworkRoute)basicLeg.getRoute();
+				List<Link> links = NetworkUtils.getLinks(network, route.getLinkIds());
+
+				double currentDistance = 0;
+
+				for (Link l : links) {
+					currentDistance += l.getLength();
+					if (currentDistance > rangePerTripWithoutStop) {
+						stopLocations.add(l);
+						currentDistance = 0;
 					}
 				}
 				List<PlanElement> stagedRoute = new ArrayList<>();
@@ -160,7 +160,7 @@ public final class EvNetworkRoutingModule implements RoutingModule {
 					Activity chargeAct = PopulationUtils.createStageActivityFromCoordLinkIdAndModePrefix(selectedChargerLink.getCoord(),
 							selectedChargerLink.getId(), stageActivityModePrefix);
 					double maxPowerEstimate = Math.min(selectedCharger.getPlugPower(), ev.getBatteryCapacity() / 3.6);
-					double estimatedChargingTime = (ev.getBatteryCapacity() * 1.5) / maxPowerEstimate;
+					double estimatedChargingTime = Math.min((ev.getBatteryCapacity() * 1.5) / maxPowerEstimate, 45);
 					chargeAct.setMaximumDuration(Math.max(evConfigGroup.minimumChargeTime, estimatedChargingTime));
 					lastArrivaltime += chargeAct.getMaximumDuration().seconds();
 					stagedRoute.add(chargeAct);
