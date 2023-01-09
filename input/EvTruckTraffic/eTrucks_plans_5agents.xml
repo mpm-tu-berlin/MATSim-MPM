@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+
+<population>
+
+
+
+<!-- ====================================================================== -->
+
+	<person id="0">
+		<plan selected="yes">
+			<activity type="Start_loaded" x="432872.4394749152" y="5741945.576125754" end_time="11:00:00" >
+			</activity>
+			<leg mode="car">
+			</leg>
+			<activity type="End_loaded" x="689850.0111775878" y="5747361.765205933" >
+			</activity>
+		</plan>
+
+	</person>
+
+<!-- ====================================================================== -->
+
+	<person id="1">
+		<plan selected="yes">
+			<activity type="Start_unloaded" x="960262.6816912284" y="5432980.111044802" end_time="12:00:00" >
+			</activity>
+			<leg mode="car">
+			</leg>
+			<activity type="End_unloaded" x="519736.8522828583" y="5423617.256530606" >
+			</activity>
+		</plan>
+
+	</person>
+
+<!-- ====================================================================== -->
+
+	<person id="10">
+		<plan selected="yes">
+			<activity type="Start_loaded" x="1246145.2720692195" y="5956576.918203924" end_time="18:00:00" >
+			</activity>
+			<leg mode="car">
+			</leg>
+			<activity type="End_loaded" x="347541.4577280143" y="5704819.664614522" >
+			</activity>
+		</plan>
+
+	</person>
+
+<!-- ====================================================================== -->
+
+	<person id="100">
+		<plan selected="yes">
+			<activity type="Start_loaded" x="487657.82404045056" y="5588000.21594754" end_time="07:00:00" >
+			</activity>
+			<leg mode="car">
+			</leg>
+			<activity type="End_loaded" x="485828.4538962617" y="5831876.633325926" >
+			</activity>
+		</plan>
+
+	</person>
+
+<!-- ====================================================================== -->
+
+	<person id="1000">
+		<plan selected="yes">
+			<activity type="Start_unloaded" x="639773.8045191555" y="5560901.602891373" end_time="11:00:00" >
+			</activity>
+			<leg mode="car">
+			</leg>
+			<activity type="End_unloaded" x="800926.1668818786" y="5823090.956626395" >
+			</activity>
+		</plan>
+
+	</person>
+
+<!-- ====================================================================== -->	
+
+<!-- ====================================================================== -->
+
+	<person id="999">
+		<plan selected="yes">
+			<activity type="Start_loaded" x="617302.3380916386" y="5775716.148876511" end_time="06:00:00" >
+			</activity>
+			<leg mode="car">
+			</leg>
+			<activity type="End_loaded" x="769500.7791623812" y="5503792.31379432" >
+			</activity>
+		</plan>
+
+	</person>
+
+<!-- ====================================================================== -->
+
+</population>
