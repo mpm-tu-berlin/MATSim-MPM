@@ -18,17 +18,17 @@
     </module>
 
     <module name="network">
-        <param name="inputNetworkFile" value="germany-europe-network.xml.gz"/>
+        <param name="inputNetworkFile" value="german_etruck_network.xml.gz"/>
     </module>
 
     <module name="plans">
-        <param name="inputPlansFile" value="eTrucks_plans_5agents.xml"/>
+        <param name="inputPlansFile" value="eTrucks_plans_1pct.xml"/>
     </module>
 
     <module name="controler">
         <param name="outputDirectory" value="./output/ETruckTraffic"/>
         <param name="firstIteration" value="0"/>
-        <param name="lastIteration" value="1"/>
+        <param name="lastIteration" value="10"/>
         <param name="eventsFileFormat" value="xml"/>
         <param name="mobsim" value="qsim"/>
     </module>
@@ -38,8 +38,6 @@
         <param name="startTime" value="00:00:00"/>
         <param name="endTime" value="24:00:00"/>
         <param name="simStarttimeInterpretation" value="onlyUseStarttime"/>
-
-
     </module>
 
     <module name="planCalcScore">
@@ -53,20 +51,27 @@
         <param name="waiting" value="-0"/>
 
         <parameterset type="activityParams">
-            <param name="activityType" value="h"/>
-            <param name="typicalDuration" value="22:00:00"/>
+            <param name="activityType" value="loaded"/>
+			            <param name="typicalDuration" value="04:00:00"/>
+            <param name="typicalDurationScoreComputation" value="relative"/>
+            <param name="scoringThisActivityAtAll" value="true"/>
+
+        </parameterset>
+		
+        <parameterset type="activityParams">
+            <param name="activityType" value="unloaded"/>
+            <param name="typicalDuration" value="04:00:00"/>
             <param name="typicalDurationScoreComputation" value="relative"/>
             <param name="scoringThisActivityAtAll" value="true"/>
 
         </parameterset>
 
         <parameterset type="activityParams">
+			<param name="priority"        value="1" />
             <param name="activityType" value="car charging interaction"/>
-            <param name="typicalDuration" value="01:30:00"/>
-            <param name="openingTime" value="07:30:00"/>
-            <param name="closingTime" value="21:30:00"/>
+            <param name="typicalDuration" value="00:45:00"/>
             <param name="typicalDurationScoreComputation" value="relative"/>
-            <param name="scoringThisActivityAtAll" value="false"/>
+            <param name="scoringThisActivityAtAll" value="true"/>
 
         </parameterset>
 
