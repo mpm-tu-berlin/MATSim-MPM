@@ -113,7 +113,9 @@ public class DriveDischargingHandler
 			double energy = ev.getDriveEnergyConsumption().calcEnergyConsumption(link, tt, eventTime - tt)
 					+ ev.getAuxEnergyConsumption().calcEnergyConsumption(eventTime - tt, tt, linkId);
 			//Energy consumption might be negative on links with negative slope
+			System.out.println("################# Vehicle ID: " + ev.getId().toString() + " #########");
 			ev.getBattery().changeCharge(-energy);
+
 
 			//FIXME emit a DriveOnLinkEnergyConsumptionEvent instead of calculating it here...
 			double linkConsumption = energy + energyConsumptionPerLink.getOrDefault(linkId, 0.0);

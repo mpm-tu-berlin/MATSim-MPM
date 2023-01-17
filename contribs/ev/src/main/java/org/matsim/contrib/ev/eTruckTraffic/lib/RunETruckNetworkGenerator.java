@@ -6,6 +6,7 @@ import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.network.NetworkWriter;
 import org.matsim.contrib.osm.networkReader.LinkProperties;
 import org.matsim.contrib.osm.networkReader.SupersonicOsmNetworkReader;
+import org.matsim.core.network.algorithms.NetworkCleaner;
 import org.matsim.core.utils.geometry.CoordinateTransformation;
 import org.matsim.core.utils.geometry.transformations.TransformationFactory;
 
@@ -15,8 +16,8 @@ import java.util.Collections;
 
 public class RunETruckNetworkGenerator {
 
-	private static final String INPUT_OSM = "C:/Users/josef/tubCloud/HoLa - Data/OSM/berlin-latest.osm.pbf";
-	private static final String OUTPUT_XML_GZ = "C:/Users/josef/tubCloud/HoLa - Data/OSM/berlin_test.xml.gz";
+	private static final String INPUT_OSM = "C:/Users/josef/tubCloud/HoLa - Data/OSM/germany-latest.osm.pbf";
+	private static final String OUTPUT_XML_GZ = "./input/EvTruckTraffic/germany_etruck_network.xml.gz";
 
 
 	private static final CoordinateTransformation coordinateTransformation =
@@ -37,10 +38,16 @@ public class RunETruckNetworkGenerator {
 						"motorway",new LinkProperties(LinkProperties.LEVEL_MOTORWAY,
 						2, 80 / 3.6, 2000, true)
 				)
+				.addOverridingLinkProperties(
+						"trunk",new LinkProperties(LinkProperties.LEVEL_TRUNK, 1, 60 / 3.6, 2000, false)
+				)
+				.addOverridingLinkProperties(
+						"primary",new LinkProperties(LinkProperties.LEVEL_PRIMARY, 1, 60 / 3.6, 1500, false)
+				)
 				.setAfterLinkCreated((link, osmTags, isReverse) -> link.setAllowedModes(Collections.singleton(TransportMode.car)))
 				.build()
 				.read(inputPath);
-
+		new NetworkCleaner().run(network);
 		new NetworkWriter(network).write(outputPath);
 	}
 }

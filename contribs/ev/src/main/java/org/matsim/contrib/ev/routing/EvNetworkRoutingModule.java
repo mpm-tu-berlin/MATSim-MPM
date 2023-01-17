@@ -115,7 +115,7 @@ public final class EvNetworkRoutingModule implements RoutingModule {
 			Leg basicLeg = (Leg)basicRoute.get(0);
 			ElectricVehicleSpecification ev = electricFleet.getVehicleSpecifications().get(evId);
 			double overallDistance = basicLeg.getRoute().getDistance();
-			double rangePerTripWithoutStop = 150 * Math.pow(10, 3);
+			double rangePerTripWithoutStop = 300 * Math.pow(10, 3);
 			double numberOfStops = Math.floor(overallDistance / rangePerTripWithoutStop); // Stop after 300km
 
 			if (numberOfStops < 1) {
@@ -137,7 +137,10 @@ public final class EvNetworkRoutingModule implements RoutingModule {
 				List<PlanElement> stagedRoute = new ArrayList<>();
 				Facility lastFrom = fromFacility;
 				double lastArrivaltime = departureTime;
+				int stopCounter = 0;
+
 				for (Link stopLocation : stopLocations) {
+					stopCounter += 1;
 
 					StraightLineKnnFinder<Link, ChargerSpecification> straightLineKnnFinder = new StraightLineKnnFinder<>(
 							2, Link::getCoord, s -> network.getLinks().get(s.getLinkId()).getCoord());
@@ -159,9 +162,13 @@ public final class EvNetworkRoutingModule implements RoutingModule {
 					stagedRoute.add(lastLeg);
 					Activity chargeAct = PopulationUtils.createStageActivityFromCoordLinkIdAndModePrefix(selectedChargerLink.getCoord(),
 							selectedChargerLink.getId(), stageActivityModePrefix);
-					double maxPowerEstimate = Math.min(selectedCharger.getPlugPower(), ev.getBatteryCapacity() / 3.6);
-					double estimatedChargingTime = Math.min((ev.getBatteryCapacity() * 1.5) / maxPowerEstimate, 45);
-					chargeAct.setMaximumDuration(Math.max(evConfigGroup.minimumChargeTime, estimatedChargingTime));
+					if (stopCounter % 2 != 0){
+						// If the StopCounter is odd, the max charging time is 45min. -> Lenkzeitunterbrechung
+						chargeAct.setMaximumDuration(evConfigGroup.maximumChargeTime); // max charging time 45min
+					}else{
+						// else the min rest time is set as the max charging duration
+						chargeAct.setMaximumDuration(11*60*60);
+					}
 					lastArrivaltime += chargeAct.getMaximumDuration().seconds();
 					stagedRoute.add(chargeAct);
 					lastFrom = nexttoFacility;

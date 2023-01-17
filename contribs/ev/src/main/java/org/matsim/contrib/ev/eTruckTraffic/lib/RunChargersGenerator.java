@@ -4,10 +4,13 @@ import org.matsim.api.core.v01.Coord;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
+import org.matsim.contrib.ev.EvConfigGroup;
 import org.matsim.contrib.ev.infrastructure.Charger;
 import org.matsim.contrib.ev.infrastructure.ChargerSpecification;
 import org.matsim.contrib.ev.infrastructure.ChargerWriter;
 import org.matsim.contrib.ev.infrastructure.ImmutableChargerSpecification;
+import org.matsim.core.config.Config;
+import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.network.NetworkUtils;
 
 import java.io.BufferedReader;
@@ -22,6 +25,21 @@ import org.matsim.core.utils.geometry.transformations.TransformationFactory;
 
 
 public class 	RunChargersGenerator {
+	private final static String CONFIG_FILE = "./input/EvTruckTraffic/config.xml";
+	private final static String DEFAULT_PATH = "./input/EvTruckTraffic/";
+	private final static String CHARGERS_CONFIG = "./input/EvTruckTraffic/raw_data/chargersConfiguration.csv";
+
+
+	public static void main(String[] args) throws Exception {
+		Config config = ConfigUtils.loadConfig(CONFIG_FILE, new EvConfigGroup());
+
+		String networkFile = DEFAULT_PATH + config.network().getInputFile();
+		String chargersFile = DEFAULT_PATH + config.getModules().get("ev").getParams().get("chargersFile");
+
+
+		run(CHARGERS_CONFIG, chargersFile,  networkFile);
+
+	}
 
 	public static void run(String chargers_config, String chargers_file, String networkFile) throws Exception{
 
@@ -62,7 +80,7 @@ public class 	RunChargersGenerator {
 			ImmutableChargerSpecification charger = builder.id(Id.create("TruckChargers", Charger.class))
 					.id(id)
 					.linkId(link.getId())
-					.plugPower(Integer.parseInt(record.get("PLUG_POWER")))
+					.plugPower(Integer.parseInt(record.get("PLUG_POWER"))*3500) // kW
 					.plugCount(Integer.parseInt(record.get("PLUG_COUNT")))
 					.chargerType(record.get("CHARGER_TYPE"))
 					.build();
