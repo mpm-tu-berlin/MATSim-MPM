@@ -31,7 +31,7 @@ import org.matsim.core.mobsim.qsim.AbstractQSimModule;
 public class DischargingModule extends AbstractModule {
 	@Override
 	public void install() {
-		bind(DriveEnergyConsumption.Factory.class).toInstance(ev -> new OhdeSlaskiDriveEnergyConsumption());
+		bind(DriveEnergyConsumption.Factory.class).toInstance(ev -> new ETruckDriveEnergyConsumption());
 		bind(TemperatureService.class).toInstance(linkId -> 15);// XXX fixed temperature 15 oC
 		bind(AuxEnergyConsumption.Factory.class).to(OhdeSlaskiAuxEnergyConsumption.Factory.class).asEagerSingleton();
 
