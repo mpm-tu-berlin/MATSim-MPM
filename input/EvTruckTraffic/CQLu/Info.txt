@@ -1,2 +1,0 @@
-Info:
-Network CRS: EPSG:25832

@@ -17,22 +17,22 @@ import java.util.Collections;
 public class RunETruckNetworkGenerator {
 
 	private static final String INPUT_OSM = "C:/Users/josef/tubCloud/HoLa - Data/OSM/germany-latest.osm.pbf";
-	private static final String OUTPUT_XML_GZ = "./input/EvTruckTraffic/germany_etruck_network.xml.gz";
+	private static final String OUTPUT_XML_GZ = "./input/TestETruckTraffic/german_motorway_network.xml.gz";
 
 
 	private static final CoordinateTransformation coordinateTransformation =
 			TransformationFactory.getCoordinateTransformation(TransformationFactory.WGS84, "EPSG:25832");
 
 	public static void main(String[] args) {
-		run(INPUT_OSM, OUTPUT_XML_GZ);
+		run(INPUT_OSM, OUTPUT_XML_GZ, LinkProperties.LEVEL_MOTORWAY);
 
 	}
 
-	public static void run(String inputPath, String outputPath) {
+	public static void run(String inputPath, String outputPath, int linkProp) {
 
 		Network network = new SupersonicOsmNetworkReader.Builder()
 				.setCoordinateTransformation(coordinateTransformation)
-				.setIncludeLinkAtCoordWithHierarchy((coord, hierachyLevel) -> hierachyLevel <= LinkProperties.LEVEL_PRIMARY)
+				.setIncludeLinkAtCoordWithHierarchy((coord, hierachyLevel) -> hierachyLevel <= linkProp)
 				.setPreserveNodeWithId(id -> id == LinkProperties.LEVEL_SECONDARY)
 				.addOverridingLinkProperties(
 						"motorway",new LinkProperties(LinkProperties.LEVEL_MOTORWAY,

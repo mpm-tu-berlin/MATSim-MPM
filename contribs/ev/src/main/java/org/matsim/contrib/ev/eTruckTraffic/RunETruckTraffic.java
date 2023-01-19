@@ -22,7 +22,7 @@ import java.io.IOException;
 import java.net.URL;
 
 public class RunETruckTraffic {
-	static final String DEFAULT_CONFIG_FILE = "input/EvTruckTraffic/config.xml";
+	static final String DEFAULT_CONFIG_FILE = "input/ETruckTraffic/config.xml";
 	private static final Logger log = LogManager.getLogger(RunEvExample.class);
 
 	public static void main(String[] args) throws IOException {

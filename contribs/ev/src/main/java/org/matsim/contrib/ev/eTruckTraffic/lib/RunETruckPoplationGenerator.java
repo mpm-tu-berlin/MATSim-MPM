@@ -23,8 +23,8 @@ import java.util.*;
 public class RunETruckPoplationGenerator {
 
 	private final static String INPUT_PLANS_FILE = "C:/Users/josef/tubCloud/HoLa - Data/" +
-			"00_PreProcessing_Data/Plans/HoLaPlans_OD_BMDV_minDist_300.csv";
-	private final static String OUTPUT_PLANS_FILE = "./input/EvTruckTraffic/eTrucks_plans.xml.gz";
+			"00_PreProcessing_Data/Plans/TestSchedule_1pct_minDist300.csv";
+	private final static String OUTPUT_PLANS_FILE = "./input/TestETruckTraffic/eTrucks_plans_1pct.xml.gz";
 	private final static double SHARE_OF_E_IN_TOTAL_PLANS = 0.05;
 
 

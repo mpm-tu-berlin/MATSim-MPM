@@ -25,9 +25,9 @@ import org.matsim.core.utils.geometry.transformations.TransformationFactory;
 
 
 public class 	RunChargersGenerator {
-	private final static String CONFIG_FILE = "./input/EvTruckTraffic/config.xml";
-	private final static String DEFAULT_PATH = "./input/EvTruckTraffic/";
-	private final static String CHARGERS_CONFIG = "./input/EvTruckTraffic/raw_data/chargersConfiguration.csv";
+	private final static String CONFIG_FILE = "./input/TestETruckTraffic/config.xml";
+	private final static String DEFAULT_PATH = "./input/TestETruckTraffic/";
+	private final static String CHARGERS_CONFIG = "./input/ETruckTraffic/raw_data/chargersConfiguration.csv";
 
 
 	public static void main(String[] args) throws Exception {

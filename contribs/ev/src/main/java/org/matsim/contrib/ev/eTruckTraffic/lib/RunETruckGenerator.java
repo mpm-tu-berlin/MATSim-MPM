@@ -19,8 +19,8 @@ public class RunETruckGenerator {
 	static final double CAR_INITIAL_SOC = 1;
 	static final String TRUCK_CHARGERS_TYPE = "DC";
 	static final String VEHICLE_TYPE_ID = "600kWh_eTruck";
-	final static String CONFIG_FILE = "./input/EvTruckTraffic/config.xml";
-	final static String DEFAULT_PATH = "./input/EvTruckTraffic/";
+	final static String CONFIG_FILE = "./input/TestETruckTraffic/config.xml";
+	final static String DEFAULT_PATH = "./input/TestETruckTraffic/";
 
 	public static void main(String[] args) {
 
