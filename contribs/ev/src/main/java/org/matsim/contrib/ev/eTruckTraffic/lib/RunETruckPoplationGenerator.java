@@ -17,17 +17,30 @@ import org.matsim.api.core.v01.population.PopulationFactory;
 import org.matsim.api.core.v01.population.PopulationWriter;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.scenario.ScenarioUtils;
+
+import java.util.*;
+
 public class RunETruckPoplationGenerator {
 
-	public static void run(String rawPlansFile, String plansFile) {
+	private final static String INPUT_PLANS_FILE = "C:/Users/josef/tubCloud/HoLa - Data/" +
+			"00_PreProcessing_Data/Plans/HoLaPlans_OD_BMDV_minDist_300.csv";
+	private final static String OUTPUT_PLANS_FILE = "./input/EvTruckTraffic/eTrucks_plans.xml.gz";
+	private final static double SHARE_OF_E_IN_TOTAL_PLANS = 0.05;
 
-		Scenario scenario = createPopulationFromFile(rawPlansFile);
+
+	public static void main(String[] args) {
+		run(INPUT_PLANS_FILE, OUTPUT_PLANS_FILE, SHARE_OF_E_IN_TOTAL_PLANS);
+
+	}
+	public static void run(String rawPlansFile, String plansFile, double shareOfTotalPlans) {
+
+		Scenario scenario = createPopulationFromFile(rawPlansFile, shareOfTotalPlans);
 		PopulationWriter populationWriter = new PopulationWriter(scenario.getPopulation(), scenario.getNetwork());
 		populationWriter.write(plansFile);
 
 	}
 
-	private static Scenario createPopulationFromFile(String file)	{
+	private static Scenario createPopulationFromFile(String file, double shareOfTotalPlans)	{
 
 		Scenario scenario = ScenarioUtils.createScenario(ConfigUtils.createConfig());
 		 // Use Parser to read csv file.
@@ -41,8 +54,15 @@ public class RunETruckPoplationGenerator {
 		// Create a Map with the PersonIds as key and a list of Entry as values.
 
 		Map<Integer, List<ETruckEntry>> personEntryMapping = new TreeMap<Integer, List<ETruckEntry>>();
-		for (ETruckEntry fileEntry : fileEntries) {
 
+		Random rn = new Random();
+		int share = (int) (1/shareOfTotalPlans);
+
+		for (ETruckEntry fileEntry : fileEntries) {
+			if (rn.nextInt(share) != 0){
+				// first attempt 10% of trucks are electric
+				continue;
+			}
 			 // If the Map already contains an entry for the current person
 			 // the list will not be null.
 

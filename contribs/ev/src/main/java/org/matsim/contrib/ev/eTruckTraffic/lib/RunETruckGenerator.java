@@ -37,10 +37,9 @@ public class RunETruckGenerator {
 		VehiclesFactory vehicleFactory = scenario.getVehicles().getFactory();
 
 
-		for (Person p : scenario.getPopulation().getPersons().values()) {
-			scenario.getVehicles().removeVehicle(Id.createVehicleId(p.getId()));
+		for (Id vId : scenario.getVehicles().getVehicles().keySet()) {
+			scenario.getVehicles().removeVehicle(Id.createVehicleId(vId));
 		}
-
 
 		scenario.getVehicles().removeVehicleType(Id.create(VEHICLE_TYPE_ID, VehicleType.class));
 
