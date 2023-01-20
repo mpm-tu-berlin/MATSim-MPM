@@ -23,6 +23,7 @@ package org.matsim.contrib.ev.stats;
 import org.matsim.contrib.ev.EvConfigGroup;
 import org.matsim.contrib.ev.EvModule;
 import org.matsim.contrib.ev.charging.ChargingEventSequenceCollector;
+import org.matsim.contrib.ev.eTruckTraffic.stats.ChargerQueuingCollector;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.mobsim.qsim.AbstractQSimModule;
 
@@ -44,8 +45,8 @@ public class EvStatsModule extends AbstractModule {
 			@Override
 			protected void configureQSim() {
 				if (evCfg.timeProfiles) {
-					addQSimComponentBinding(EvModule.EV_COMPONENT).toProvider(
-							SocHistogramTimeProfileCollectorProvider.class);
+					//addQSimComponentBinding(EvModule.EV_COMPONENT).toProvider(
+					//		SocHistogramTimeProfileCollectorProvider.class);
 					addQSimComponentBinding(EvModule.EV_COMPONENT).toProvider(
 							IndividualChargeTimeProfileCollectorProvider.class);
 					addQSimComponentBinding(EvModule.EV_COMPONENT).toProvider(
@@ -57,6 +58,9 @@ public class EvStatsModule extends AbstractModule {
 
 					bind(ChargerPowerCollector.class).asEagerSingleton();
 					addMobsimScopeEventHandlerBinding().to(ChargerPowerCollector.class);
+
+					bind(ChargerQueuingCollector.class).asEagerSingleton();
+					addMobsimScopeEventHandlerBinding().to(ChargerQueuingCollector.class);
 					// add more time profiles if necessary
 				}
 			}

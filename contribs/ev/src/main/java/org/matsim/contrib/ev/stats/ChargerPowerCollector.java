@@ -48,9 +48,8 @@ public class ChargerPowerCollector
 	private final ChargingInfrastructure chargingInfrastructure;
 	private final ElectricFleet fleet;
 
-	private record TimeCharge(double time, double charge) {
+	private record TimeCharge(double time, double charge, double startSoC) {
 	}
-
 	private final Map<Id<Vehicle>, TimeCharge> chargeBeginCharge = new HashMap<>();
 
 	private final List<ChargingLogEntry> logList = new ArrayList<>();
@@ -67,8 +66,11 @@ public class ChargerPowerCollector
 		if (chargeStart != null) {
 			double energy = this.fleet.getElectricVehicles().get(event.getVehicleId()).getBattery().getCharge()
 					- chargeStart.charge;
+			double endSoC = this.fleet.getElectricVehicles().get(event.getVehicleId()).getBattery().getCharge()/
+					this.fleet.getElectricVehicles().get(event.getVehicleId()).getBattery().getCapacity();
 			ChargingLogEntry loge = new ChargingLogEntry(chargeStart.time, event.getTime(),
-					chargingInfrastructure.getChargers().get(event.getChargerId()), energy, event.getVehicleId());
+					chargingInfrastructure.getChargers().get(event.getChargerId()), energy, event.getVehicleId(),
+					chargeStart.startSoC, endSoC);
 			logList.add(loge);
 		} else
 			throw new NullPointerException(event.getVehicleId().toString() + " has never started charging");
@@ -79,7 +81,8 @@ public class ChargerPowerCollector
 		ElectricVehicle ev = this.fleet.getElectricVehicles().get(event.getVehicleId());
 		if (ev != null) {
 			this.chargeBeginCharge.put(event.getVehicleId(),
-					new TimeCharge(event.getTime(), ev.getBattery().getCharge()));
+					new TimeCharge(event.getTime(), ev.getBattery().getCharge(),
+							ev.getBattery().getCharge()/ev.getBattery().getCapacity()));
 		} else
 			throw new NullPointerException(event.getVehicleId().toString() + " is not in list");
 
@@ -95,15 +98,18 @@ public class ChargerPowerCollector
 		private final Charger charger;
 		private final double transmitted_Energy;
 		private final Id<Vehicle> vehicleId;
-		static final String HEADER = "chargerId;chargingStart;chargingEnd;chargingDuration;chargerX;chargerY;vehicleId;transmittedEnergy_kWh";
+		private final double startSoC;
+		private final double endSoC;
 
 		public ChargingLogEntry(double chargeStart, double chargeEnd, Charger charger, double transmitted_Energy,
-				Id<Vehicle> vehicleId) {
+				Id<Vehicle> vehicleId, double startSoC, double endSoC) {
 			this.chargeStart = chargeStart;
 			this.chargeEnd = chargeEnd;
 			this.charger = charger;
 			this.transmitted_Energy = transmitted_Energy;
 			this.vehicleId = vehicleId;
+			this.startSoC = startSoC;
+			this.endSoC = endSoC;
 		}
 
 		public double getChargeStart() {
@@ -121,6 +127,9 @@ public class ChargerPowerCollector
 		public double getTransmitted_Energy() {
 			return transmitted_Energy;
 		}
+		public double getStartSoC(){ return startSoC;}
+
+		public double getEndSoC() { return endSoC;}
 
 		@Override
 		public String toString() {
@@ -139,7 +148,13 @@ public class ChargerPowerCollector
 					+ ";"
 					+ vehicleId.toString()
 					+ ";"
-					+ energyKWh;
+					+ energyKWh
+					+ ";"
+					+ startSoC
+					+ ";"
+					+ endSoC;
+
+
 		}
 
 		@Override

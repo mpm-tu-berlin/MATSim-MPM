@@ -24,11 +24,13 @@ package org.matsim.contrib.ev.stats;/*
 import com.google.inject.Inject;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
+import org.jfree.data.io.CSV;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.contrib.ev.EvUnits;
 import org.matsim.contrib.ev.discharging.DriveDischargingHandler;
+import org.matsim.contrib.ev.eTruckTraffic.stats.ChargerQueuingCollector;
 import org.matsim.core.controler.IterationCounter;
 import org.matsim.core.controler.OutputDirectoryHierarchy;
 import org.matsim.core.mobsim.framework.events.MobsimBeforeCleanupEvent;
@@ -47,6 +49,8 @@ public class EvMobsimListener implements MobsimBeforeCleanupListener {
 	@Inject
 	ChargerPowerCollector chargerPowerCollector;
 	@Inject
+	ChargerQueuingCollector chargerQueuingCollector;
+	@Inject
 	OutputDirectoryHierarchy controlerIO;
 	@Inject
 	IterationCounter iterationCounter;
@@ -59,10 +63,12 @@ public class EvMobsimListener implements MobsimBeforeCleanupListener {
 
 		try {
 			CSVPrinter csvPrinter = new CSVPrinter(Files.newBufferedWriter(Paths.get(controlerIO.getIterationFilename(iterationCounter.getIterationNumber(), "chargingStats.csv"))), CSVFormat.DEFAULT.withDelimiter(';').
-					withHeader("ChargerId", "chargeStartTime", "chargeEndTime", "ChargingDuration", "xCoord", "yCoord", "energyTransmitted_kWh"));
+					withHeader("ChargerId", "chargeStartTime", "chargeEndTime", "ChargingDuration", "xCoord", "yCoord", "VehicleID", "energyTransmitted_kWh", "Start_SoC", "End_SoC"));
 			for (ChargerPowerCollector.ChargingLogEntry e : chargerPowerCollector.getLogList()) {
 				double energyKWh = Math.round(EvUnits.J_to_kWh(e.getTransmitted_Energy()) * 10.) / 10.;
-				csvPrinter.printRecord(e.getCharger().getId(), Time.writeTime(e.getChargeStart()), Time.writeTime(e.getChargeEnd()), Time.writeTime(e.getChargeEnd() - e.getChargeStart()), e.getCharger().getCoord().getX(), e.getCharger().getCoord().getY(), energyKWh);
+				csvPrinter.printRecord(e.getCharger().getId(), Time.writeTime(e.getChargeStart()), Time.writeTime(e.getChargeEnd()),
+						Time.writeTime(e.getChargeEnd() - e.getChargeStart()), e.getCharger().getCoord().getX(),
+						e.getCharger().getCoord().getY(), e.getVehicleId(), energyKWh, e.getStartSoC(), e.getEndSoC());
 			}
 			csvPrinter.close();
 
@@ -74,7 +80,13 @@ public class EvMobsimListener implements MobsimBeforeCleanupListener {
 			}
 			csvPrinter2.close();
 
-
+			CSVPrinter csvPrinter1 = new CSVPrinter(Files.newBufferedWriter(Paths.get(controlerIO.getIterationFilename(iterationCounter.getIterationNumber(), "queuingStats.csv"))), CSVFormat.DEFAULT.withDelimiter(';').
+					withHeader("ChargerId", "queueStartTime", "queueEndTime", "QueuingDuration", "xCoord", "yCoord", "VehicleID"));
+			for (ChargerQueuingCollector.QueuingLogEntry e : chargerQueuingCollector.getLogList()){
+				csvPrinter1.printRecord(e.getCharger().getId(), Time.writeTime(e.getQueueStart()), Time.writeTime(e.getQueueEnd()), Time.writeTime(e.getQueueEnd() - e.getQueueStart()),
+						e.getCharger().getCoord().getX(), e.getCharger().getCoord().getY(), e.getVehicleId());
+			}
+			csvPrinter1.close();
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
