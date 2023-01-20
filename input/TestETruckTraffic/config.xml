@@ -18,21 +18,21 @@
     </module>
 
     <module name="network">
-        <param name="inputNetworkFile" value="german_motorway_network.xml.gz"/>
+        <param name="inputNetworkFile" value="german_etruck_network.xml.gz"/>
     </module>
 
     <module name="plans">
-        <param name="inputPlansFile" value="eTrucks_plans_5agents.xml.gz"/>
+        <param name="inputPlansFile" value="eTrucks_plans_10_sameAgents.xml"/>
     </module>
 
     <module name="controler">
         <param name="outputDirectory" value="./output/TestETruckTraffic"/>
         <param name="firstIteration" value="0"/>
-        <param name="lastIteration" value="10"/>
+        <param name="lastIteration" value="0"/>
         <param name="eventsFileFormat" value="xml"/>
         <param name="mobsim" value="qsim"/>
     </module>
-
+ 
     <module name="qsim">
         <!-- "start/endTime" of MobSim (00:00:00 == take earliest activity time/ run as long as active vehicles exist) -->
         <param name="startTime" value="00:00:00"/>

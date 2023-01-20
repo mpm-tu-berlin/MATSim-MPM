@@ -60,7 +60,6 @@ public class RunETruckPoplationGenerator {
 
 		for (ETruckEntry fileEntry : fileEntries) {
 			if (rn.nextInt(share) != 0){
-				// first attempt 10% of trucks are electric
 				continue;
 			}
 			 // If the Map already contains an entry for the current person

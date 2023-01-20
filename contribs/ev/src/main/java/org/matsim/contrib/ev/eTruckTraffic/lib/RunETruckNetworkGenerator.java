@@ -24,7 +24,7 @@ public class RunETruckNetworkGenerator {
 			TransformationFactory.getCoordinateTransformation(TransformationFactory.WGS84, "EPSG:25832");
 
 	public static void main(String[] args) {
-		run(INPUT_OSM, OUTPUT_XML_GZ, LinkProperties.LEVEL_MOTORWAY);
+		run(INPUT_OSM, OUTPUT_XML_GZ, LinkProperties.LEVEL_TRUNK);
 
 	}
 
