@@ -23,9 +23,9 @@ public class PrepareETruckScenario {
 		String chargersFile = DEFAULT_PATH + config.getModules().get("ev").getParams().get("chargersFile");
 
 		System.out.println("######## Start: Network Generator ########");
-		new RunETruckNetworkGenerator().run(OSM_PDF_FILE_PATH, networkFile, LinkProperties.LEVEL_PRIMARY);
+		//new RunETruckNetworkGenerator().run(OSM_PDF_FILE_PATH, networkFile, LinkProperties.LEVEL_PRIMARY);
 		System.out.println("######## Start: Chargers Generator ########");
-		new RunChargersGenerator().run(CHARGERS_CONFIG, chargersFile,  networkFile);
+		//new RunChargersGenerator().run(CHARGERS_CONFIG, chargersFile,  networkFile);
 		System.out.println("######## Start: Plans Generator ########");
 		new RunETruckPoplationGenerator().run(RAW_PLANS, plansFile, SHARE_OF_EV_IN_TOTAL_PLANS);
 		System.out.println("######## Start: ETruck Generator ########");

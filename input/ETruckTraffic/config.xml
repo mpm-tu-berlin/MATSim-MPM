@@ -28,7 +28,7 @@
     <module name="controler">
         <param name="outputDirectory" value="./output/ETruckTraffic"/>
         <param name="firstIteration" value="0"/>
-        <param name="lastIteration" value="30"/>
+        <param name="lastIteration" value="0"/>
         <param name="eventsFileFormat" value="xml"/>
         <param name="mobsim" value="qsim"/>
     </module>
@@ -36,7 +36,7 @@
     <module name="qsim">
         <!-- "start/endTime" of MobSim (00:00:00 == take earliest activity time/ run as long as active vehicles exist) -->
         <param name="startTime" value="00:00:00"/>
-        <param name="endTime" value="23:59:59"/>
+        <param name="endTime" value="168:00:00"/>
         <param name="simStarttimeInterpretation" value="onlyUseStarttime"/>
     </module>
 

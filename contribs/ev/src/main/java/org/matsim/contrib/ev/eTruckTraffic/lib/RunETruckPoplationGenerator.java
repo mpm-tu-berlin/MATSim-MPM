@@ -101,7 +101,8 @@ public class RunETruckPoplationGenerator {
 
 			Coord homeCoord =  new Coord(entry.o_x, entry.o_y);
 			Activity homeActivity = populationFactory.createActivityFromCoord(entry.tripmode, homeCoord);
-			homeActivity.setEndTime(entry.starttime * 60 * 60);
+			// starttime 1 - 24 and day: 1 - 7
+			homeActivity.setEndTime((entry.starttime-1) * 60 * 60 + (entry.day-1)* 24 * 60 * 60);
 			plan.addActivity(homeActivity);
 
 			// Create person's Trips and add them to the Plan.

@@ -48,7 +48,7 @@ public class ETruckParser {
 				fileEntry.d_x = parseDouble(cols[6]);
 				fileEntry.d_y = parseDouble(cols[7]);
 				fileEntry.day = parseInteger(cols[8]);
-				fileEntry.starttime = parseInteger(cols[9]);
+				fileEntry.starttime = parseDouble(cols[9]);
 
 				entries.add(fileEntry);
 			}

@@ -11,5 +11,5 @@ public class ETruckEntry {
 	double d_x;
 	double d_y;
 	int day;
-	int starttime;
+	double starttime;
 }
