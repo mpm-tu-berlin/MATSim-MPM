@@ -103,9 +103,9 @@ public class TimeProfileCollector implements MobsimBeforeSimStepListener, Mobsim
 			}
 		}
 
-		for (ChartType t : chartTypes) {
+/*		for (ChartType t : chartTypes) {
 			generateImage(extendedHeader, t);
-		}
+		}*/
 	}
 
 	private void generateImage(ImmutableList<String> extendedHeader, ChartType chartType) {

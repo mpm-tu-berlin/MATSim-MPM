@@ -27,7 +27,7 @@ import org.matsim.core.utils.geometry.transformations.TransformationFactory;
 public class 	RunChargersGenerator {
 	private final static String CONFIG_FILE = "./input/TestETruckTraffic/config.xml";
 	private final static String DEFAULT_PATH = "./input/TestETruckTraffic/";
-	private final static String CHARGERS_CONFIG = "./input/ETruckTraffic/raw_data/chargersConfiguration.csv";
+	private final static String CHARGERS_CONFIG = "C:\\Users\\josef\\tubCloud\\HoLa - Data\\00_PreProcessing_Data\\chargersConfiguration.csv";
 
 
 	public static void main(String[] args) throws Exception {
@@ -80,7 +80,7 @@ public class 	RunChargersGenerator {
 			ImmutableChargerSpecification charger = builder.id(Id.create("TruckChargers", Charger.class))
 					.id(id)
 					.linkId(link.getId())
-					.plugPower(Integer.parseInt(record.get("PLUG_POWER"))*3500) // kW
+					.plugPower(Integer.parseInt(record.get("PLUG_POWER"))*1000) // kW -> W
 					.plugCount(Integer.parseInt(record.get("PLUG_COUNT")))
 					.chargerType(record.get("CHARGER_TYPE"))
 					.build();

@@ -113,7 +113,6 @@ public class DriveDischargingHandler
 			double energy = ev.getDriveEnergyConsumption().calcEnergyConsumption(link, tt, eventTime - tt)
 					+ ev.getAuxEnergyConsumption().calcEnergyConsumption(eventTime - tt, tt, linkId);
 			//Energy consumption might be negative on links with negative slope
-			System.out.println("################# Vehicle ID: " + ev.getId().toString() + " #########");
 			ev.getBattery().changeCharge(-energy);
 
 

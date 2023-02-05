@@ -47,8 +47,14 @@ public class ETruckParser {
 				fileEntry.o_y = parseDouble(cols[5]);
 				fileEntry.d_x = parseDouble(cols[6]);
 				fileEntry.d_y = parseDouble(cols[7]);
-				fileEntry.day = parseInteger(cols[8]);
-				fileEntry.starttime = parseDouble(cols[9]);
+				// day: 1 - 7 in data but 0 - 6 needed -> day-1
+				fileEntry.day = parseInteger(cols[8]) - 1 ;
+				// time 1 - 2 in data but 0 - 23 needed -> hour-1
+				// additionally an offset of 2h muss be build in so plans matches the real life scenario.
+				fileEntry.starttime = parseDouble(cols[9]) - 3; // Offset correction from data
+				if (fileEntry.starttime < 0){
+					fileEntry.starttime += 24*7;
+				}
 
 				entries.add(fileEntry);
 			}

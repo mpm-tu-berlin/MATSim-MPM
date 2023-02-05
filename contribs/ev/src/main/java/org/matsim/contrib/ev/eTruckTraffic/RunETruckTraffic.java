@@ -26,7 +26,7 @@ public class RunETruckTraffic {
 	private static final Logger log = LogManager.getLogger(RunEvExample.class);
 
 	public static void main(String[] args) throws IOException {
-		final URL configUrl;
+/*		final URL configUrl;
 		if (args.length > 0) {
 			log.info("Starting simulation run with the following arguments:");
 			configUrl = new URL(args[0]);
@@ -41,11 +41,21 @@ public class RunETruckTraffic {
 				configUrl = new URL("https://raw.githubusercontent.com/matsim-org/matsim/master/contribs/ev/"
 						+ DEFAULT_CONFIG_FILE);
 			}
+		}*/
+
+		String config_paths[] = {
+				"input/ETruckTraffic/1.0pctETrucks/config.xml",
+				"input/ETruckTraffic/5.0pctETrucks/config.xml",
+				"input/ETruckTraffic/10.0pctETrucks/config.xml",
+				"input/ETruckTraffic/15.0pctETrucks/config.xml",
+				"input/ETruckTraffic/20.0pctETrucks/config.xml",
+		};
+		for (String config_path: config_paths){
+			new RunETruckTraffic().run(config_path);
 		}
-		new RunETruckTraffic().run(configUrl);
 	}
 
-	public void run(URL configUrl) {
+	public void run(String configUrl) {
 		Config config = ConfigUtils.loadConfig(configUrl, new EvConfigGroup());
 		config.controler()
 				.setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
