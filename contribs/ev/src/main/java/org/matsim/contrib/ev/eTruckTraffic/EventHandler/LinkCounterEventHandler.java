@@ -46,8 +46,6 @@ public class LinkCounterEventHandler implements LinkLeaveEventHandler {
 		for (int i=0; i<counter_stats.size(); i++ ){
 			links.add(((BASTCounterEntry) counter_stats.get(i)).LINK_ID);
 		}
-
-		System.out.println(links);
 		return links;
 	}
 	public static List<BASTCounterEntry> read_counter_stat_from_csv(String filePath, Network network){

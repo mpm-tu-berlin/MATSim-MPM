@@ -9,20 +9,27 @@ import java.nio.file.Paths;
 
 public class TruckCountAtCountingStations {
 
-	private static final String EVENT_FILE_PATH =
-			"C:\\Users\\josef\\Desktop\\matsim-libs-HoLa\\output\\TestETruckTraffic\\ITERS\\it.0\\0.events.xml.gz";
+	private static final String PATH =
+			"./";
+	private static final String EVENT_FILE = "output_events.xml.gz";
+	private static final String OUTPUT_FILE = "counter_distribution.csv";
 
 	public static void main(String[] args) {
 
+		run(PATH, EVENT_FILE, OUTPUT_FILE);
+	}
+	public static void run(String path, String event_file, String output_file){
 		var handler = new LinkCounterEventHandler();
-		var manager = EventsUtils.createEventsManager();
+		// var manager = EventsUtils.createEventsManager();
+		var manager = EventsUtils.createParallelEventsManager();
 		manager.addHandler(handler);
-
-		EventsUtils.readEvents(manager, EVENT_FILE_PATH);
+		manager.initProcessing();
+		EventsUtils.readEvents(manager, path + event_file);
+		manager.finishProcessing();
 
 		var counterStats = handler.getCounterList();
 		try (
-				var writer = Files.newBufferedWriter(Paths.get("test.csv"));
+				var writer = Files.newBufferedWriter(Paths.get(path + output_file));
 				var printer = CSVFormat.DEFAULT.withDelimiter(';').withHeader("COUNTER_ID", "STREET_CLASS", "HOUR",
 						"BAST_COUNT_1", "BAST_COUNT_2", "LON", "LAT", "LINK_ID", "MODEL_COUNT").print(writer)){
 
