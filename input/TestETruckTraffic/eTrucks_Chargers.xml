@@ -45,15 +45,12 @@
 	<charger id="39323848" link="2553227930000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="244666059" link="3171103010006f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="303502088" link="231149910003f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="351878995" link="1833383280001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="383543609" link="2636427350000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="144326724" link="3132311500007f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="144326727" link="3132311520007f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="33804997" link="1521365550004f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="75732198" link="1738429730001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="94520791" link="3135275050000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="94523352" link="1521365550004f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="281837928" link="2663622140001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="28473085" link="2107310550000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="165388936" link="3753367880000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="165388938" link="3753367880000f" type="DC" plug_power="720.0" plug_count="100"/>
@@ -88,7 +85,6 @@
 	<charger id="378014864" link="4120867570008f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="78066827" link="3171103040008f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="127686627" link="3171103040008f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="352018529" link="97297520001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="352024839" link="3199796900000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="966516681" link="3170053140004f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="26005323" link="1530853740007f" type="DC" plug_power="720.0" plug_count="100"/>
@@ -105,15 +101,10 @@
 	<charger id="355237416" link="2117171070002f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="370170888" link="2144472530003f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="370171490" link="545026170003f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="78189867" link="2924513960001f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="464167975" link="6273671690001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="59872382" link="176950850001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="345398554" link="271268900006f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="360155854" link="1356825360003f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="370168287" link="1550784010003f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="436970375" link="448180920002f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="578200607" link="5502269750001f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="567846325" link="6646787460001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="369970104" link="3376547430000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="369970105" link="3376547280003f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="377197596" link="3375414220006f" type="DC" plug_power="720.0" plug_count="100"/>
@@ -168,7 +159,6 @@
 	<charger id="216234621" link="2533574990009f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="362762315" link="3751972020010f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="532022590" link="2863432430004f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="948613916" link="2988505830004f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="290395800" link="2562979170002f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="319306609" link="1944666870006f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="368772737" link="2904568780001f" type="DC" plug_power="720.0" plug_count="100"/>
@@ -310,8 +300,6 @@
 	<charger id="244808733" link="254264730010f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="244808740" link="485883130000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="349579960" link="2381059770002f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="405471341" link="7977956900006f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="405471342" link="3617357300000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="475589745" link="994724820012f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="475589746" link="3672456030002f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="27647544" link="4758352390000f" type="DC" plug_power="720.0" plug_count="100"/>
@@ -337,14 +325,11 @@
 	<charger id="217938424" link="2105320110005f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="290532302" link="4868827240000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="290532303" link="4868827240000f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="347950750" link="11171078510002f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="347955640" link="6047520860010f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="432010425" link="1529828800000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="462406282" link="343796860007f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="462411632" link="343796860007f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="221160721" link="2330773160004f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="296507866" link="5442127500003f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="356093325" link="468301060020f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="217024136" link="1441422170005f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="217024137" link="5465607570009f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="355647362" link="194120790001f" type="DC" plug_power="720.0" plug_count="100"/>
@@ -375,8 +360,6 @@
 	<charger id="367459355" link="266831590007f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="368724794" link="1433189880001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="368652897" link="1451542310059f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="369546447" link="8212188870023f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="772803211" link="284901490018f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="162401643" link="1045010990029f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="162403225" link="2932965300016f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="162409495" link="3225237680002f" type="DC" plug_power="720.0" plug_count="100"/>
@@ -395,23 +378,19 @@
 	<charger id="240055322" link="3662880670003f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="332415879" link="2474273030009f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="348000260" link="312274340000f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="355436141" link="3777663540002f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="355470800" link="2559604060000f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="355527105" link="5747133590000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="518873223" link="3155411910000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="254529040" link="3039728360003f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="255213304" link="3039728340002f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="63209123" link="5392288610002f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="98814255" link="3144262390003f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="316279024" link="3188437920001f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="34647081" link="4452691130001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="75669483" link="3042833520001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="77950782" link="324683610005f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="161640937" link="1438688720006f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="186015276" link="3601710250004f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="282084781" link="245833460001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="306639124" link="2294133110005f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="469115379" link="5496721300004f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="518612582" link="1454788000005f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="518612583" link="1454788000005f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="991997194" link="2043653570003f" type="DC" plug_power="720.0" plug_count="100"/>
@@ -432,12 +411,10 @@
 	<charger id="64460652" link="615570050006f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="161602762" link="3905784190006f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="161602763" link="3905784200005f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="179661146" link="3223407120000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="221251710" link="512215450000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="276744007" link="6221348030002f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="384052276" link="376681730001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="384055829" link="348483860002f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="402433011" link="3223407120000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="442030860" link="244757980013f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="442030864" link="294011370000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="444928124" link="9172231210001f" type="DC" plug_power="720.0" plug_count="100"/>
@@ -448,12 +425,9 @@
 	<charger id="1009325273" link="512215450000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="1076986934" link="2643840350001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="1076986935" link="2643840580002f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="350652340" link="80527570009f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="350652344" link="80527570009f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="509122226" link="51194260006f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="598383168" link="1615225610002f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="946413200" link="2296375700004f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="1135240661" link="2417184590007f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="646510056" link="2258520150020f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="162532158" link="2191041670001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="163688925" link="2930054420000f" type="DC" plug_power="720.0" plug_count="100"/>
@@ -472,9 +446,7 @@
 	<charger id="162691561" link="3328937990001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="198028929" link="2706199700023f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="367122097" link="77656380000f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="64199695" link="3279153500003f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="206003077" link="3317188580001f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="220944902" link="278534110002f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="299600726" link="3317188610001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="348348513" link="247323450003f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="348708965" link="3330450970000f" type="DC" plug_power="720.0" plug_count="100"/>
@@ -500,8 +472,6 @@
 	<charger id="602461109" link="3050830060003f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="602995821" link="3050830070003f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="604623613" link="607992840001f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="353002075" link="10089332150000f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="353004659" link="2278468250005f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="122505272" link="3240025950005f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="122505273" link="3240025950005f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="253046765" link="2777680860000f" type="DC" plug_power="720.0" plug_count="100"/>
@@ -553,9 +523,6 @@
 	<charger id="296611541" link="9832150590004f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="296611542" link="9832150590004f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="679228237" link="6995139310002f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="276155311" link="3707904080000f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="706204832" link="2624848140007f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="706206326" link="2624848140007f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="93843430" link="4770425420001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="131183933" link="246205130002f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="446729404" link="3240645390001f" type="DC" plug_power="720.0" plug_count="100"/>
@@ -610,7 +577,6 @@
 	<charger id="669127953" link="2918776900001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="111265381" link="3316769940005f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="111265391" link="3316769930004f" type="DC" plug_power="720.0" plug_count="100"/>
-	<charger id="556298783" link="5562988550000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="493659200" link="10867277680000f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="1010044669" link="950230360001f" type="DC" plug_power="720.0" plug_count="100"/>
 	<charger id="351449020" link="4294576830009f" type="DC" plug_power="720.0" plug_count="100"/>

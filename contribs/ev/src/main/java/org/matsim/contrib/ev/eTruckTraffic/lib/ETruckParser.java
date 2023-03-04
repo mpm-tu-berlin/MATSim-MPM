@@ -22,7 +22,9 @@ public class ETruckParser {
 		FileInputStream fis = null;
 		InputStreamReader isr = null;
 		BufferedReader br = null;
-
+		// time from 1 to 24 in data but 0 - 23 needed -> hour-1
+		// + offset
+		int offset = -5;
 		try
 		{
 			fis = new FileInputStream(inFile);
@@ -49,9 +51,8 @@ public class ETruckParser {
 				fileEntry.d_y = parseDouble(cols[7]);
 				// day: 1 - 7 in data but 0 - 6 needed -> day-1
 				fileEntry.day = parseInteger(cols[8]) - 1 ;
-				// time 1 - 2 in data but 0 - 23 needed -> hour-1
-				// additionally an offset of 2h muss be build in so plans matches the real life scenario.
-				fileEntry.starttime = parseDouble(cols[9]) - 3; // Offset correction from data
+
+				fileEntry.starttime = parseDouble(cols[9]) + offset;
 				if (fileEntry.starttime < 0){
 					fileEntry.starttime += 24*7;
 				}

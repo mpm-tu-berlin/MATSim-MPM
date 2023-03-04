@@ -59,7 +59,7 @@ public class RunETruckPoplationGenerator {
 		int share = (int) (1/shareOfTotalPlans);
 
 		for (ETruckEntry fileEntry : fileEntries) {
-			if (rn.nextInt(share) != 0){
+			if (rn.nextInt(share) != 0 & shareOfTotalPlans != 1) {
 				continue;
 			}
 			 // If the Map already contains an entry for the current person
@@ -102,7 +102,9 @@ public class RunETruckPoplationGenerator {
 			Coord homeCoord =  new Coord(entry.o_x, entry.o_y);
 			Activity homeActivity = populationFactory.createActivityFromCoord(entry.tripmode, homeCoord);
 			double random_minute = rn.nextInt(60);
-			homeActivity.setEndTime(random_minute*60 + entry.starttime * 60 * 60 + entry.day* 24 * 60 * 60);
+			double starttime = random_minute*60 + entry.starttime * 60 * 60 + entry.day* 24 * 60 * 60;
+			// if (starttime < 0){starttime = 0;}
+			homeActivity.setEndTime(starttime);
 			plan.addActivity(homeActivity);
 
 			// Create person's Trips and add them to the Plan.

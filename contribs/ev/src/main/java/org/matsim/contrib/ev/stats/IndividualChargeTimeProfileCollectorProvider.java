@@ -49,7 +49,8 @@ public class IndividualChargeTimeProfileCollectorProvider implements Provider<Mo
 	public IndividualChargeTimeProfileCollectorProvider(ElectricFleet evFleet, MatsimServices matsimServices, Config config) {
 		this.evFleet = evFleet;
 		this.matsimServices = matsimServices;
-		maxVehicleColumns = ConfigUtils.addOrGetModule(config, EvConfigGroup.class).numberOfIndividualTimeProfiles;
+		maxVehicleColumns = evFleet.getElectricVehicles().size();
+				//ConfigUtils.addOrGetModule(config, EvConfigGroup.class).numberOfIndividualTimeProfiles;
 	}
 
 	public static ProfileCalculator createIndividualChargeCalculator(final ElectricFleet evFleet, int maxVehicleColumns) {

@@ -26,7 +26,6 @@ public class LinkCounterEventHandler implements LinkLeaveEventHandler {
 	static List COUNTER_LIST = read_counter_stat_from_csv(COUNTER_FILE_PATH, NETWORK);
 	static List LINKS = get_link_list(COUNTER_LIST);
 
-	private final Map<Id, String> volumes = new HashMap<>();
 	List getCounterList(){
 		return COUNTER_LIST;
 	}

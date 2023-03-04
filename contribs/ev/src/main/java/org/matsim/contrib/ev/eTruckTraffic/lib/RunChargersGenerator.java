@@ -36,7 +36,6 @@ public class 	RunChargersGenerator {
 		String networkFile = DEFAULT_PATH + config.network().getInputFile();
 		String chargersFile = DEFAULT_PATH + config.getModules().get("ev").getParams().get("chargersFile");
 
-
 		run(CHARGERS_CONFIG, chargersFile,  networkFile);
 
 	}

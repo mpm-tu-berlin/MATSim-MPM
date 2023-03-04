@@ -23,6 +23,7 @@ import com.google.inject.Inject;
 import com.google.inject.Provider;
 import org.matsim.contrib.ev.charging.ChargingLogic;
 import org.matsim.contrib.ev.charging.ChargingWithAssignmentLogic;
+import org.matsim.contrib.ev.fleet.ElectricFleet;
 import org.matsim.contrib.ev.infrastructure.Charger;
 import org.matsim.contrib.ev.infrastructure.ChargingInfrastructure;
 import org.matsim.contrib.ev.stats.XYDataCollector.XYDataCalculator;
@@ -32,10 +33,14 @@ import org.matsim.core.mobsim.framework.listeners.MobsimListener;
 public class ChargerOccupancyXYDataProvider implements Provider<MobsimListener> {
 	private final ChargingInfrastructure chargingInfrastructure;
 	private final MatsimServices matsimServices;
+	private final ElectricFleet fleet;
+
 
 	@Inject
-	public ChargerOccupancyXYDataProvider(ChargingInfrastructure chargingInfrastructure,
-			MatsimServices matsimServices) {
+	public ChargerOccupancyXYDataProvider(ElectricFleet fleet,
+										  ChargingInfrastructure chargingInfrastructure,
+										  MatsimServices matsimServices) {
+		this.fleet = fleet;
 		this.chargingInfrastructure = chargingInfrastructure;
 		this.matsimServices = matsimServices;
 	}
@@ -52,13 +57,16 @@ public class ChargerOccupancyXYDataProvider implements Provider<MobsimListener> 
 	private static final String QUEUED_ID = "queued";
 	private static final String ASSIGNED_ID = "assigned";
 	private static final String RELATIVE_SUFFIX = "_rel";
+	private static final String TRANSMITTED_ENERGY_ID = "transmitted_Energy";
 
-	public static XYDataCalculator<Charger> createChargerOccupancyCalculator(
+	public XYDataCalculator<Charger> createChargerOccupancyCalculator(
 			final ChargingInfrastructure chargingInfrastructure, boolean relative) {
 		String[] header = relative ?
 				new String[] { PLUGS_ID, PLUGGED_ID + RELATIVE_SUFFIX, QUEUED_ID + RELATIVE_SUFFIX,
 						ASSIGNED_ID + RELATIVE_SUFFIX } :
 				new String[] { PLUGS_ID, PLUGGED_ID, QUEUED_ID, ASSIGNED_ID };
+
+		//double energy = this.fleet.getElectricVehicles().get(event.getVehicleId()).getBattery().getCharge();
 
 		return XYDataCollectors.createCalculator(header, charger -> {
 			ChargingLogic logic = charger.getLogic();

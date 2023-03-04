@@ -18,7 +18,7 @@ public class PrepareETruckScenario {
 	private final static String DEFAULT_PATH = "./input/ETruckTraffic/";
 	private final static String CONFIG_FILE = "config.xml";
 	private final static String NETWORK_FILE = "german_etruck_network.xml.gz";
-	private final static double SHARE_OF_EV_IN_TOTAL_PLANS[] = {0.01, 0.05, 0.1, 0.15, 0.2};
+	private final static double SHARE_OF_EV_IN_TOTAL_PLANS[] = {0.01, 0.05, 0.1, 0.15, 0.2}; //,
 	private final static String SUB_FOLDER = "pctETrucks/";
 
 
@@ -38,7 +38,7 @@ public class PrepareETruckScenario {
 
 
 			System.out.println("######## Start: Chargers Generator ########");
-			new RunChargersGenerator().run(CHARGERS_CONFIG, chargersFile,  networkFile);
+			// new RunChargersGenerator().run(CHARGERS_CONFIG, chargersFile,  networkFile);
 			System.out.println("######## Start: Plans Generator ########");
 			new RunETruckPoplationGenerator().run(RAW_PLANS, plansFile, share);
 			System.out.println("######## Start: ETruck Generator ########");

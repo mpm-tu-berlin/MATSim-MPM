@@ -44,11 +44,11 @@ public class RunETruckTraffic {
 		}*/
 
 		String config_paths[] = {
-				"input/ETruckTraffic/1.0pctETrucks/config.xml",
+				// "input/ETruckTraffic/1.0pctETrucks/config.xml",
 				"input/ETruckTraffic/5.0pctETrucks/config.xml",
-				"input/ETruckTraffic/10.0pctETrucks/config.xml",
-				"input/ETruckTraffic/15.0pctETrucks/config.xml",
-				"input/ETruckTraffic/20.0pctETrucks/config.xml",
+				// "input/ETruckTraffic/10.0pctETrucks/config.xml",
+				// "input/ETruckTraffic/15.0pctETrucks/config.xml",
+				// "input/ETruckTraffic/20.0pctETrucks/config.xml",
 		};
 		for (String config_path: config_paths){
 			new RunETruckTraffic().run(config_path);
