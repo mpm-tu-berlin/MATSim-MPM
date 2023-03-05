@@ -9,11 +9,11 @@ import java.nio.file.Path;
 
 public class PrepareETruckScenario {
 	private static final String OSM_PDF_FILE_PATH =
-			"C:/Users/josef/tubCloud/HoLa - Data/OSM/germany-latest.osm.pbf";
+			"C:/Users/josef/tubCloud/Masterarbeit_374456_Menter/01_BaseData/rawData/OSM/germany-latest.osm.pbf";
 	private final static String CHARGERS_CONFIG =
-			"C:/Users/josef/tubCloud/HoLa - Data/00_PreProcessing_Data/chargersConfiguration.csv";
+			"C:/Users/josef/tubCloud/Masterarbeit_374456_Menter/02_ProcessedData/Charger/chargersConfiguration.csv";
 	private final static String RAW_PLANS =
-			"C:/Users/josef/tubCloud/HoLa - Data/00_PreProcessing_Data/Plans/HoLaPlans_OD_BMDV_minDist_300.csv";
+			"C:/Users/josef/tubCloud/Masterarbeit_374456_Menter/02_ProcessedData/Plans/HoLaPlans_OD_BMDV_minDist_300.csv";
 
 	private final static String DEFAULT_PATH = "./input/ETruckTraffic/";
 	private final static String CONFIG_FILE = "config.xml";
@@ -25,7 +25,11 @@ public class PrepareETruckScenario {
 	public static void main(String[] args) throws Exception {
 		String networkFile = DEFAULT_PATH + NETWORK_FILE;
 		System.out.println("######## Start: Network Generator ########");
-		// new RunETruckNetworkGenerator().run(OSM_PDF_FILE_PATH, networkFile, LinkProperties.LEVEL_PRIMARY);
+		
+		// Generation of Networkfile
+		// This needs only to bee executed ONCE!!
+		System.out.println("######## Start: Network Generator. Only needs to be executed once if no chances in Network needed!!!! ########");
+		new RunETruckNetworkGenerator().run(OSM_PDF_FILE_PATH, networkFile, LinkProperties.LEVEL_PRIMARY);
 
 		for (double share : SHARE_OF_EV_IN_TOTAL_PLANS) {
 			String configFile = sub_path_parser(CONFIG_FILE, share);
@@ -36,11 +40,13 @@ public class PrepareETruckScenario {
 			String plansFile = sub_path_parser(Path.of(config.plans().getInputFile()).getFileName().toString(), share);
 			String vehicleFile = sub_path_parser(Path.of(config.vehicles().getVehiclesFile()).getFileName().toString(), share);
 
-
+			// CreateCharger File
 			System.out.println("######## Start: Chargers Generator ########");
-			// new RunChargersGenerator().run(CHARGERS_CONFIG, chargersFile,  networkFile);
+			new RunChargersGenerator().run(CHARGERS_CONFIG, chargersFile,  networkFile);
+			// Create Population File
 			System.out.println("######## Start: Plans Generator ########");
 			new RunETruckPoplationGenerator().run(RAW_PLANS, plansFile, share);
+			// Create EVehicle File
 			System.out.println("######## Start: ETruck Generator ########");
 			new RunETruckGenerator().run(config, vehicleFile);
 		}
