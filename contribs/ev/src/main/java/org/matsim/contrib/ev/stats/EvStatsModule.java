@@ -25,6 +25,7 @@ import org.matsim.contrib.common.timeprofile.ProfileWriter;
 import org.matsim.contrib.ev.EvConfigGroup;
 import org.matsim.contrib.ev.EvModule;
 import org.matsim.contrib.ev.charging.ChargingEventSequenceCollector;
+import org.matsim.contrib.ev.eTruckTraffic.stats.ChargerQueuingCollector;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.MatsimServices;
 import org.matsim.core.controler.listener.ControlerListener;
@@ -61,7 +62,10 @@ public class EvStatsModule extends AbstractModule {
 					bind(EnergyConsumptionCollector.class).asEagerSingleton();
 					addMobsimScopeEventHandlerBinding().to(EnergyConsumptionCollector.class);
 					addQSimComponentBinding(EvModule.EV_COMPONENT).to(EnergyConsumptionCollector.class);
-					// add more time profiles if necessary
+
+					bind(ChargerQueuingCollector.class).asEagerSingleton();
+					addMobsimScopeEventHandlerBinding().to(ChargerQueuingCollector.class);
+					// add more time profiles or collectors if necessary
 				}
 			}
 		});

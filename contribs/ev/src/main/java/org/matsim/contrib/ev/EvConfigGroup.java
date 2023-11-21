@@ -48,6 +48,10 @@ public final class EvConfigGroup extends ReflectiveConfigGroup {
 	@Comment("Minimum activity duration for charging. Used in EvNetwork Routing.")
 	public int minimumChargeTime = 1200;
 
+	@Parameter("maxChargingTime")
+	@Comment("Maximum activity duration for charging. Used in EvNetwork Routing.")
+	public int maximumChargeTime = 45 * 60; // 45 min
+
 	@Parameter
 	@Comment("Location of the chargers file")
 	@NotNull

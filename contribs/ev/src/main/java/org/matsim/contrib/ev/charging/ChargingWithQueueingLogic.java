@@ -109,7 +109,9 @@ public class ChargingWithQueueingLogic implements ChargingLogic {
 			listeners.remove(ev.getId()).notifyChargingEnded(ev, now);
 
 			if (!queuedVehicles.isEmpty()) {
-				plugVehicle(queuedVehicles.poll(), now);
+				ElectricVehicle queuedEv = queuedVehicles.poll();
+				eventsManager.processEvent(new QuitQueueAtChargerEvent(now, charger.getId(), queuedEv.getId()));
+				plugVehicle(queuedEv, now);
 			}
 		} else {
 			// make sure ev was in the queue

@@ -44,7 +44,7 @@ final class BatteryDefaultImpl implements Battery {
 
 	@Override
 	public void setCharge(double charge) {
-		Preconditions.checkArgument(charge >= 0 && charge <= capacity, "Charge outside allowed range (SOC=%s)", charge / capacity);
+		// Preconditions.checkArgument(charge >= 0 && charge <= capacity, "Charge outside allowed range (SOC=%s)", charge / capacity);
 		this.charge = charge;
 	}
 

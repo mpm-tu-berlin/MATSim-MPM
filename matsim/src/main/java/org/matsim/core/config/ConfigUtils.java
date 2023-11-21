@@ -138,6 +138,7 @@ public class ConfigUtils implements MatsimExtensionPoint {
 	}
 
 	public static Config loadConfig(final URL url, ConfigGroup... customModules) throws UncheckedIOException {
+		System.out.println("################### MATSIM LIB ");
 		Gbl.assertNotNull(url);
 
 		Config config = new Config();

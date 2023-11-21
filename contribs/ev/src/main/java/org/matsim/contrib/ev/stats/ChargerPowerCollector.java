@@ -67,9 +67,8 @@ public final class ChargerPowerCollector
 
 	@Inject ChargerPowerCollector(){} // this forces instantiation via guice.  kai, oct'23
 
-	private record TimeCharge(double time, double charge) {
+	private record TimeCharge(double time, double charge, double startSoC) {
 	}
-
 	private final Map<Id<Vehicle>, TimeCharge> chargeBeginCharge = new HashMap<>();
 
 	public record ChargingLogEntry(double chargeStart, double chargeEnd, Charger charger, double transmitted_Energy, Id<Vehicle> vehicleId) {
@@ -83,8 +82,11 @@ public final class ChargerPowerCollector
 		Preconditions.checkNotNull(chargeStart, "%s has never started charging", event.getVehicleId());
 
 		double energy = fleet.getElectricVehicles().get(event.getVehicleId()).getBattery().getCharge() - chargeStart.charge;
+		double endSoC = fleet.getElectricVehicles().get(event.getVehicleId()).getBattery().getCharge()/
+					fleet.getElectricVehicles().get(event.getVehicleId()).getBattery().getCapacity();
 		ChargingLogEntry loge = new ChargingLogEntry(chargeStart.time, event.getTime(),
-				chargingInfrastructure.getChargers().get(event.getChargerId()), energy, event.getVehicleId());
+				chargingInfrastructure.getChargers().get(event.getChargerId()), energy, event.getVehicleId(),
+				chargeStart.startSoC, endSoC);
 		logList.add(loge);
 	}
 
@@ -101,11 +103,11 @@ public final class ChargerPowerCollector
 				Files.newBufferedWriter(Paths.get(controlerIO.getIterationFilename(iterationCounter.getIterationNumber(), "chargingStats.csv"))),
 				CSVFormat.DEFAULT.withDelimiter(';')
 						.withHeader("ChargerId", "chargeStartTime", "chargeEndTime", "ChargingDuration", "xCoord", "yCoord",
-								"energyTransmitted_kWh"))) {
+								"energyTransmitted_kWh","startSoC", endSoC))) {
 			for (ChargerPowerCollector.ChargingLogEntry e : logList) {
 				double energyKWh = Math.round(EvUnits.J_to_kWh(e.transmitted_Energy()) * 10.) / 10.;
 				csvPrinter.printRecord(e.charger().getId(), Time.writeTime(e.chargeStart()), Time.writeTime(e.chargeEnd()),
-						Time.writeTime(e.chargeEnd() - e.chargeStart()), e.charger().getCoord().getX(), e.charger().getCoord().getY(), energyKWh);
+						Time.writeTime(e.chargeEnd() - e.chargeStart()), e.charger().getCoord().getX(), e.charger().getCoord().getY(), energyKWh, startSoC, endSoC);
 			}
 		} catch (IOException e) {
 			throw new RuntimeException(e);
