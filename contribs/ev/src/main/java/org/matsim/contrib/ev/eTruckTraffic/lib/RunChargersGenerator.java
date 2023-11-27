@@ -1,5 +1,8 @@
 package org.matsim.contrib.ev.eTruckTraffic.lib;
 
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVRecord;
 import org.matsim.api.core.v01.Coord;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Link;
@@ -12,16 +15,12 @@ import org.matsim.contrib.ev.infrastructure.ImmutableChargerSpecification;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.network.NetworkUtils;
+import org.matsim.core.utils.geometry.CoordinateTransformation;
+import org.matsim.core.utils.geometry.transformations.TransformationFactory;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.util.ArrayList;
-
-import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVParser;
-import org.apache.commons.csv.CSVRecord;
-import org.matsim.core.utils.geometry.CoordinateTransformation;
-import org.matsim.core.utils.geometry.transformations.TransformationFactory;
 
 
 public class 	RunChargersGenerator {
@@ -75,7 +74,7 @@ public class 	RunChargersGenerator {
 			// search nearest Link
 			Link link  = NetworkUtils.getNearestLink(network, coord);
 
-			ImmutableChargerSpecification.Builder builder = ImmutableChargerSpecification.newBuilder();
+			ImmutableChargerSpecification.ChargerSpecificationBuilder builder = ImmutableChargerSpecification.newBuilder();
 			ImmutableChargerSpecification charger = builder.id(Id.create("TruckChargers", Charger.class))
 					.id(id)
 					.linkId(link.getId())

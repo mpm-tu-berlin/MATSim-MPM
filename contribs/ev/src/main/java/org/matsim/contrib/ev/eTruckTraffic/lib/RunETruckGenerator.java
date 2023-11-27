@@ -51,7 +51,7 @@ public class RunETruckGenerator {
 		VehicleUtils.setEnergyCapacity(vehicleType_eTruck.getEngineInformation(), CAR_BATTERY_CAPACITY_kWh);
 		VehicleUtils.setEnergyConsumptionKWhPerMeter(vehicleType_eTruck.getEngineInformation(),0.0012);
 		vehicleType_eTruck.setDescription("600kWh_Long_Haul_eTruck");
-		ElectricVehicleSpecifications.setChargerTypes(vehicleType_eTruck.getEngineInformation(), Arrays.asList( TRUCK_CHARGERS_TYPE, "default" ));
+		ElectricFleetUtils.setChargerTypes(vehicleType_eTruck.getEngineInformation(), Arrays.asList( TRUCK_CHARGERS_TYPE, "default" ));
 		scenario.getVehicles().addVehicleType(vehicleType_eTruck);
 
 		Random rn = new Random();
@@ -62,7 +62,7 @@ public class RunETruckGenerator {
 //			}
 			Vehicle truckVehicle = vehicleFactory.createVehicle(Id.createVehicleId(person.getId()),
 					vehicleType_eTruck);
-			ElectricVehicleSpecifications.setInitialSoc(truckVehicle, CAR_INITIAL_SOC);
+			ElectricFleetUtils.setInitialSoc(truckVehicle, CAR_INITIAL_SOC);
 			scenario.getVehicles().addVehicle(truckVehicle);
 
 		}

@@ -1,16 +1,6 @@
 <?xml version="1.0" ?>
 <!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">
 <config>
-    <module name="ev">
-        <param name="auxDischargeTimeStep" value="10"/>
-        <param name="chargeTimeStep" value="5"/>
-        <param name="chargersFile" value="eTrucks_Chargers.xml"/>
-        <param name="timeProfiles" value="true"/>
-	</module>
-
-	<module name="vehicles">
-        <param name="vehiclesFile" value="eTrucks_Vehicle.xml.gz"/>
-    </module>
 
     <module name="global">
         <param name="randomSeed" value="4711"/>
@@ -18,15 +8,15 @@
     </module>
 
     <module name="network">
-        <param name="inputNetworkFile" value="german_etruck_network.xml.gz"/>
+        <param name="inputNetworkFile" value="../german_etruck_network.xml.gz"/>
     </module>
 
     <module name="plans">
-        <param name="inputPlansFile" value="eTrucks_plans_10_sameAgents.xml"/>
+        <param name="inputPlansFile" value="eTrucks_plans.xml.gz"/>
     </module>
 
     <module name="controler">
-        <param name="outputDirectory" value="./output/TestETruckTraffic"/>
+        <param name="outputDirectory" value="./output/ETruckTraffic/1.0pctETrucks/noElec"/>
         <param name="firstIteration" value="0"/>
         <param name="lastIteration" value="0"/>
         <param name="eventsFileFormat" value="xml"/>
@@ -36,9 +26,8 @@
     <module name="qsim">
         <!-- "start/endTime" of MobSim (00:00:00 == take earliest activity time/ run as long as active vehicles exist) -->
         <param name="startTime" value="00:00:00"/>
-        <param name="endTime" value="48:00:00"/>
+        <param name="endTime" value="96:00:00"/>
         <param name="simStarttimeInterpretation" value="onlyUseStarttime"/>
-		<param name= "numberOfThreads" value= "6" />  <!-- Anzahl der verfügbaren physischen Kerne -->
     </module>
 
     <module name="planCalcScore">
@@ -58,19 +47,10 @@
             <param name="scoringThisActivityAtAll" value="true"/>
 
         </parameterset>
-
+		
         <parameterset type="activityParams">
             <param name="activityType" value="unloaded"/>
             <param name="typicalDuration" value="04:00:00"/>
-            <param name="typicalDurationScoreComputation" value="relative"/>
-            <param name="scoringThisActivityAtAll" value="true"/>
-
-        </parameterset>
-
-        <parameterset type="activityParams">
-			<param name="priority"        value="1" />
-            <param name="activityType" value="car charging interaction"/>
-            <param name="typicalDuration" value="00:45:00"/>
             <param name="typicalDurationScoreComputation" value="relative"/>
             <param name="scoringThisActivityAtAll" value="true"/>
 

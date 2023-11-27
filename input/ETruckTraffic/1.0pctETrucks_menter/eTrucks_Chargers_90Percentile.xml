@@ -1,0 +1,590 @@
+<?xml version="1.0" ?><!DOCTYPE chargers  SYSTEM 'http://matsim.org/files/dtd/chargers_v1.dtd'><chargers>
+	
+	
+	
+	
+	
+	<charger id="359378712" link="3285141960003f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	<charger id="359830014" link="2257197940001f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	<charger id="358867277" link="3133629590001f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="592578692" link="3357176630000f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="769706181" link="2696064270004f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	<charger id="355230073" link="237903100008f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	<charger id="202702398" link="859766260003f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="221257685" link="247273400004f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="39323848" link="2553227930000f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="244666059" link="3171103010006f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="383543609" link="2636427350000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="144326727" link="3132311520007f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="33804997" link="1521365550004f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="28473085" link="2107310550000f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="165388936" link="3753367880000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	<charger id="370279698" link="3273026310007f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="206657445" link="7816669620001f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="149746921" link="2702216410007f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	<charger id="297670233" link="2981284100001f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="298014272" link="2981284140001f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="378014864" link="4120867570008f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="78066827" link="3171103040008f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="362390885" link="2756307250001f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="196333695" link="2702739970005f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="355237416" link="2117171070002f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="59872382" link="176950850001f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="345398554" link="271268900006f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="360155854" link="1356825360003f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="370168287" link="1550784010003f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="449711031" link="188380460000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="195010293" link="1957122220011f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="159027047" link="2792809030003f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="258280913" link="1237594340000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	<charger id="45522608" link="240912120005f" type="DC" plug_power="720.0" plug_count="2"/>
+	<charger id="49219756" link="3081552640002f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="315644973" link="3171103090004f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="362060789" link="229593500012f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="362206626" link="1379424170007f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="70101851" link="2797948790008f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="70101860" link="1441082290005f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	<charger id="351208069" link="289661110002f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="182163390" link="3226979950001f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="369955646" link="3377615460007f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	<charger id="369332497" link="2643727130004f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	<charger id="183899749" link="2555664330008f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="299993681" link="2625478150000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="110996821" link="2323075100003f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="461690052" link="239683690007f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="469076163" link="2946709400003f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="469076165" link="2542886530004f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	<charger id="264515519" link="244995640005f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="32340174" link="2887052890002f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	<charger id="370733504" link="3745430280001f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="370730645" link="627104210005f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="264518693" link="2732586770004f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	<charger id="363199010" link="1516875440010f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	<charger id="11962946" link="2092495950005f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="26562493" link="11134371720000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="45338179" link="42678900005f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	<charger id="196770269" link="3296147710006f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="206812377" link="1924267600008f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="353875230" link="2454269340001f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	<charger id="350832428" link="2435581100016f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="97332265" link="5515766820009f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="221257687" link="2902225500013f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	<charger id="546149868" link="3253219680008f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="290305655" link="2859452690004f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="367858769" link="2937750870002f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	<charger id="193674608" link="2309496760001f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	<charger id="162095319" link="3234869660000f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="163686058" link="2561444280000f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="246100681" link="2683940580000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="357225540" link="2268702580000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	<charger id="356885988" link="3101151270000f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="961635296" link="3837352220002f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="202011251" link="3328938840009f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="244808733" link="254264730010f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="244808740" link="485883130000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="475589746" link="3672456030002f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="27647544" link="4758352390000f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="201438673" link="1938648590000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="314084532" link="3318864880004f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="254638002" link="2552017280006f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	<charger id="199225426" link="2897630840008f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	<charger id="194276952" link="1944474510003f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="353662571" link="2055861670002f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="353764610" link="2239808620002f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="550645507" link="5506455120002f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="388128241" link="3229623720006f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	<charger id="22568865" link="266831590007f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="194087133" link="46734800005f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	<charger id="162409495" link="3225237680002f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="36851158" link="2649451850000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="89811840" link="282754800011f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="316279024" link="3188437920001f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="75669483" link="3042833520001f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="77950782" link="324683610005f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="186015276" link="3601710250004f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="282084781" link="245833460001f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="518612582" link="1454788000005f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="991997194" link="2043653570003f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="353635018" link="611183400009f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="649319183" link="2427958740002f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="1061103987" link="6316003010000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	<charger id="221251710" link="512215450000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="349250405" link="2706627770000f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="368720165" link="2706627780000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="353419565" link="3052085000004f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="552909403" link="604672760004f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="411792027" link="3260861210000f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="48869559" link="1326685600002f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="159372676" link="1326653410012f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="336406408" link="5574696340003f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	<charger id="199724359" link="3905743750004f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="376634342" link="2939902200008f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="654401635" link="245948570004f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="93843430" link="4770425420001f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="131183933" link="246205130002f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	<charger id="360179168" link="3319390170032f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	<charger id="104672016" link="1273236270001f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="190043620" link="3905743720003f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	<charger id="1050482069" link="8890684550000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	<charger id="136296490" link="268676380001f" type="DC" plug_power="720.0" plug_count="1"/>
+	<charger id="237037534" link="3904235660000f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<charger id="697673569" link="6928745170003f" type="DC" plug_power="720.0" plug_count="1"/>
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+</chargers>

@@ -20,7 +20,7 @@ public class TestETruckTraffic {
 	public static void main(String[] args) {
 
 		Config config = ConfigUtils.loadConfig(DEFAULT_CONFIG_FILE, new EvConfigGroup());
-		config.controler()
+		config.controller()
 				.setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
 		Scenario scenario = ScenarioUtils.loadScenario(config);
 		Controler controler = new Controler(scenario);

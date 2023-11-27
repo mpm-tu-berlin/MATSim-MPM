@@ -19,14 +19,8 @@
 
 package org.matsim.contrib.ev.stats;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
+import com.google.common.base.Preconditions;
+import com.google.inject.Inject;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
 import org.matsim.api.core.v01.Id;
@@ -47,8 +41,13 @@ import org.matsim.core.mobsim.framework.listeners.MobsimBeforeCleanupListener;
 import org.matsim.core.utils.misc.Time;
 import org.matsim.vehicles.Vehicle;
 
-import com.google.common.base.Preconditions;
-import com.google.inject.Inject;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /*
  * created by jbischoff, 26.10.2018
@@ -71,10 +70,41 @@ public final class ChargerPowerCollector
 	}
 	private final Map<Id<Vehicle>, TimeCharge> chargeBeginCharge = new HashMap<>();
 
-	public record ChargingLogEntry(double chargeStart, double chargeEnd, Charger charger, double transmitted_Energy, Id<Vehicle> vehicleId) {
+	public record ChargingLogEntry(double chargeStart, double chargeEnd, Charger charger, double transmitted_Energy, Id<Vehicle> vehicleId, double startSoC, double endSoc) {
+		public double getTransmitted_Energy() {
+			return transmitted_Energy;
+		}
+
+		public Charger getCharger() {
+			return charger;
+		}
+
+		public double getChargeStart() {
+			return chargeStart;
+		}
+
+		public double getChargeEnd() {
+			return chargeEnd;
+		}
+
+		public Object getVehicleId() {
+			return vehicleId;
+		}
+
+		public double getStartSoC() {
+			return startSoC;
+		}
+
+		public double getEndSoC() {
+			return endSoc;
+		}
 	}
 
 	private final List<ChargingLogEntry> logList = new ArrayList<>();
+
+	public List<ChargingLogEntry> getLogList() {
+		return logList;
+	}
 
 	@Override
 	public void handleEvent(ChargingEndEvent event) {
@@ -84,9 +114,8 @@ public final class ChargerPowerCollector
 		double energy = fleet.getElectricVehicles().get(event.getVehicleId()).getBattery().getCharge() - chargeStart.charge;
 		double endSoC = fleet.getElectricVehicles().get(event.getVehicleId()).getBattery().getCharge()/
 					fleet.getElectricVehicles().get(event.getVehicleId()).getBattery().getCapacity();
-		ChargingLogEntry loge = new ChargingLogEntry(chargeStart.time, event.getTime(),
-				chargingInfrastructure.getChargers().get(event.getChargerId()), energy, event.getVehicleId(),
-				chargeStart.startSoC, endSoC);
+		ChargingLogEntry loge = new ChargingLogEntry(chargeStart.time, event.getTime(),	chargingInfrastructure.getChargers().get(event.getChargerId()),
+				energy, event.getVehicleId(), chargeStart.startSoC, endSoC);
 		logList.add(loge);
 	}
 
@@ -94,7 +123,7 @@ public final class ChargerPowerCollector
 	public void handleEvent(ChargingStartEvent event) {
 		ElectricVehicle ev = fleet.getElectricVehicles().get(event.getVehicleId());
 		Preconditions.checkNotNull(ev, "%s is not in the EV fleet", event.getVehicleId());
-		chargeBeginCharge.put(event.getVehicleId(), new TimeCharge(event.getTime(), ev.getBattery().getCharge()));
+		chargeBeginCharge.put(event.getVehicleId(), new TimeCharge(event.getTime(), ev.getBattery().getCharge(), ev.getBattery().getCharge()/ev.getBattery().getCapacity()));
 	}
 
 	@Override
@@ -103,11 +132,13 @@ public final class ChargerPowerCollector
 				Files.newBufferedWriter(Paths.get(controlerIO.getIterationFilename(iterationCounter.getIterationNumber(), "chargingStats.csv"))),
 				CSVFormat.DEFAULT.withDelimiter(';')
 						.withHeader("ChargerId", "chargeStartTime", "chargeEndTime", "ChargingDuration", "xCoord", "yCoord",
-								"energyTransmitted_kWh","startSoC", endSoC))) {
+								"energyTransmitted_kWh","startSoC", "endSoC"))) {
 			for (ChargerPowerCollector.ChargingLogEntry e : logList) {
 				double energyKWh = Math.round(EvUnits.J_to_kWh(e.transmitted_Energy()) * 10.) / 10.;
+				double endSoC2 = fleet.getElectricVehicles().get(e.getVehicleId()).getBattery().getCharge()/
+					fleet.getElectricVehicles().get(e.getVehicleId()).getBattery().getCapacity();
 				csvPrinter.printRecord(e.charger().getId(), Time.writeTime(e.chargeStart()), Time.writeTime(e.chargeEnd()),
-						Time.writeTime(e.chargeEnd() - e.chargeStart()), e.charger().getCoord().getX(), e.charger().getCoord().getY(), energyKWh, startSoC, endSoC);
+						Time.writeTime(e.chargeEnd() - e.chargeStart()), e.charger().getCoord().getX(), e.charger().getCoord().getY(), energyKWh, e.startSoC(), endSoC2);
 			}
 		} catch (IOException e) {
 			throw new RuntimeException(e);

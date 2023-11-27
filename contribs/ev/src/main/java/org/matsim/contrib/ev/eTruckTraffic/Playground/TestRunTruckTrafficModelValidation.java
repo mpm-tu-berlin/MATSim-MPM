@@ -30,7 +30,7 @@ public class TestRunTruckTrafficModelValidation {
 
 	public void run(String configUrl) throws IOException {
 		Config config = ConfigUtils.loadConfig(configUrl);
-		config.controler().setOverwriteFileSetting( OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists );
+		config.controller().setOverwriteFileSetting( OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists );
 		Scenario scenario = ScenarioUtils.loadScenario(config) ;Controler controler = new Controler( scenario ) ;
 
 		// Does not work

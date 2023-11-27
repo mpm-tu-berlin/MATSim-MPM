@@ -26,7 +26,7 @@ public class RunTruckTraffic {
 
 	public void run(String configUrl) {
 		Config config = ConfigUtils.loadConfig(configUrl);
-		config.controler().setOverwriteFileSetting( OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists );
+		config.controller().setOverwriteFileSetting( OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists );
 		Scenario scenario = ScenarioUtils.loadScenario(config) ;
 		Controler controler = new Controler( scenario ) ;
 		controler.run();
