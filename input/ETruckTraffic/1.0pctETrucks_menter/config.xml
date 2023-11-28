@@ -4,7 +4,7 @@
     <module name="ev">
         <param name="auxDischargeTimeStep" value="10"/>
         <param name="chargeTimeStep" value="5"/>
-        <param name="chargersFile" value="eTrucks_Chargers_100Percentile.xml"/>
+        <param name="chargersFile" value="eTrucks_Chargers_85Percentile.xml"/>
         <param name="timeProfiles" value="true"/>
 	</module>
 
@@ -26,7 +26,7 @@
     </module>
 
     <module name="controller">
-        <param name="outputDirectory" value="./output/ETruckTraffic/1.0pctETrucks/0_unlimited_chargers"/>
+        <param name="outputDirectory" value="./output/ETruckTraffic/1.0pctETrucks/eTrucks_Chargers_85Percentile.xml"/>
         <param name="firstIteration" value="0"/>
         <param name="lastIteration" value="0"/>
         <param name="eventsFileFormat" value="xml"/>
@@ -36,7 +36,7 @@
     <module name="qsim">
         <!-- "start/endTime" of MobSim (00:00:00 == take earliest activity time/ run as long as active vehicles exist) -->
         <param name="startTime" value="00:00:00"/>
-        <param name="endTime" value="48:00:00"/>
+        <param name="endTime" value="24:00:00"/>
         <param name="simStarttimeInterpretation" value="onlyUseStarttime"/>
 		<param name= "numberOfThreads" value= "6" />  <!-- Anzahl der verfügbaren physischen Kerne -->
     </module>
