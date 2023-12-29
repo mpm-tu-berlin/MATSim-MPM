@@ -19,7 +19,6 @@
 package org.matsim.contrib.ev.routing;
 
 import org.matsim.api.core.v01.Id;
-import org.matsim.api.core.v01.TransportMode;
 import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.population.Activity;
@@ -52,6 +51,8 @@ import org.matsim.facilities.Facility;
 import org.matsim.vehicles.Vehicle;
 
 import java.util.*;
+
+import static org.matsim.api.core.v01.TransportMode.car;
 
 /**
  * This network Routing module adds stages for re-charging into the Route.
@@ -93,7 +94,7 @@ final class EvNetworkRoutingModule implements RoutingModule {
 		this.auxConsumptionFactory = auxConsumptionFactory;
 		stageActivityModePrefix = mode + VehicleChargingHandler.CHARGING_IDENTIFIER;
 		this.evConfigGroup = evConfigGroup;
-		this.vehicleSuffix = mode.equals(TransportMode.car) ? "" : "_" + mode;
+		this.vehicleSuffix = mode.equals(car) ? "" : "_" + mode;
 	}
 
 	@Override
@@ -112,32 +113,35 @@ final class EvNetworkRoutingModule implements RoutingModule {
 			ElectricVehicleSpecification ev = electricFleet.getVehicleSpecifications().get(evId);
 
 			Map<Link, Double> estimatedEnergyConsumption = estimateConsumption(ev, basicLeg);
+			Map<Link, Double> estimatedTravelTime = estimateTravelTime(basicLeg);
 			double estimatedOverallConsumption = estimatedEnergyConsumption.values()
 					.stream()
 					.mapToDouble(Number::doubleValue)
 					.sum();
-			double capacity = ev.getBatteryCapacity() * (0.8 + random.nextDouble() * 0.18);
-			double numberOfStops = Math.floor(estimatedOverallConsumption / capacity);
-			if (numberOfStops < 1) {
+			double capacity = ev.getBatteryCapacity() * 0.8; // Definition Mindest SOC von 20%; angepasst, später ursprüngliche MATSim-Herangehensweise nutzen
+			double numberOfChargingStops = Math.floor(estimatedOverallConsumption / capacity);
+			double travelTime = basicLeg.getTravelTime().seconds();
+
+			if (numberOfChargingStops < 1 && travelTime < 4.5*60*60) {
 				return basicRoute;
-			} else {
+			} else if (numberOfChargingStops == 1 && travelTime < 4.5*60*60) {
 				List<Link> stopLocations = new ArrayList<>();
 				double currentConsumption = 0;
-				for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) {
+				for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) { // Schauen, wann Energiebedarf zu groß für capacity
 					currentConsumption += e.getValue();
-					if (currentConsumption > capacity) {
+					if (currentConsumption > capacity) { //Suche charger/Stop
 						stopLocations.add(e.getKey());
 						currentConsumption = 0;
 					}
 				}
-				List<PlanElement> stagedRoute = new ArrayList<>();
+				List<PlanElement> stagedRoute = new ArrayList<>(); // Umwege zum nächsten Charger einbeziehen
 				Facility lastFrom = fromFacility;
 				double lastArrivaltime = departureTime;
 				for (Link stopLocation : stopLocations) {
 
 					StraightLineKnnFinder<Link, ChargerSpecification> straightLineKnnFinder = new StraightLineKnnFinder<>(
 							2, Link::getCoord, s -> network.getLinks().get(s.getLinkId()).getCoord());
-					List<ChargerSpecification> nearestChargers = straightLineKnnFinder.findNearest(stopLocation,
+					List<ChargerSpecification> nearestChargers = straightLineKnnFinder.findNearest(stopLocation, 				// Auswahl nächstgelegener Charger
 							chargingInfrastructureSpecification.getChargerSpecifications()
 									.values()
 									.stream()
@@ -159,8 +163,83 @@ final class EvNetworkRoutingModule implements RoutingModule {
 					chargeAct = PopulationUtils.createActivity(chargeAct);
 					// assume that the battery is compatible with a power that allows for full charge within one hour (cf. FixedSpeedCharging)
 					double maxPowerEstimate = Math.min(selectedCharger.getPlugPower(), ev.getBatteryCapacity() / 3600);
-					double estimatedChargingTime = (ev.getBatteryCapacity() * 1.5) / maxPowerEstimate;
-					chargeAct.setMaximumDuration(Math.max(evConfigGroup.minimumChargeTime, estimatedChargingTime));
+					//double estimatedChargingTime = (ev.getBatteryCapacity() * 1.5) / maxPowerEstimate;
+					//chargeAct.setMaximumDuration(Math.max(evConfigGroup.minimumChargeTime, estimatedChargingTime));
+					chargeAct.setMaximumDuration(45*60);
+
+
+					lastArrivaltime += chargeAct.getMaximumDuration().seconds();
+					stagedRoute.add(chargeAct);
+					lastFrom = nexttoFacility;
+				}
+				stagedRoute.addAll(delegate.calcRoute(DefaultRoutingRequest.of(lastFrom, toFacility, lastArrivaltime, person, request.getAttributes())));
+
+				return stagedRoute;
+
+			} else if (numberOfChargingStops == 1 && travelTime > 4.5*60*60 && travelTime <= 9*60*60) {
+				List<Link> stopLocations = new ArrayList<>();
+				Map<Link, Double> stopSocOrBreakTime = new LinkedHashMap<>();
+				double currentConsumption = 0;
+				double currentTravelTime = 0;
+				double counter = 0;
+
+				//Prüfen, ob zuerst der SOC zu niedrig ist oder eine Pause eingelegt werden muss
+				for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) { // Prüfen, wann Energiebedarf zu groß für Capacity oder Zeit länger als 4,5h
+					currentConsumption += e.getValue();
+					counter ++;
+					if (currentConsumption > capacity) {
+						stopSocOrBreakTime.put(e.getKey(), counter);
+						currentConsumption = 0;
+						counter = 0;
+					}
+				}
+				for (Map.Entry<Link, Double> e : estimatedTravelTime.entrySet()) { // Prüfen, wann Reisedauer am Stück länger ist als erlaubt
+					currentTravelTime += e.getValue();
+					if (currentTravelTime > 4.5*60*60) {
+						stopSocOrBreakTime.put(e.getKey(), counter);
+						currentTravelTime = 0;
+						counter = 0;
+					}
+				}
+				// Finden der kleineren Anzahl an zurückgelegten Links bis zu einem der beiden zuvor geprüften Fälle
+				Link linkWithFirstBreakNecessity = Collections.min(stopSocOrBreakTime.entrySet(), Map.Entry.comparingByValue()).getKey();
+				stopLocations.add(linkWithFirstBreakNecessity);
+
+				// Umwege zum nächsten Charger einbeziehen
+				List<PlanElement> stagedRoute = new ArrayList<>();
+				Facility lastFrom = fromFacility;
+				double lastArrivaltime = departureTime;
+				for (Link stopLocation : stopLocations) {
+
+					StraightLineKnnFinder<Link, ChargerSpecification> straightLineKnnFinder = new StraightLineKnnFinder<>(
+						2, Link::getCoord, s -> network.getLinks().get(s.getLinkId()).getCoord());
+					List<ChargerSpecification> nearestChargers = straightLineKnnFinder.findNearest(stopLocation, // Auswahl nächstgelegener Charger
+						chargingInfrastructureSpecification.getChargerSpecifications()
+							.values()
+							.stream()
+							.filter(charger -> ev.getChargerTypes().contains(charger.getChargerType())));
+					ChargerSpecification selectedCharger = nearestChargers.get(random.nextInt(1));
+					Link selectedChargerLink = network.getLinks().get(selectedCharger.getLinkId());
+					Facility nexttoFacility = new LinkWrapperFacility(selectedChargerLink);
+					if (nexttoFacility.getLinkId().equals(lastFrom.getLinkId())) {
+						continue;
+					}
+					List<? extends PlanElement> routeSegment = delegate.calcRoute(DefaultRoutingRequest.of(lastFrom, nexttoFacility,
+						lastArrivaltime, person, request.getAttributes()));
+					Leg lastLeg = (Leg)routeSegment.get(0);
+					lastArrivaltime = lastLeg.getDepartureTime().seconds() + lastLeg.getTravelTime().seconds();
+					stagedRoute.add(lastLeg);
+					Activity chargeAct = PopulationUtils.createStageActivityFromCoordLinkIdAndModePrefix(selectedChargerLink.getCoord(),
+						selectedChargerLink.getId(), stageActivityModePrefix);
+					// createStageActivity... creates a InteractionActivity where duration cannot be set.
+					chargeAct = PopulationUtils.createActivity(chargeAct);
+					// assume that the battery is compatible with a power that allows for full charge within one hour (cf. FixedSpeedCharging)
+					double maxPowerEstimate = Math.min(selectedCharger.getPlugPower(), ev.getBatteryCapacity() / 3600);
+					//double estimatedChargingTime = (ev.getBatteryCapacity() * 1.5) / maxPowerEstimate;
+					//chargeAct.setMaximumDuration(Math.max(evConfigGroup.minimumChargeTime, estimatedChargingTime));
+					chargeAct.setMaximumDuration(45*60);
+
+
 					lastArrivaltime += chargeAct.getMaximumDuration().seconds();
 					stagedRoute.add(chargeAct);
 					lastFrom = nexttoFacility;
@@ -172,6 +251,7 @@ final class EvNetworkRoutingModule implements RoutingModule {
 			}
 
 		}
+		return basicRoute; //Hinzugefügt, weil eine Rückgabe erwartet wird..
 	}
 
 	private Map<Link, Double> estimateConsumption(ElectricVehicleSpecification ev, Leg basicLeg) {
@@ -179,9 +259,9 @@ final class EvNetworkRoutingModule implements RoutingModule {
 		NetworkRoute route = (NetworkRoute)basicLeg.getRoute();
 		List<Link> links = NetworkUtils.getLinks(network, route.getLinkIds());
 		ElectricVehicle pseudoVehicle = ElectricFleetUtils.create(ev, driveConsumptionFactory, auxConsumptionFactory,
-				v -> charger -> {
-					throw new UnsupportedOperationException();
-				} );
+			v -> charger -> {
+				throw new UnsupportedOperationException();
+			} );
 		DriveEnergyConsumption driveEnergyConsumption = pseudoVehicle.getDriveEnergyConsumption();
 		AuxEnergyConsumption auxEnergyConsumption = pseudoVehicle.getAuxEnergyConsumption();
 		double linkEnterTime = basicLeg.getDepartureTime().seconds();
@@ -189,12 +269,25 @@ final class EvNetworkRoutingModule implements RoutingModule {
 			double travelT = travelTime.getLinkTravelTime(l, basicLeg.getDepartureTime().seconds(), null, null);
 
 			double consumption = driveEnergyConsumption.calcEnergyConsumption(l, travelT, linkEnterTime)
-					+ auxEnergyConsumption.calcEnergyConsumption(basicLeg.getDepartureTime().seconds(), travelT, l.getId());
+				+ auxEnergyConsumption.calcEnergyConsumption(basicLeg.getDepartureTime().seconds(), travelT, l.getId());
 			// to accomodate for ERS, where energy charge is directly implemented in the consumption model
 			consumptions.put(l, consumption);
 			linkEnterTime += travelT;
 		}
 		return consumptions;
+	}
+
+	private Map<Link, Double> estimateTravelTime(Leg basicLeg) {
+		NetworkRoute route = (NetworkRoute)basicLeg.getRoute();
+		List<Link> links = NetworkUtils.getLinks(network, route.getLinkIds());
+		//double linkEnterTime = basicLeg.getDepartureTime().seconds();
+		Map<Link, Double> travelTimes = new LinkedHashMap<>();
+		for (Link l : links) {
+			double travelT = travelTime.getLinkTravelTime(l, basicLeg.getDepartureTime().seconds(), null, null);
+			travelTimes.put(l, travelT);
+			//linkEnterTime += travelT;
+		}
+		return travelTimes;
 	}
 
 	@Override
