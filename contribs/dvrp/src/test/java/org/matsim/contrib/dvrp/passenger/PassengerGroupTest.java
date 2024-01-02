@@ -2,7 +2,7 @@ package org.matsim.contrib.dvrp.passenger;
 
 import com.google.common.collect.ImmutableMap;
 import org.apache.commons.compress.utils.Sets;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.events.*;
 import org.matsim.api.core.v01.network.Network;
@@ -30,11 +30,15 @@ import org.matsim.vehicles.VehicleType;
 import org.matsim.vehicles.VehicleUtils;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.matsim.contrib.dvrp.passenger.PassengerEngineTestFixture.*;
 
-public class GroupPassengerEngineTest {
+/**
+ * @author nkuehnel / MOIA
+ */
+public class PassengerGroupTest {
 
 	private final PassengerEngineTestFixture fixture = new PassengerEngineTestFixture();
 
@@ -49,7 +53,7 @@ public class GroupPassengerEngineTest {
 	private final Fleet fleet = () -> ImmutableMap.of(oneTaxi.getId(), oneTaxi);
 
 	@Test
-	public void test_group() {
+	void test_group() {
 		double departureTime = 0;
 		Id<Person> person1 = Id.createPersonId("1");
 		Id<Person> person2 = Id.createPersonId("2");
@@ -99,7 +103,7 @@ public class GroupPassengerEngineTest {
 	private QSim createQSim(PassengerRequestValidator requestValidator, Class<? extends VrpOptimizer> optimizerClass) {
 		return new QSimBuilder(fixture.config).useDefaults()
 				.addOverridingModule(new MobsimScopeEventHandlingModule())
-				.addQSimModule(new PassengerEngineQSimModule(MODE, PassengerEngineQSimModule.PassengerEngineType.WITH_GROUPS))
+				.addQSimModule(new PassengerEngineQSimModule(MODE, PassengerEngineQSimModule.PassengerEngineType.DEFAULT))
 				.addQSimModule(new VrpAgentSourceQSimModule(MODE))
 				.addQSimModule(new AbstractDvrpModeQSimModule(MODE) {
 					@Override
@@ -111,6 +115,7 @@ public class GroupPassengerEngineTest {
 						bindModal(PassengerRequestCreator.class).to(OneTaxiRequest.OneTaxiRequestCreator.class)
 								.asEagerSingleton();
 						bindModal(PassengerRequestValidator.class).toInstance(requestValidator);
+						bindModal(AdvanceRequestProvider.class).toInstance(AdvanceRequestProvider.NONE);
 
 						//supply
 						addQSimComponentBinding(DynActivityEngine.COMPONENT_NAME).to(DynActivityEngine.class);
@@ -120,8 +125,13 @@ public class GroupPassengerEngineTest {
 						bindModal(VrpAgentLogic.DynActionCreator.class).to(OneTaxiActionCreator.class)
 								.asEagerSingleton();
 
+					}
+				})
+				.addOverridingQSimModule(new AbstractDvrpModeQSimModule(MODE) {
+					@Override
+					protected void configureQSim() {
 						//groups
-						bindModal(PassengerGroupIdentifier.class).toInstance(agent -> Id.create("group1", PassengerGroupIdentifier.PassengerGroup.class));
+						bindModal(PassengerGroupIdentifier.class).toInstance(agent -> Optional.of(Id.create("group1", PassengerGroupIdentifier.PassengerGroup.class)));
 					}
 				})
 				.configureQSimComponents(components -> {

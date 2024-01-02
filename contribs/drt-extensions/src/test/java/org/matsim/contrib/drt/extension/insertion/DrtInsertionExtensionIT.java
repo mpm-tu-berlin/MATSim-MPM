@@ -1,7 +1,7 @@
 package org.matsim.contrib.drt.extension.insertion;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.URL;
 import java.util.ArrayList;
@@ -9,14 +9,16 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.IdMap;
 import org.matsim.api.core.v01.IdSet;
 import org.matsim.api.core.v01.events.LinkEnterEvent;
 import org.matsim.api.core.v01.events.handler.LinkEnterEventHandler;
+import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
+import org.matsim.contrib.drt.extension.insertion.distances.DistanceApproximator;
 import org.matsim.contrib.drt.run.DrtConfigGroup;
 import org.matsim.contrib.drt.run.DrtControlerCreator;
 import org.matsim.contrib.drt.run.MultiModeDrtConfigGroup;
@@ -33,6 +35,7 @@ import org.matsim.contrib.dvrp.passenger.PassengerRequestSubmittedEvent;
 import org.matsim.contrib.dvrp.passenger.PassengerRequestSubmittedEventHandler;
 import org.matsim.contrib.dvrp.passenger.PassengerWaitingEvent;
 import org.matsim.contrib.dvrp.passenger.PassengerWaitingEventHandler;
+import org.matsim.contrib.dvrp.run.AbstractDvrpModeQSimModule;
 import org.matsim.contrib.dvrp.run.DvrpConfigGroup;
 import org.matsim.contrib.dvrp.vrpagent.TaskEndedEvent;
 import org.matsim.contrib.dvrp.vrpagent.TaskEndedEventHandler;
@@ -41,6 +44,7 @@ import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
 import org.matsim.core.controler.OutputDirectoryHierarchy.OverwriteFileSetting;
+import org.matsim.core.utils.geometry.CoordUtils;
 import org.matsim.core.utils.io.IOUtils;
 import org.matsim.examples.ExamplesUtils;
 import org.matsim.testcases.MatsimTestUtils;
@@ -48,8 +52,8 @@ import org.matsim.vehicles.Vehicle;
 import org.matsim.vis.otfvis.OTFVisConfigGroup;
 
 public class DrtInsertionExtensionIT {
-	@Rule
-	public MatsimTestUtils utils = new MatsimTestUtils();
+	@RegisterExtension
+	private MatsimTestUtils utils = new MatsimTestUtils();
 
 	private Controler createController() {
 		URL configUrl = IOUtils.extendUrl(ExamplesUtils.getTestScenarioURL("mielec"), "mielec_drt_config.xml");
@@ -64,7 +68,7 @@ public class DrtInsertionExtensionIT {
 	}
 
 	@Test
-	public void testExclusivityContraint() {
+	void testExclusivityContraint() {
 		IdSet<Request> exclusiveRequestIds = new IdSet<>(Request.class);
 
 		for (int i = 100; i <= 200; i++) {
@@ -169,7 +173,7 @@ public class DrtInsertionExtensionIT {
 	}
 
 	@Test
-	public void testSkillsConstraint() {
+	void testSkillsConstraint() {
 		IdSet<Request> restrictedRequestIds = new IdSet<>(Request.class);
 		for (int i = 100; i <= 200; i++) {
 			restrictedRequestIds.add(Id.create("drt_" + i, Request.class));
@@ -235,7 +239,7 @@ public class DrtInsertionExtensionIT {
 	}
 
 	@Test
-	public void testRangeConstraint() {
+	void testRangeConstraint() {
 		Controler controller = createController();
 		DrtConfigGroup drtConfig = DrtConfigGroup.getSingleModeDrtConfig(controller.getConfig());
 
@@ -251,6 +255,86 @@ public class DrtInsertionExtensionIT {
 
 		for (var item : handler.distances.entrySet()) {
 			assertTrue(item.getValue() < 100.0 * 1e3);
+		}
+	}
+
+	@Test
+	void testRangeConstraintWithCustomInstances() {
+		Controler controller = createController();
+		DrtConfigGroup drtConfig = DrtConfigGroup.getSingleModeDrtConfig(controller.getConfig());
+
+		CustomCalculator distanceCalculator = new CustomCalculator();
+		CustomCalculator distanceApproximator = new CustomCalculator();
+
+		DrtInsertionModule insertionModule = new DrtInsertionModule(drtConfig) //
+				.withVehicleRange(100.0 * 1e3) //
+				.withDistanceCalculator(distanceCalculator) //
+				.withDistanceApproximator(distanceApproximator);
+
+		controller.addOverridingQSimModule(insertionModule);
+
+		DistanceHandler handler = new DistanceHandler(controller.getScenario().getNetwork());
+		handler.install(controller);
+
+		controller.run();
+
+		for (var item : handler.distances.entrySet()) {
+			assertTrue(item.getValue() < 100.0 * 1e3);
+		}
+
+		assertEquals(1470, distanceCalculator.calculatedDistances);
+		assertEquals(5288, distanceApproximator.calculatedDistances);
+	}
+
+	@Test
+	void testRangeConstraintWithCustomInjection() {
+		Controler controller = createController();
+		DrtConfigGroup drtConfig = DrtConfigGroup.getSingleModeDrtConfig(controller.getConfig());
+
+		CustomDistanceCalculator distanceCalculator = new CustomDistanceCalculator();
+		CustomDistanceApproximator distanceApproximator = new CustomDistanceApproximator();
+
+		DrtInsertionModule insertionModule = new DrtInsertionModule(drtConfig) //
+				.withVehicleRange(100.0 * 1e3) //
+				.withDistanceCalculator(CustomDistanceCalculator.class) //
+				.withDistanceApproximator(CustomDistanceApproximator.class);
+
+		controller.addOverridingQSimModule(insertionModule);
+
+		controller.addOverridingQSimModule(new AbstractDvrpModeQSimModule("drt") {
+			@Override
+			protected void configureQSim() {
+				bindModal(CustomDistanceCalculator.class).toInstance(distanceCalculator);
+				bindModal(CustomDistanceApproximator.class).toInstance(distanceApproximator);
+			}
+		});
+
+		DistanceHandler handler = new DistanceHandler(controller.getScenario().getNetwork());
+		handler.install(controller);
+
+		controller.run();
+
+		for (var item : handler.distances.entrySet()) {
+			assertTrue(item.getValue() < 100.0 * 1e3);
+		}
+
+		assertEquals(1470, distanceCalculator.calculatedDistances);
+		assertEquals(5288, distanceApproximator.calculatedDistances);
+	}
+
+	static class CustomDistanceCalculator extends CustomCalculator {
+	}
+
+	static class CustomDistanceApproximator extends CustomCalculator {
+	}
+
+	static class CustomCalculator implements DistanceApproximator {
+		int calculatedDistances = 0;
+
+		@Override
+		public synchronized double calculateDistance(double departureTime, Link fromLink, Link toLink) {
+			calculatedDistances++;
+			return CoordUtils.calcEuclideanDistance(fromLink.getCoord(), toLink.getCoord());
 		}
 	}
 
@@ -281,7 +365,7 @@ public class DrtInsertionExtensionIT {
 	}
 
 	@Test
-	public void testCustomConstraint() {
+	void testCustomConstraint() {
 		Controler controller = createController();
 		DrtConfigGroup drtConfig = DrtConfigGroup.getSingleModeDrtConfig(controller.getConfig());
 
@@ -325,7 +409,7 @@ public class DrtInsertionExtensionIT {
 	}
 
 	@Test
-	public void testDefaults() {
+	void testDefaults() {
 		Controler controller = createController();
 		DrtConfigGroup drtConfig = DrtConfigGroup.getSingleModeDrtConfig(controller.getConfig());
 
@@ -344,7 +428,7 @@ public class DrtInsertionExtensionIT {
 	}
 
 	@Test
-	public void testVehicleActiveTimeObjective() {
+	void testVehicleActiveTimeObjective() {
 		Controler controller = createController();
 		DrtConfigGroup drtConfig = DrtConfigGroup.getSingleModeDrtConfig(controller.getConfig());
 
@@ -365,7 +449,7 @@ public class DrtInsertionExtensionIT {
 	}
 
 	@Test
-	public void testVehicleDistanceObjective() {
+	void testVehicleDistanceObjective() {
 		Controler controller = createController();
 		DrtConfigGroup drtConfig = DrtConfigGroup.getSingleModeDrtConfig(controller.getConfig());
 
@@ -386,7 +470,7 @@ public class DrtInsertionExtensionIT {
 	}
 
 	@Test
-	public void testPassengerPassengerDelayObjective() {
+	void testPassengerPassengerDelayObjective() {
 		Controler controller = createController();
 		DrtConfigGroup drtConfig = DrtConfigGroup.getSingleModeDrtConfig(controller.getConfig());
 
