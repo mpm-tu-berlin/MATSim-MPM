@@ -41,7 +41,7 @@ public class RunETruckTraffic {
 
 		String config_paths[] = {
 				"input/ETruckTraffic/1.0pctETrucks_menter/config.xml",
-				//"input/ETruckTraffic/5.0pctETrucks/config.xml",
+				//"input/ETruckTraffic/5.0pctETrucks_menter/config.xml",
 				//"input/ETruckTraffic/10.0pctETrucks/config.xml",
 				//"input/ETruckTraffic/15.0pctETrucks/config.xml",
 				//"input/ETruckTraffic/20.0pctETrucks/config.xml",
@@ -55,17 +55,18 @@ public class RunETruckTraffic {
 		Config config = ConfigUtils.loadConfig(configUrl, new EvConfigGroup());
 		config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
 		Scenario scenario = ScenarioUtils.loadScenario(config);
-		Controler controller = new Controler(scenario);
+		Controler controler = new Controler(scenario);
 
-		controller.addOverridingModule(new AbstractModule(){
+		controler.addOverridingModule(new AbstractModule(){
 
 			@Override public void install(){
 				install( new EvModule() );
+
 				addRoutingModuleBinding(TransportMode.car).toProvider(new EvNetworkRoutingProvider(TransportMode.car));
 			}
 		} );
 
-		controller.run();
+		controler.run();
 
 	}
 }

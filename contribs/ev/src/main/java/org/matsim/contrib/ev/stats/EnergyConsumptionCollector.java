@@ -27,16 +27,13 @@ import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Link;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.contrib.ev.EvUnits;
-import org.matsim.contrib.ev.discharging.DriveDischargingHandler;
 import org.matsim.contrib.ev.discharging.DrivingEnergyConsumptionEvent;
 import org.matsim.contrib.ev.discharging.DrivingEnergyConsumptionEventHandler;
-import org.matsim.contrib.ev.eTruckTraffic.stats.ChargerQueuingCollector;
 import org.matsim.core.controler.IterationCounter;
 import org.matsim.core.controler.OutputDirectoryHierarchy;
 import org.matsim.core.events.MobsimScopeEventHandler;
 import org.matsim.core.mobsim.framework.events.MobsimBeforeCleanupEvent;
 import org.matsim.core.mobsim.framework.listeners.MobsimBeforeCleanupListener;
-import org.matsim.core.utils.misc.Time;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -50,12 +47,6 @@ import java.util.Map;
 public class EnergyConsumptionCollector implements DrivingEnergyConsumptionEventHandler, MobsimScopeEventHandler, MobsimBeforeCleanupListener {
 
 	@Inject
-	DriveDischargingHandler driveDischargingHandler;
-	@Inject
-	ChargerPowerCollector chargerPowerCollector;
-	@Inject
-	ChargerQueuingCollector chargerQueuingCollector;
-	@Inject
 	private OutputDirectoryHierarchy controlerIO;
 	@Inject
 	private IterationCounter iterationCounter;
@@ -64,9 +55,7 @@ public class EnergyConsumptionCollector implements DrivingEnergyConsumptionEvent
 
 	private final Map<Id<Link>, Double> energyConsumptionPerLink = new HashMap<>();
 
-	@Inject
-	EnergyConsumptionCollector() {
-	}  // so that class can only be instantiated via guice.  kai, oct'23
+	@Inject EnergyConsumptionCollector(){}  // so that class can only be instantiated via guice.  kai, oct'23
 
 	@Override
 	public void handleEvent(DrivingEnergyConsumptionEvent event) {
@@ -85,17 +74,7 @@ public class EnergyConsumptionCollector implements DrivingEnergyConsumptionEvent
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
-		try (CSVPrinter csvPrinter1 = new CSVPrinter(Files.newBufferedWriter(Paths.get(controlerIO.getIterationFilename(iterationCounter.getIterationNumber(), "queuingStats.csv"))), CSVFormat.DEFAULT.withDelimiter(';').
-			withHeader("ChargerId", "queueStartTime", "queueEndTime", "QueuingDuration", "xCoord", "yCoord", "VehicleID"))) {
-			for (ChargerQueuingCollector.QueuingLogEntry e : chargerQueuingCollector.getLogList()) {
-				csvPrinter1.printRecord(e.getCharger().getId(), Time.writeTime(e.getQueueStart()), Time.writeTime(e.getQueueEnd()), Time.writeTime(e.getQueueEnd() - e.getQueueStart()),
-					e.getCharger().getCoord().getX(), e.getCharger().getCoord().getY(), e.getVehicleId());
-			}
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
 	}
 }
-
 
 

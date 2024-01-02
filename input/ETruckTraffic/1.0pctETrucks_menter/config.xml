@@ -2,6 +2,7 @@
 <!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">
 <config>
     <module name="ev">
+		<param name="enforceChargingInteractionDuration" value="false" />
         <param name="auxDischargeTimeStep" value="10"/>
         <param name="chargeTimeStep" value="5"/>
         <param name="chargersFile" value="eTrucks_Chargers_85Percentile.xml"/>
@@ -15,6 +16,7 @@
     <module name="global">
         <param name="randomSeed" value="4711"/>
         <param name="coordinateSystem" value="Atlantis"/>
+		<param name="numberOfThreads" value="6" />
     </module>
 
     <module name="network">
@@ -26,7 +28,7 @@
     </module>
 
     <module name="controller">
-        <param name="outputDirectory" value="./output/ETruckTraffic/1.0pctETrucks/eTrucks_Chargers_85Percentile.xml"/>
+        <param name="outputDirectory" value="./output/ETruckTraffic/1.0pctETrucks/eTrucks_Chargers_75quantil_720kW.xml"/>
         <param name="firstIteration" value="0"/>
         <param name="lastIteration" value="0"/>
         <param name="eventsFileFormat" value="xml"/>
@@ -70,20 +72,31 @@
         <parameterset type="activityParams">
 			<param name="priority"        value="1" />
             <param name="activityType" value="car charging interaction"/>
-            <param name="typicalDuration" value="00:45:00"/>
+            <param name="typicalDuration" value="0:45:00"/>  <!-- Nur Scoring -->
+			<!--<param name="minimalDuration" value="0:01:00" />  Zwei Pausen pro Schicht sind erlaubt mit je 15 oder 30 min -->
             <param name="typicalDurationScoreComputation" value="relative"/>
-            <param name="scoringThisActivityAtAll" value="true"/>
+            <param name="scoringThisActivityAtAll" value="true"/> <!-- Normalerweise werden diese activities nicht gescored -->
 
         </parameterset>
 
     </module>
-
     <module name="replanning">
         <param name="maxAgentPlanMemorySize" value="5"/> <!-- 0 means unlimited -->
+		<!--<param name="ModuleProbability_1" value="0.7"/>
+		<param name="Module_1" value="BestScore"/> -->
 
-        <param name="ModuleProbability_1" value="0.7"/>
-        <param name="Module_1" value="BestScore"/>
+		<parameterset type="strategysettings">
+			<param name="strategyName" value="BestScore"/>
+			<param name="weight" value="0.8"/>
+		</parameterset>
 
+		<!--<parameterset type="strategysettings">-->
+		<!--	<param name="strategyName" value="ReRoute"/>-->
+		<!--	<param name="weight" value="0.1"/>-->
+		<!--</parameterset>-->
+
+
+		<!-- Replanning, Rerouting.  Führt dazu, dass Scoring relevant wird -->
     </module>
 
 
