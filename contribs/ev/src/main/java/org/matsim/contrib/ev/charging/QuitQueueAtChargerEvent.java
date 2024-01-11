@@ -19,12 +19,12 @@
 
 package org.matsim.contrib.ev.charging;
 
-import java.util.Map;
-
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.events.Event;
 import org.matsim.contrib.ev.infrastructure.Charger;
 import org.matsim.vehicles.Vehicle;
+
+import java.util.Map;
 
 public class QuitQueueAtChargerEvent extends Event {
 	public static final String EVENT_TYPE = "quit_queue_at_charger";

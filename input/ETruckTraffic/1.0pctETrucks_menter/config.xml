@@ -2,7 +2,7 @@
 <!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">
 <config>
     <module name="ev">
-		<param name="enforceChargingInteractionDuration" value="false" />
+		<param name="enforceChargingInteractionDuration" value="true" />
         <param name="auxDischargeTimeStep" value="10"/>
         <param name="chargeTimeStep" value="5"/>
         <param name="chargersFile" value="eTrucks_Chargers_85Percentile.xml"/>
@@ -30,7 +30,7 @@
     <module name="controller">
         <param name="outputDirectory" value="./output/ETruckTraffic/1.0pctETrucks/eTrucks_Chargers_75quantil_720kW.xml"/>
         <param name="firstIteration" value="0"/>
-        <param name="lastIteration" value="0"/>
+        <param name="lastIteration" value="2"/>
         <param name="eventsFileFormat" value="xml"/>
         <param name="mobsim" value="qsim"/>
     </module>
@@ -38,9 +38,11 @@
     <module name="qsim">
         <!-- "start/endTime" of MobSim (00:00:00 == take earliest activity time/ run as long as active vehicles exist) -->
         <param name="startTime" value="00:00:00"/>
-        <param name="endTime" value="24:00:00"/>
+        <param name="endTime" value="12:00:00"/>
         <param name="simStarttimeInterpretation" value="onlyUseStarttime"/>
 		<param name= "numberOfThreads" value= "6" />  <!-- Anzahl der verfügbaren physischen Kerne -->
+		<param name="flowCapacityFactor" value="1.0" />
+		<param name="storageCapacityFactor" value="1.0" />
     </module>
 
     <module name="scoring">
@@ -90,10 +92,10 @@
 			<param name="weight" value="0.8"/>
 		</parameterset>
 
-		<!--<parameterset type="strategysettings">-->
-		<!--	<param name="strategyName" value="ReRoute"/>-->
-		<!--	<param name="weight" value="0.1"/>-->
-		<!--</parameterset>-->
+		<parameterset type="strategysettings">
+		<param name="strategyName" value="ReRoute"/>
+		<param name="weight" value="0.1"/>
+		</parameterset>
 
 
 		<!-- Replanning, Rerouting.  Führt dazu, dass Scoring relevant wird -->

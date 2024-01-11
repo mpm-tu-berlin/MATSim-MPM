@@ -193,15 +193,15 @@ public class VehicleChargingHandler
 
 	@Override
 	public void handleEvent(QuitQueueAtChargerEvent event) {
-		if(evCfg.enforceChargingInteractionDuration){
+		//if(evCfg.enforceChargingInteractionDuration){
 			//this could actually happen when combining with edrt/etaxi/evrp
-			throw new RuntimeException("should currently not happen, as queue is only quit by the agent if the charging activity ended" +
-				" and this should not happen with fixed charging activity duration.\n" +
-				"If you run evrp together with conventional (preplanned) EV, please refer to VSP.");
-		} else {
+		//	throw new RuntimeException("should currently not happen, as queue is only quit by the agent if the charging activity ended" +
+		//		" and this should not happen with fixed charging activity duration.\n" +
+		//		"If you run evrp together with conventional (preplanned) EV, please refer to VSP.");
+		//} else {
 			//Charging has ended before activity ends
 			vehiclesAtChargers.remove(event.getVehicleId());
 			agentsInChargerQueue.remove(lastDriver.get(event.getVehicleId()));
-		}
+		//}
 	}
 }
