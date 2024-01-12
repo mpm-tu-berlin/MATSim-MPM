@@ -18,7 +18,7 @@ import org.matsim.core.scenario.ScenarioUtils;
 import java.io.IOException;
 
 public class RunETruckTraffic {
-	static final String DEFAULT_CONFIG_FILE = "input/ETruckTraffic/1.0pctETrucks_menter/config.xml";
+	static final String DEFAULT_CONFIG_FILE = "input/ETruckTraffic/100.0pctETrucks_soc_determination/config.xml";
 	private static final Logger log = LogManager.getLogger(RunEvExample.class);
 
 	public static void main(String[] args) throws IOException {
@@ -40,7 +40,7 @@ public class RunETruckTraffic {
 		}*/
 
 		String config_paths[] = {
-				"input/ETruckTraffic/1.0pctETrucks_menter/config.xml",
+				"input/ETruckTraffic/100.0pctETrucks_soc_determination/config.xml",
 				//"input/ETruckTraffic/5.0pctETrucks_menter/config.xml",
 				//"input/ETruckTraffic/10.0pctETrucks/config.xml",
 				//"input/ETruckTraffic/15.0pctETrucks/config.xml",
