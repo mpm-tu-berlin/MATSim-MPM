@@ -19,10 +19,10 @@
 
 package org.matsim.contrib.ev.stats;
 
-import static org.matsim.contrib.common.timeprofile.TimeProfileCollector.ProfileCalculator;
-
-import java.awt.Color;
-
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.inject.Inject;
+import com.google.inject.Provider;
 import org.matsim.contrib.common.histogram.UniformHistogram;
 import org.matsim.contrib.common.timeprofile.TimeProfileCharts;
 import org.matsim.contrib.common.timeprofile.TimeProfileCharts.ChartType;
@@ -32,10 +32,9 @@ import org.matsim.contrib.ev.fleet.ElectricVehicle;
 import org.matsim.core.controler.MatsimServices;
 import org.matsim.core.mobsim.framework.listeners.MobsimListener;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.inject.Inject;
-import com.google.inject.Provider;
+import java.awt.*;
+
+import static org.matsim.contrib.common.timeprofile.TimeProfileCollector.ProfileCalculator;
 
 public class SocHistogramTimeProfileCollectorProvider implements Provider<MobsimListener> {
 	private final ElectricFleet evFleet;
@@ -53,9 +52,10 @@ public class SocHistogramTimeProfileCollectorProvider implements Provider<Mobsim
 		ProfileCalculator calculator = () -> {
 			var histogram = new UniformHistogram(0.1, header.size());
 			for (ElectricVehicle ev : evFleet.getElectricVehicles().values()) {
-				histogram.addValue(ev.getBattery().getCharge() / ev.getBattery().getCapacity());
+				if (ev.getBattery().getSoc() != ev.getVehicleSpecification().getInitialSoc()) {
+					histogram.addValue(ev.getBattery().getCharge() / ev.getBattery().getCapacity());
+				}
 			}
-
 			ImmutableMap.Builder<String, Double> builder = ImmutableMap.builder();
 			for (int b = 0; b < header.size(); b++) {
 				builder.put(header.get(b), (double)histogram.getCount(b));
@@ -73,8 +73,8 @@ public class SocHistogramTimeProfileCollectorProvider implements Provider<Mobsim
 				new Color(1f, 1, 0), // 0.5+
 				new Color(.75f, 1, 0), // 0.6+
 				new Color(.5f, 1, 0), // 0.7+
-				new Color(.25f, 1, 0), // 0.8+
-				new Color(0f, 1, 0) // 0.9+
+				new Color(.25f, 0.9f, 0), // 0.8+
+				new Color(0f, .8f, 0) // 0.9+
 		));
 		return collector;
 	}
