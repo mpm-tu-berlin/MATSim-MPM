@@ -15,6 +15,7 @@
     <module name="global">
         <param name="randomSeed" value="4711"/>
         <param name="coordinateSystem" value="Atlantis"/>
+		<param name= "numberOfThreads" value= "32" />
     </module>
 
     <module name="network">
