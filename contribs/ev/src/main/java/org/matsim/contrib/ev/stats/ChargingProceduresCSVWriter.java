@@ -88,7 +88,7 @@ public final class ChargingProceduresCSVWriter implements IterationEndsListener 
 				} else if (sequence.getChargingStart().isPresent()) {
 					waitEndTime = sequence.getChargingStart().get().getTime();
 				} else {
-					waitEndTime = 1000000;
+					waitEndTime = 360000;
 				}
 
 			//	waitEndTime = sequence.getChargingStart().isPresent() ?
