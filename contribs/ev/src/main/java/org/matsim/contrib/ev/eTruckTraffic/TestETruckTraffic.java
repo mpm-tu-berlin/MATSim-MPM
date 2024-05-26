@@ -38,7 +38,6 @@ public class TestETruckTraffic {
 				});
 			}
 		});
-		controler.configureQSimComponents(components -> components.addNamedComponent(EvModule.EV_COMPONENT));
 
 		controler.run();
 	}

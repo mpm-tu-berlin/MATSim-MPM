@@ -42,7 +42,7 @@
 		<param name="startTime" value="00:00:00"/>
 		<param name="endTime" value="96:00:00"/>
 		<param name="simStarttimeInterpretation" value="onlyUseStarttime"/>
-		<param name= "numberOfThreads" value= "12" />
+		<param name= "numberOfThreads" value= "31" />
 		<param name="flowCapacityFactor" value="1.0" />
 		<param name="storageCapacityFactor" value="1.0" />
 	</module>

@@ -18,7 +18,7 @@ import org.matsim.core.scenario.ScenarioUtils;
 import java.io.IOException;
 
 public class RunETruckTraffic {
-	static final String DEFAULT_CONFIG_FILE = "input/ETruckTraffic/100.0pctETrucks_soc_determination/config.xml";
+	static final String DEFAULT_CONFIG_FILE = "input/EVS/1.0pctETrucks_1Iteration_unlimited/config.xml";
 	private static final Logger log = LogManager.getLogger(RunEvExample.class);
 
 	public static void main(String[] args) throws IOException {
@@ -40,11 +40,12 @@ public class RunETruckTraffic {
 		}*/
 
 		String config_paths[] = {
-				"input/ETruckTraffic/100.0pctETrucks_soc_determination/config.xml",
-				//"input/ETruckTraffic/5.0pctETrucks_menter/config.xml",
-				//"input/ETruckTraffic/10.0pctETrucks/config.xml",
-				//"input/ETruckTraffic/15.0pctETrucks/config.xml",
-				//"input/ETruckTraffic/20.0pctETrucks/config.xml",
+				//"input/ETruckTraffic/100.0pctETrucks_soc_determination/config.xml",
+				//"input/EVS/1.0pctETrucks_1Iteration_unlimited/config.xml"
+				//"input/EVS/5.0pctETrucks_1Iteration_unlimited/config.xml",
+				//"input/EVS/10.0pctETrucks_1Iteration_unlimited/config.xml",
+				"input/EVS/15.0pctETrucks_1Iteration_unlimited/config.xml",
+				//"input/EVS/20.0pctETrucks_1Iteration_unlimited/config.xml",
 		};
 		for (String config_path: config_paths){
 			new RunETruckTraffic().run(config_path);
