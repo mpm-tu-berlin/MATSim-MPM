@@ -44,8 +44,8 @@ public class RunETruckTraffic {
 				//"input/EVS/1.0pctETrucks_1Iteration_unlimited/config.xml"
 				//"input/EVS/5.0pctETrucks_1Iteration_unlimited/config.xml",
 				//"input/EVS/10.0pctETrucks_1Iteration_unlimited/config.xml",
-				"input/EVS/15.0pctETrucks_1Iteration_unlimited/config.xml",
-				//"input/EVS/20.0pctETrucks_1Iteration_unlimited/config.xml",
+				//"input/EVS/15.0pctETrucks_1Iteration_unlimited/config.xml",
+				"input/EVS/20.0pctETrucks_1Iteration_unlimited/config.xml",
 		};
 		for (String config_path: config_paths){
 			new RunETruckTraffic().run(config_path);
