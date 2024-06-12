@@ -83,7 +83,8 @@ final class EvNetworkRoutingModule implements RoutingModule {
 	private static final double MAX_OVERALL_DRIVE_TIME_PER_DAY = 9 * 60 * 60; // Maximum overall allowed driving time per day in seconds
 	private static final double BREAK_DURATION = 45 * 60; // in seconds
 	private static final double REST_DURATION = 11 * 60 * 60; // in seconds
-	private static final double CHARGER_POWER = 720 * 1000; // in Watt
+	private static final double CHARGER_POWER = 640 * 1000; // in Watt
+	private static final double MAX_VEHICLE_SPEED = 18.056; // in m/s (65 km/h)
 
 	EvNetworkRoutingModule(final String mode, final Network network, RoutingModule delegate,
 			ElectricFleetSpecification electricFleet,
@@ -375,7 +376,8 @@ final class EvNetworkRoutingModule implements RoutingModule {
 		AuxEnergyConsumption auxEnergyConsumption = pseudoVehicle.getAuxEnergyConsumption();
 		double linkEnterTime = basicLeg.getDepartureTime().seconds();
 		for (Link l : links) {
-			double travelT = travelTime.getLinkTravelTime(l, basicLeg.getDepartureTime().seconds(), null, null);
+			//double travelT = travelTime.getLinkTravelTime(l, basicLeg.getDepartureTime().seconds(), null, null);
+			double travelT = l.getLength() / Math.min(MAX_VEHICLE_SPEED, l.getFreespeed());
 
 			double consumption = driveEnergyConsumption.calcEnergyConsumption(l, travelT, linkEnterTime)
 				+ auxEnergyConsumption.calcEnergyConsumption(basicLeg.getDepartureTime().seconds(), travelT, l.getId());
@@ -391,7 +393,8 @@ final class EvNetworkRoutingModule implements RoutingModule {
 		List<Link> links = NetworkUtils.getLinks(network, route.getLinkIds());
 		Map<Link, Double> travelTimes = new LinkedHashMap<>();
 		for (Link l : links) {
-			double travelT = travelTime.getLinkTravelTime(l, basicLeg.getDepartureTime().seconds(), null, null);
+			//double travelT = travelTime.getLinkTravelTime(l, basicLeg.getDepartureTime().seconds(), null, null);
+			double travelT = l.getLength() / Math.min(MAX_VEHICLE_SPEED, l.getFreespeed());
 			travelTimes.put(l, travelT);
 		}
 		return travelTimes;
