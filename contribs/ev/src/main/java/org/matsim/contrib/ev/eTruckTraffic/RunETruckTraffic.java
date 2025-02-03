@@ -18,7 +18,7 @@ import org.matsim.core.scenario.ScenarioUtils;
 import java.io.IOException;
 
 public class RunETruckTraffic {
-	static final String DEFAULT_CONFIG_FILE = "input/EVS/1.0pctETrucks_1Iteration_unlimited/config.xml";
+	static final String DEFAULT_CONFIG_FILE = "input/BETScenarios/1.0pctETrucks_1Iteration_unlimited/config.xml";
 	private static final Logger log = LogManager.getLogger(RunEvExample.class);
 
 	public static void main(String[] args) throws IOException {

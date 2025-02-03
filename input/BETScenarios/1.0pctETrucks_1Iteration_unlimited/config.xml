@@ -6,7 +6,7 @@
 		<param name="chargeTimeStep" value="5"/>
 		<param name="chargersFile" value="eTrucks_Chargers_unlimited.xml"/>
 		<param name="timeProfiles" value="true"/>
-		<param name="enforceChargingInteractionDuration" value="true"/>
+		<param name="enforceChargingInteractionDuration" value="false"/>
 	</module>
 
 	<module name="vehicles">
@@ -14,7 +14,6 @@
 	</module>
 
 	<module name="global">
-		<param name="randomSeed" value="4711"/>
 		<param name="coordinateSystem" value="Atlantis"/>
 		<param name= "numberOfThreads" value= "32" />
 	</module>
@@ -75,7 +74,7 @@
 		<parameterset type="activityParams">
 			<param name="priority"        value="1" />
 			<param name="activityType" value="car charging interaction"/>
-			<param name="typicalDuration" value="00:45:00"/>
+			<param name="typicalDuration" value="00:15:00"/>
 			<param name="typicalDurationScoreComputation" value="relative"/>
 			<param name="scoringThisActivityAtAll" value="true"/>
 		</parameterset>
