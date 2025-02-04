@@ -33,7 +33,7 @@ import com.google.inject.Singleton;
 public final class DischargingModule extends AbstractModule {
 	@Override
 	public void install() {
-		bind(DriveEnergyConsumption.Factory.class).toInstance(ev -> new ETruckDriveEnergyConsumption());
+		bind(DriveEnergyConsumption.Factory.class).toInstance(ev -> new DynamicConsumption());
 		bind(TemperatureService.class).toInstance(linkId -> 15);// XXX fixed temperature 15 oC
 		bind(AuxEnergyConsumption.Factory.class).to(OhdeSlaskiAuxEnergyConsumption.Factory.class).in(Singleton.class);
 
