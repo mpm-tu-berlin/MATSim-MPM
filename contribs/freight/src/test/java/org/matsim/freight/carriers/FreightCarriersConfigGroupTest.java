@@ -21,17 +21,16 @@
 
 package org.matsim.freight.carriers;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigReader;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.freight.carriers.FreightCarriersConfigGroup.UseDistanceConstraintForTourPlanning;
-
-import java.io.ByteArrayInputStream;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.util.Map;
 
 /**
  * @author mrieser / Simunto
@@ -55,17 +54,18 @@ public class FreightCarriersConfigGroupTest {
 		FreightCarriersConfigGroup freight = new FreightCarriersConfigGroup();
 		Config config = ConfigUtils.createConfig(freight);
 
-		String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-				"<!DOCTYPE config SYSTEM \"http://www.matsim.org/files/dtd/config_v2.dtd\">\n" +
-				"<config>\n" +
-				"  <module name=\"freight\" >\t\n" +
-				"    <param name=\"carriersFile\" value=\"/path/to/carriers.xml\" />\n" +
-				"    <param name=\"carriersVehicleTypeFile\" value=\"/path/to/carriersVehicleTypes.xml\" />\n" +
-				"    <param name=\"vehicleRoutingAlgorithmFile\" value=\"/path/to/carriersRoutingAlgorithm.xml\" />\n" +
-				"    <param name=\"travelTimeSliceWidth\" value=\"3600\" />\n" +
-				"    <param name=\"useDistanceConstraintForTourPlanning\" value=\"basedOnEnergyConsumption\" />\n" +
-				"  </module>\n" +
-				"</config>";
+		String xml = """
+			<?xml version="1.0" encoding="UTF-8"?>
+			<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">
+			<config>
+			  <module name="freight" >\t
+			    <param name="carriersFile" value="/path/to/carriers.xml" />
+			    <param name="carriersVehicleTypeFile" value="/path/to/carriersVehicleTypes.xml" />
+			    <param name="vehicleRoutingAlgorithmFile" value="/path/to/carriersRoutingAlgorithm.xml" />
+			    <param name="travelTimeSliceWidth" value="3600" />
+			    <param name="useDistanceConstraintForTourPlanning" value="basedOnEnergyConsumption" />
+			  </module>
+			</config>""";
 
 		InputStream is = new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8));
 

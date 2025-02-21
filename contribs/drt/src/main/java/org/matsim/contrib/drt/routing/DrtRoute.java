@@ -17,24 +17,26 @@
  * *********************************************************************** */
 package org.matsim.contrib.drt.routing;
 
-import com.google.common.base.MoreObjects;
-import org.matsim.api.core.v01.Id;
-import org.matsim.api.core.v01.TransportMode;
-import org.matsim.api.core.v01.network.Link;
-import org.matsim.contrib.dvrp.path.VrpPathWithTravelData;
-import org.matsim.core.population.routes.AbstractRoute;
-import org.matsim.core.utils.misc.OptionalTime;
+import static com.google.common.base.Preconditions.checkArgument;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
+import org.matsim.api.core.v01.Id;
+import org.matsim.api.core.v01.TransportMode;
+import org.matsim.api.core.v01.network.Link;
+import org.matsim.contrib.dvrp.load.DvrpLoad;
+import org.matsim.contrib.dvrp.load.DvrpLoadType;
+import org.matsim.contrib.dvrp.path.VrpPathWithTravelData;
+import org.matsim.core.population.routes.AbstractRoute;
+import org.matsim.core.utils.misc.OptionalTime;
+
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
-import static com.google.common.base.Preconditions.checkArgument;
+import com.google.common.base.MoreObjects;
 
 /**
  * Assumptions:
@@ -72,6 +74,10 @@ public class DrtRoute extends AbstractRoute {
 		return getTravelTime().seconds(); // currently DrtRoute.travelTime is set to the max allowed travel time
 	}
 
+	public double getMaxRideTime() {
+		return routeDescription.getMaxRideTime();
+	}
+
 	public void setDirectRideTime(double directRideTime) {
 		this.routeDescription.setDirectRideTime(directRideTime);
 	}
@@ -86,6 +92,24 @@ public class DrtRoute extends AbstractRoute {
 		this.routeDescription.setUnsharedPath(links);
 	}
 
+	public void setMaxRideTime(double maxRideTime) {
+		this.routeDescription.setMaxRideTime(maxRideTime);
+	}
+
+	private DvrpLoad load;
+
+	public DvrpLoad getLoad(DvrpLoadType loadType) {
+		if (load == null) {
+			load = loadType.deserialize(routeDescription.getLoad());
+		}
+
+		return load;
+	}
+
+	public void setLoad(DvrpLoad load, DvrpLoadType loadType) {
+		this.load = load;
+		routeDescription.setLoad(loadType.serialize(load));
+	}
 
 	@Override
 	public String getRouteDescription() {
@@ -140,6 +164,7 @@ public class DrtRoute extends AbstractRoute {
 		return MoreObjects.toStringHelper(this)
 				.add("maxWaitTime", routeDescription.getMaxWaitTime())
 				.add("directRideTime", routeDescription.getDirectRideTime())
+				.add("load", routeDescription.getLoad())
 				.add("super", super.toString())
 				.toString();
 	}
@@ -149,10 +174,17 @@ public class DrtRoute extends AbstractRoute {
 		private OptionalTime maxWaitTime = OptionalTime.undefined();
 		private OptionalTime directRideTime = OptionalTime.undefined();
 		private List<String> unsharedPath = new ArrayList<String>();
+		private OptionalTime maxRideTime = OptionalTime.undefined();
+		private String load = null;
 
 		@JsonProperty("directRideTime")
 		public double getDirectRideTime() {
 			return directRideTime.isUndefined() ? OptionalTime.undefined().seconds() : directRideTime.seconds();
+		}
+
+		@JsonProperty("maxRideTime")
+		public double getMaxRideTime() {
+			return maxRideTime.seconds();
 		}
 
 		@JsonProperty("maxWaitTime")
@@ -165,8 +197,17 @@ public class DrtRoute extends AbstractRoute {
 			return unsharedPath;
 		}
 
+		@JsonProperty("load")
+		public String getLoad() {
+			return load;
+		}
+
 		public void setDirectRideTime(double directRideTime) {
 			this.directRideTime = OptionalTime.defined(directRideTime);
+		}
+
+		public void setMaxRideTime(double maxRideTime) {
+			this.maxRideTime = OptionalTime.defined(maxRideTime);
 		}
 
 		public void setMaxWaitTime(double maxWaitTime) {
@@ -177,5 +218,8 @@ public class DrtRoute extends AbstractRoute {
 			this.unsharedPath = unsharedPath;
 		}
 
+		public void setLoad(String load) {
+			this.load = load;
+		}
 	}
 }

@@ -19,17 +19,21 @@
 
 package org.matsim.contrib.dvrp.run;
 
-import jakarta.inject.Provider;
+import java.net.URL;
 
 import org.matsim.api.core.v01.network.Network;
+import org.matsim.contrib.common.zones.ZoneSystem;
+import org.matsim.contrib.common.zones.ZoneSystemUtils;
 import org.matsim.contrib.dvrp.fleet.DvrpVehicleLookup;
 import org.matsim.contrib.dvrp.passenger.PassengerModule;
 import org.matsim.contrib.dvrp.router.DvrpGlobalRoutingNetworkProvider;
 import org.matsim.contrib.dvrp.trafficmonitoring.DvrpTravelTimeModule;
 import org.matsim.contrib.dvrp.vrpagent.VrpAgentQueryHelper;
 import org.matsim.contrib.dynagent.run.DynActivityEngine;
+import org.matsim.contrib.zone.skims.DvrpTravelTimeMatrixParams;
 import org.matsim.contrib.zone.skims.FreeSpeedTravelTimeMatrix;
 import org.matsim.contrib.zone.skims.TravelTimeMatrix;
+import org.matsim.core.config.ConfigGroup;
 import org.matsim.core.config.groups.QSimConfigGroup;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.mobsim.framework.MobsimTimer;
@@ -40,6 +44,8 @@ import com.google.inject.Inject;
 import com.google.inject.Singleton;
 import com.google.inject.name.Named;
 import com.google.inject.name.Names;
+
+import jakarta.inject.Provider;
 
 /**
  * This module initialises generic (i.e. not taxi or drt-specific) AND global (not mode-specific) dvrp objects.
@@ -84,8 +90,18 @@ public final class DvrpModule extends AbstractModule {
 			public TravelTimeMatrix get() {
 				var numberOfThreads = getConfig().global().getNumberOfThreads();
 				var params = dvrpConfigGroup.getTravelTimeMatrixParams();
-				return FreeSpeedTravelTimeMatrix.createFreeSpeedMatrix(network, params, numberOfThreads,
+				DvrpTravelTimeMatrixParams matrixParams = dvrpConfigGroup.getTravelTimeMatrixParams();
+				ZoneSystem zoneSystem = ZoneSystemUtils.createZoneSystem(getConfig().getContext(), network,
+					matrixParams.getZoneSystemParams(), getConfig().global().getCoordinateSystem(), zone -> true);
+				
+				if (params.cachePath == null) {
+					return FreeSpeedTravelTimeMatrix.createFreeSpeedMatrix(network, zoneSystem, params, numberOfThreads,
 						qSimConfigGroup.getTimeStepSize());
+				} else {
+					URL cachePath = ConfigGroup.getInputFileURL(getConfig().getContext(), params.cachePath);
+					return FreeSpeedTravelTimeMatrix.createFreeSpeedMatrixFromCache(network, zoneSystem, params, numberOfThreads,
+						qSimConfigGroup.getTimeStepSize(), cachePath);
+				}
 			}
 		}).in(Singleton.class);
 

@@ -21,6 +21,7 @@
 
 package org.matsim.freight.carriers.events;
 
+import java.util.TreeMap;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.events.ActivityEndEvent;
 import org.matsim.api.core.v01.events.Event;
@@ -32,12 +33,10 @@ import org.matsim.freight.carriers.CarrierConstants;
 import org.matsim.freight.carriers.ScheduledTour;
 import org.matsim.vehicles.Vehicle;
 
-import java.util.TreeMap;
-
 /*package-private*/  final class CarrierTourStartEventCreator implements CarrierEventCreator {
 
-	TreeMap<Id<Person>, ActivityEndEvent> endEventMap = new TreeMap<>();
-	TreeMap<Id<Person>, PersonEntersVehicleEvent> personEntersVehicleEventMap = new TreeMap<>();
+	final TreeMap<Id<Person>, ActivityEndEvent> endEventMap = new TreeMap<>();
+	final TreeMap<Id<Person>, PersonEntersVehicleEvent> personEntersVehicleEventMap = new TreeMap<>();
 
 
 	@Override
@@ -69,9 +68,9 @@ import java.util.TreeMap;
 	/**
 	 * Creating the FreightTourStartsEvent
 	 *
-	 * @param personId
-	 * @param carrier
-	 * @param scheduledTour
+	 * @param personId id of the driver (person)
+	 * @param carrier the carrier
+	 * @param scheduledTour the scheduledTour
 	 * @return CarrierTourStartEvent
 	 */
 	private CarrierTourStartEvent createFreightTourStartsEvent(Id<Person> personId, Carrier carrier, ScheduledTour scheduledTour) {

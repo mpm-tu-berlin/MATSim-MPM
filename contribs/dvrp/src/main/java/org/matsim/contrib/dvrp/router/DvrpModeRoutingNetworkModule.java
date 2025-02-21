@@ -20,15 +20,21 @@
 
 package org.matsim.contrib.dvrp.router;
 
+import java.io.File;
+import java.net.URL;
 import java.util.Collections;
 import java.util.Set;
 
 import org.matsim.api.core.v01.network.Network;
+import org.matsim.contrib.common.zones.ZoneSystem;
+import org.matsim.contrib.common.zones.ZoneSystemUtils;
 import org.matsim.contrib.dvrp.run.AbstractDvrpModeModule;
 import org.matsim.contrib.dvrp.run.DvrpConfigGroup;
+import org.matsim.contrib.zone.skims.DvrpTravelTimeMatrixParams;
 import org.matsim.contrib.zone.skims.FreeSpeedTravelTimeMatrix;
 import org.matsim.contrib.zone.skims.TravelTimeMatrix;
 import org.matsim.core.config.Config;
+import org.matsim.core.config.ConfigGroup;
 import org.matsim.core.config.groups.GlobalConfigGroup;
 import org.matsim.core.config.groups.QSimConfigGroup;
 import org.matsim.core.network.NetworkUtils;
@@ -46,6 +52,7 @@ import com.google.inject.name.Names;
  */
 public class DvrpModeRoutingNetworkModule extends AbstractDvrpModeModule {
 	private final boolean useModeFilteredSubnetwork;
+	private final String modalCachePath;
 
 	@Inject
 	private DvrpConfigGroup dvrpConfigGroup;
@@ -56,9 +63,14 @@ public class DvrpModeRoutingNetworkModule extends AbstractDvrpModeModule {
 	@Inject
 	private QSimConfigGroup qSimConfigGroup;
 
-	public DvrpModeRoutingNetworkModule(String mode, boolean useModeFilteredSubnetwork) {
+	public DvrpModeRoutingNetworkModule(String mode, boolean useModeFilteredSubnetwork, String modalCachePath) {
 		super(mode);
 		this.useModeFilteredSubnetwork = useModeFilteredSubnetwork;
+		this.modalCachePath = modalCachePath;
+	}
+
+	public DvrpModeRoutingNetworkModule(String mode, boolean useModeFilteredSubnetwork) {
+		this(mode, useModeFilteredSubnetwork, null);
 	}
 
 	@Override
@@ -78,9 +90,22 @@ public class DvrpModeRoutingNetworkModule extends AbstractDvrpModeModule {
 			//use mode-specific travel time matrix built for this subnetwork
 			//lazily initialised: optimisers may not need it
 			bindModal(TravelTimeMatrix.class).toProvider(modalProvider(
-					getter -> FreeSpeedTravelTimeMatrix.createFreeSpeedMatrix(getter.getModal(Network.class),
-							dvrpConfigGroup.getTravelTimeMatrixParams(), globalConfigGroup.getNumberOfThreads(),
-							qSimConfigGroup.getTimeStepSize()))).in(Singleton.class);
+					getter -> {
+						Network network = getter.getModal(Network.class);
+						DvrpTravelTimeMatrixParams matrixParams = dvrpConfigGroup.getTravelTimeMatrixParams();
+						ZoneSystem zoneSystem = ZoneSystemUtils.createZoneSystem(getConfig().getContext(), network,
+							matrixParams.getZoneSystemParams(), getConfig().global().getCoordinateSystem(), zone -> true);
+						
+						
+						if (modalCachePath == null) {
+							return FreeSpeedTravelTimeMatrix.createFreeSpeedMatrix(network, zoneSystem, matrixParams, globalConfigGroup.getNumberOfThreads(),
+								qSimConfigGroup.getTimeStepSize());
+						} else {
+							URL cachePath = ConfigGroup.getInputFileURL(getConfig().getContext(), modalCachePath);
+							return FreeSpeedTravelTimeMatrix.createFreeSpeedMatrixFromCache(network, zoneSystem, matrixParams, globalConfigGroup.getNumberOfThreads(),
+								qSimConfigGroup.getTimeStepSize(), cachePath);
+						}
+                    })).in(Singleton.class);
 		} else {
 			//use DVRP-routing (dvrp-global) network
 			bindModal(Network.class).to(

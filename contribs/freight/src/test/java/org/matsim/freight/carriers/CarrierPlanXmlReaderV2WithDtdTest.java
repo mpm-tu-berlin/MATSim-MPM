@@ -21,19 +21,17 @@
 
 package org.matsim.freight.carriers;
 
+import java.util.*;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.matsim.api.core.v01.Id;
 import org.matsim.core.gbl.Gbl;
-import org.matsim.freight.carriers.*;
 import org.matsim.freight.carriers.CarrierCapabilities.FleetSize;
 import org.matsim.testcases.MatsimTestUtils;
 import org.matsim.vehicles.Vehicle;
-
-import java.util.*;
 
 public class CarrierPlanXmlReaderV2WithDtdTest  {
 
@@ -43,7 +41,7 @@ public class CarrierPlanXmlReaderV2WithDtdTest  {
 	private Carrier testCarrier;
 
 	@BeforeEach
-	public void setUp() throws Exception{
+	public void setUp() {
 
 		CarrierVehicleTypes carrierVehicleTypes = new CarrierVehicleTypes();
 		new CarrierVehicleTypeReader( carrierVehicleTypes ).readFile( utils.getPackageInputDirectory() + "vehicleTypes_v2.xml" );

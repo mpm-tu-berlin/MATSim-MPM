@@ -21,12 +21,12 @@
 
 package org.matsim.freight.carriers;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.matsim.api.core.v01.Id;
-import org.matsim.freight.carriers.CarrierVehicleTypes;
+import org.matsim.api.core.v01.TransportMode;
 import org.matsim.testcases.MatsimTestUtils;
 import org.matsim.vehicles.*;
 import org.matsim.vehicles.EngineInformation.FuelType;
@@ -39,7 +39,7 @@ public class CarrierVehicleTypeTest {
 	CarrierVehicleTypes types;
 
 	@BeforeEach
-	public void setUp() throws Exception{
+	public void setUp() {
 		final Id<VehicleType> vehicleTypeId = Id.create( "medium", VehicleType.class );
 		VehicleType mediumType = VehicleUtils.getFactory().createVehicleType( vehicleTypeId );
 		{
@@ -48,38 +48,38 @@ public class CarrierVehicleTypeTest {
 			costInformation1.setCostsPerMeter( 1.0 );
 			costInformation1.setCostsPerSecond( 0.5 );
 			EngineInformation engineInformation1 = mediumType.getEngineInformation();
-			engineInformation1.setFuelType( FuelType.diesel );
-			engineInformation1.setFuelConsumption( 0.02 );
+			VehicleUtils.setHbefaTechnology( engineInformation1, "diesel" );
+			VehicleUtils.setFuelConsumptionLitersPerMeter( engineInformation1, 0.02 );
 			VehicleCapacity vehicleCapacity = mediumType.getCapacity();
 			vehicleCapacity.setWeightInTons( 30 );
 			mediumType.setDescription( "Medium Vehicle" ).setMaximumVelocity( 13.89 );
+			mediumType.setNetworkMode(TransportMode.truck);
 			types = new CarrierVehicleTypes();
 			types.getVehicleTypes().put( mediumType.getId(), mediumType );
 		}
 		//Setting up a copy of the one above
 		VehicleType newVehicleType1 = VehicleUtils.getFactory().createVehicleType( Id.create("medium2", VehicleType.class ) );
 		VehicleUtils.copyFromTo( mediumType, newVehicleType1 );
-		VehicleType mediumType2 = newVehicleType1;
-		types.getVehicleTypes().put(mediumType2.getId(), mediumType2);
+		types.getVehicleTypes().put(newVehicleType1.getId(), newVehicleType1);
 
 		//Setting up a smaller one based of the one above and changing all values.
 		final Id<VehicleType> smallTypeId = Id.create( "small", VehicleType.class );
-		VehicleType newVehicleType = VehicleUtils.getFactory().createVehicleType( smallTypeId );
-		VehicleUtils.copyFromTo( mediumType, newVehicleType );
-		VehicleType smallType = newVehicleType ;
+		VehicleType smallType = VehicleUtils.getFactory().createVehicleType( smallTypeId );
+		VehicleUtils.copyFromTo( mediumType, smallType );
 		{
 			CostInformation costInformation = smallType.getCostInformation() ;
 			costInformation.setFixedCost( 25. );
 			costInformation.setCostsPerMeter( 0.75 );
 			costInformation.setCostsPerSecond( 0.25 );
 			EngineInformation engineInformation = smallType.getEngineInformation() ;
-			engineInformation.setFuelType( FuelType.gasoline );
-			engineInformation.setFuelConsumption( 0.015 );
+			VehicleUtils.setHbefaTechnology( engineInformation, "gasoline" );
+			VehicleUtils.setFuelConsumptionLitersPerMeter( engineInformation, 0.015 );
 			VehicleCapacity capacity = smallType.getCapacity() ;
 			capacity.setWeightInTons( 16 ) ;
 //			VehicleType smallType = CarriersUtils.CarrierVehicleTypeBuilder.newInstance( smallTypeId, mediumType )
 			smallType.setDescription( "Small Vehicle" ).setMaximumVelocity( 10.0 ) ;
-			types.getVehicleTypes().put( smallType.getId(), smallType );
+			smallType.setNetworkMode(TransportMode.car);
+			types.getVehicleTypes().put( smallType.getId(), smallType);
 		}
 	}
 
@@ -106,8 +106,8 @@ public class CarrierVehicleTypeTest {
 	@Test
 	void test_whenCreatingTypeMedium_itCreatesEngineInfoCorrectly(){
 		VehicleType medium = types.getVehicleTypes().get(Id.create("medium", org.matsim.vehicles.VehicleType.class ) );
-		Assertions.assertEquals(0.02, medium.getEngineInformation().getFuelConsumption(),0.001);
-		Assertions.assertEquals(FuelType.diesel, medium.getEngineInformation().getFuelType());
+		Assertions.assertEquals(0.02, VehicleUtils.getFuelConsumptionLitersPerMeter(medium.getEngineInformation()));
+		Assertions.assertEquals("diesel", VehicleUtils.getHbefaTechnology(medium.getEngineInformation()));
 	}
 
 	@Test
@@ -140,8 +140,8 @@ public class CarrierVehicleTypeTest {
 	@Test
 	void test_whenCopyingTypeMedium_itCopiesEngineInfoCorrectly(){
 		VehicleType medium2 = types.getVehicleTypes().get(Id.create("medium2", org.matsim.vehicles.VehicleType.class ) );
-		Assertions.assertEquals(0.02, medium2.getEngineInformation().getFuelConsumption(),0.001);
-		Assertions.assertEquals(FuelType.diesel, medium2.getEngineInformation().getFuelType());
+		Assertions.assertEquals(0.02, VehicleUtils.getFuelConsumptionLitersPerMeter(medium2.getEngineInformation()));
+		Assertions.assertEquals("diesel", VehicleUtils.getHbefaTechnology(medium2.getEngineInformation()));
 	}
 
 	@Test
@@ -174,8 +174,8 @@ public class CarrierVehicleTypeTest {
 	@Test
 	void test_whenModifyingTypeSmall_itModifiesEngineInfoCorrectly(){
 		VehicleType small = types.getVehicleTypes().get(Id.create("small", org.matsim.vehicles.VehicleType.class ) );
-		Assertions.assertEquals(0.015, small.getEngineInformation().getFuelConsumption(),0.001);
-		Assertions.assertEquals(FuelType.gasoline, small.getEngineInformation().getFuelType());
+		Assertions.assertEquals(0.015, VehicleUtils.getFuelConsumptionLitersPerMeter(small.getEngineInformation()));
+		Assertions.assertEquals("gasoline", VehicleUtils.getHbefaTechnology(small.getEngineInformation()));
 	}
 
 	@Test

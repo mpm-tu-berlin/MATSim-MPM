@@ -30,6 +30,7 @@ import org.matsim.contrib.signals.data.SignalsDataLoader;
 import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.RoutingConfigGroup;
 import org.matsim.core.controler.*;
 import org.matsim.core.controler.OutputDirectoryHierarchy.OverwriteFileSetting;
 import org.matsim.core.events.EventsUtils;
@@ -38,8 +39,7 @@ import org.matsim.core.mobsim.qsim.QSimBuilder;
 import org.matsim.core.scenario.ScenarioUtils;
 import org.matsim.testcases.MatsimTestUtils;
 import org.matsim.utils.eventsfilecomparison.EventsFileComparator;
-
-import static org.matsim.utils.eventsfilecomparison.EventsFileComparator.*;
+import org.matsim.utils.eventsfilecomparison.ComparisonResult;
 
 /**
  * @author aneumann
@@ -78,6 +78,8 @@ public class TravelTimeFourWaysTest {
 		conf.network().setLaneDefinitionsFile("testLaneDefinitions_v2.0.xml");
 		conf.qsim().setUseLanes(true);
 	    conf.qsim().setUsingFastCapacityUpdate(false);
+		conf.routing().setNetworkRouteConsistencyCheck(RoutingConfigGroup.NetworkRouteConsistencyCheck.disable);
+
 
 		SignalSystemsConfigGroup signalsConfig = ConfigUtils.addOrGetModule(conf, SignalSystemsConfigGroup.GROUP_NAME, SignalSystemsConfigGroup.class );
 		signalsConfig.setUseSignalSystems(true);
@@ -125,7 +127,7 @@ public class TravelTimeFourWaysTest {
 
 		eventsXmlWriter.closeFile();
 //	    Assert.assertEquals("different events files", EventsFileComparator.compareAndReturnInt(this.testUtils.getInputDirectory() + EVENTSFILE, eventsOut), 0);
-		Assertions.assertEquals( Result.FILES_ARE_EQUAL, new EventsFileComparator().setIgnoringCoordinates( true ).runComparison( this.testUtils.getInputDirectory() + EVENTSFILE, eventsOut ) );
+		Assertions.assertEquals( ComparisonResult.FILES_ARE_EQUAL, new EventsFileComparator().setIgnoringCoordinates( true ).runComparison( this.testUtils.getInputDirectory() + EVENTSFILE, eventsOut ) );
 	}
 
 }

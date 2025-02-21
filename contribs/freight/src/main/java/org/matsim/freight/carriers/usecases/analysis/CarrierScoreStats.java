@@ -21,6 +21,10 @@
 
 package org.matsim.freight.carriers.usecases.analysis;
 
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.Locale;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.matsim.core.controler.events.IterationEndsEvent;
@@ -34,11 +38,6 @@ import org.matsim.core.utils.io.IOUtils;
 import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.carriers.CarrierPlan;
 import org.matsim.freight.carriers.Carriers;
-
-import java.io.BufferedWriter;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.util.Locale;
 
 /**
  * As you can see, it is basically a copy of {@link org.matsim.analysis.ScoreStatsControlerListener}. However, it is modified to score {@link Carrier}s
@@ -81,7 +80,6 @@ public class CarrierScoreStats implements StartupListener, IterationEndsListener
 	 *
 	 * @param filename including the path, excluding the file type extension
 	 * @param createPNG true if in every iteration, the scorestats should be visualized in a graph and written to disk.
-	 * @throws UncheckedIOException
 	 */
 	public CarrierScoreStats(Carriers carriers, final String filename, final boolean createPNG) throws UncheckedIOException {
 		this.carriers = carriers;
@@ -178,10 +176,10 @@ public class CarrierScoreStats implements StartupListener, IterationEndsListener
 				nofAvgScores++;
 			}
 		}
-		log.info("-- avg. score of the executed plan of each agent: " + (sumExecutedScores / nofExecutedScores));
-		log.info("-- avg. score of the worst plan of each agent: " + (sumScoreWorst / nofScoreWorst));
-		log.info("-- avg. of the avg. plan score per agent: " + (sumAvgScores / nofAvgScores));
-		log.info("-- avg. score of the best plan of each agent: " + (sumScoreBest / nofScoreBest));
+		log.info("-- avg. score of the executed plan of each agent: {}", sumExecutedScores / nofExecutedScores);
+		log.info("-- avg. score of the worst plan of each agent: {}", sumScoreWorst / nofScoreWorst);
+		log.info("-- avg. of the avg. plan score per agent: {}", sumAvgScores / nofAvgScores);
+		log.info("-- avg. score of the best plan of each agent: {}", sumScoreBest / nofScoreBest);
 
 		try {
 			this.out.write(event.getIteration() + "\t" + (sumExecutedScores / nofExecutedScores) + "\t" +

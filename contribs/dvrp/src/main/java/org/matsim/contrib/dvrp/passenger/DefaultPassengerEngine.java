@@ -53,6 +53,8 @@ import jakarta.inject.Provider;
 public final class DefaultPassengerEngine implements PassengerEngine, PassengerRequestRejectedEventHandler {
 
 	private final String mode;
+	private final Set<String> departureModes;
+	
 	private final MobsimTimer mobsimTimer;
 	private final EventsManager eventsManager;
 
@@ -79,9 +81,10 @@ public final class DefaultPassengerEngine implements PassengerEngine, PassengerR
 	private final Map<Id<PassengerGroupIdentifier.PassengerGroup>, List<MobsimPassengerAgent>> groupDepartureStage = new LinkedHashMap<>();
 
 
-	DefaultPassengerEngine(String mode, EventsManager eventsManager, MobsimTimer mobsimTimer, PassengerRequestCreator requestCreator,
+	DefaultPassengerEngine(String mode, Set<String> departureModes, EventsManager eventsManager, MobsimTimer mobsimTimer, PassengerRequestCreator requestCreator,
 						   VrpOptimizer optimizer, Network network, PassengerRequestValidator requestValidator, AdvanceRequestProvider advanceRequestProvider, PassengerGroupIdentifier passengerGroupIdentifier) {
 		this.mode = mode;
+		this.departureModes = departureModes;
 		this.mobsimTimer = mobsimTimer;
 		this.requestCreator = requestCreator;
 		this.optimizer = optimizer;
@@ -150,7 +153,12 @@ public final class DefaultPassengerEngine implements PassengerEngine, PassengerR
 	private void handleDepartureImpl(double now, List<MobsimPassengerAgent> group) {
 		List<Id<Person>> groupIds = group.stream().map(Identifiable::getId).toList();
 
-		MobsimPassengerAgent representative = group.get(0);
+		List<Route> routes = group.stream().map(agent -> {
+			Leg leg = (Leg)((PlanAgent) agent).getCurrentPlanElement();
+			return leg.getRoute();
+		}).toList();
+
+		MobsimPassengerAgent representative = group.getFirst();
 
 		Id<Link> fromLinkId = representative.getCurrentLinkId();
 		Id<Link> toLinkId = representative.getDestinationLinkId();
@@ -163,9 +171,8 @@ public final class DefaultPassengerEngine implements PassengerEngine, PassengerR
 		PassengerRequest request = advanceRequestProvider.retrieveRequest(representative, leg);
 
 		if (request == null) { // immediate request
-			Route route = leg.getRoute();
 			request = requestCreator.createRequest(internalPassengerHandling.createRequestId(),
-					groupIds, route, getLink(fromLinkId), getLink(toLinkId), now, now);
+					groupIds, routes, getLink(fromLinkId), getLink(toLinkId), now, now);
 
 			// must come before validateAndSubmitRequest (to come before rejection event)
 			eventsManager.processEvent(new PassengerWaitingEvent(now, mode, request.getId(), groupIds));
@@ -197,7 +204,7 @@ public final class DefaultPassengerEngine implements PassengerEngine, PassengerR
 
 	@Override
 	public boolean handleDeparture(double now, MobsimAgent agent, Id<Link> fromLinkId) {
-		if (!agent.getMode().equals(mode)) {
+		if (!departureModes.contains(agent.getMode())) {
 			return false;
 		}
 
@@ -285,8 +292,12 @@ public final class DefaultPassengerEngine implements PassengerEngine, PassengerR
 			rejectedRequestsEvents.add(event);
 		}
 	}
-
+	
 	public static Provider<PassengerEngine> createProvider(String mode) {
+		return createProvider(mode, Collections.singleton(mode));
+	}
+
+	public static Provider<PassengerEngine> createProvider(String mode, Set<String> departureModes) {
 		return new ModalProviders.AbstractProvider<>(mode, DvrpModes::mode) {
 			@Inject
 			private EventsManager eventsManager;
@@ -296,7 +307,7 @@ public final class DefaultPassengerEngine implements PassengerEngine, PassengerR
 
 			@Override
 			public DefaultPassengerEngine get() {
-				return new DefaultPassengerEngine(getMode(), eventsManager, mobsimTimer, getModalInstance(PassengerRequestCreator.class),
+				return new DefaultPassengerEngine(getMode(), departureModes, eventsManager, mobsimTimer, getModalInstance(PassengerRequestCreator.class),
 					getModalInstance(VrpOptimizer.class), getModalInstance(Network.class), getModalInstance(PassengerRequestValidator.class),
 					getModalInstance(AdvanceRequestProvider.class), getModalInstance(PassengerGroupIdentifier.class));
 			}

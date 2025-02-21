@@ -21,6 +21,8 @@
 
 package org.matsim.freight.carriers.mobsim;
 
+import java.util.HashSet;
+import java.util.Set;
 import org.junit.jupiter.api.Disabled;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Link;
@@ -37,13 +39,10 @@ import org.matsim.deprecated.scoring.ScoringFunctionAccumulator.BasicScoring;
 import org.matsim.deprecated.scoring.ScoringFunctionAccumulator.LegScoring;
 import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.carriers.CarrierConstants;
-import org.matsim.freight.carriers.CarriersUtils;
 import org.matsim.freight.carriers.CarrierVehicle;
-import org.matsim.freight.carriers.controler.CarrierScoringFunctionFactory;
+import org.matsim.freight.carriers.CarriersUtils;
+import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
 import org.matsim.vehicles.Vehicle;
-
-import java.util.HashSet;
-import java.util.Set;
 
 @Disabled
 public class ScoringFunctionFactoryForTests implements CarrierScoringFunctionFactory{
@@ -55,20 +54,17 @@ public class ScoringFunctionFactoryForTests implements CarrierScoringFunctionFac
 			private final Carrier carrier;
 			private final Set<CarrierVehicle> employedVehicles;
 			private Leg currentLeg = null;
-			private double currentLegStartTime;
 
-			public DriverLegScoring(Carrier carrier, Network network) {
+		 public DriverLegScoring(Carrier carrier, Network network) {
 				super();
 				this.network = network;
 				this.carrier = carrier;
-				employedVehicles = new HashSet<CarrierVehicle>();
+				employedVehicles = new HashSet<>();
 			}
 
 
 			@Override
-			public void finish() {
-
-			}
+			public void finish() {}
 
 
 			@Override
@@ -87,20 +83,16 @@ public class ScoringFunctionFactoryForTests implements CarrierScoringFunctionFac
 			@Override
 			public void startLeg(double time, Leg leg) {
 				currentLeg = leg;
-				currentLegStartTime = time;
 			}
 
 
 			@Override
 			public void endLeg(double time) {
-				if(currentLeg.getRoute() instanceof NetworkRoute){
-					NetworkRoute nRoute = (NetworkRoute) currentLeg.getRoute();
+				if(currentLeg.getRoute() instanceof NetworkRoute nRoute){
 					Id<Vehicle> vehicleId = nRoute.getVehicleId();
 					CarrierVehicle vehicle = CarriersUtils.getCarrierVehicle(carrier, vehicleId);
 					Gbl.assertNotNull(vehicle);
-					if(!employedVehicles.contains(vehicle)){
-						employedVehicles.add(vehicle);
-					}
+					employedVehicles.add(vehicle);
 					double distance = 0.0;
 					if(currentLeg.getRoute() instanceof NetworkRoute){
 						distance += network.getLinks().get(currentLeg.getRoute().getStartLinkId()).getLength();
@@ -136,7 +128,7 @@ public class ScoringFunctionFactoryForTests implements CarrierScoringFunctionFac
 
 		 double startTimeOfEnd;
 
-		 double amountPerHour = 20.0;
+		 final double amountPerHour = 20.0;
 
 		@Override
 		public void startActivity(double time, Activity act) {
@@ -174,7 +166,7 @@ public class ScoringFunctionFactoryForTests implements CarrierScoringFunctionFac
 
 	static class NumberOfToursAward implements BasicScoring{
 
-		private Carrier carrier;
+		private final Carrier carrier;
 
 		public NumberOfToursAward(Carrier carrier) {
 			super();
@@ -199,7 +191,7 @@ public class ScoringFunctionFactoryForTests implements CarrierScoringFunctionFac
 
 	}
 
-	 private Network network;
+	 private final Network network;
 
 	public ScoringFunctionFactoryForTests(Network network) {
 		super();

@@ -4,6 +4,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.matsim.api.core.v01.Coord;
@@ -22,6 +23,8 @@ import org.matsim.contrib.dvrp.fleet.FleetSpecification;
 import org.matsim.contrib.dvrp.fleet.FleetSpecificationImpl;
 import org.matsim.contrib.dvrp.fleet.Fleets;
 import org.matsim.contrib.dvrp.fleet.ImmutableDvrpVehicleSpecification;
+import org.matsim.contrib.dvrp.load.DvrpLoadModule;
+import org.matsim.contrib.dvrp.load.DvrpLoadParams;
 import org.matsim.contrib.dvrp.optimizer.Request;
 import org.matsim.contrib.dvrp.optimizer.VrpOptimizer;
 import org.matsim.contrib.dvrp.passenger.PassengerRequest;
@@ -51,6 +54,7 @@ import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.config.groups.QSimConfigGroup;
 import org.matsim.core.config.groups.QSimConfigGroup.StarttimeInterpretation;
+import org.matsim.core.config.groups.RoutingConfigGroup;
 import org.matsim.core.controler.Controler;
 import org.matsim.core.controler.OutputDirectoryHierarchy.OverwriteFileSetting;
 import org.matsim.core.mobsim.framework.MobsimTimer;
@@ -124,7 +128,7 @@ public class DiversionTest {
 
 		{
 			/* Create some necessary configuration for the test */
-
+			config.routing().setNetworkRouteConsistencyCheck(RoutingConfigGroup.NetworkRouteConsistencyCheck.disable);
 			config.controller().setOverwriteFileSetting(OverwriteFileSetting.deleteDirectoryIfExists);
 			config.controller().setLastIteration(0);
 
@@ -251,6 +255,7 @@ public class DiversionTest {
 
 			DvrpModes.registerDvrpMode(binder(), getMode());
 			install(new DvrpModeRoutingNetworkModule(getMode(), false));
+			install(new DvrpLoadModule(getMode(), new DvrpLoadParams()));
 
 			/*
 			 * Add handler to track the actual arrival time in simulation
@@ -287,7 +292,7 @@ public class DiversionTest {
 				return Fleets.createDefaultFleet(fleetSpecification, getter.getModal(Network.class).getLinks()::get);
 			})).in(Singleton.class);
 
-			bindModal(VehicleType.class).toInstance(VehicleUtils.getDefaultVehicleType());
+			bindModal(VehicleType.class).toInstance(VehicleUtils.createDefaultVehicleType());
 
 			install(new VrpAgentSourceQSimModule(getMode()));
 
@@ -454,6 +459,7 @@ public class DiversionTest {
 
 			config.controller().setOverwriteFileSetting(OverwriteFileSetting.deleteDirectoryIfExists);
 			config.controller().setLastIteration(0);
+			config.routing().setNetworkRouteConsistencyCheck(RoutingConfigGroup.NetworkRouteConsistencyCheck.disable);
 
 			config.qsim().setStartTime(0.0);
 			config.qsim().setSimStarttimeInterpretation(StarttimeInterpretation.onlyUseStarttime);

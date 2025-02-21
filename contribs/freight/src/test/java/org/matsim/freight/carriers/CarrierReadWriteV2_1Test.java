@@ -21,14 +21,10 @@
 
 package org.matsim.freight.carriers;
 
+import java.util.Collections;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
-import org.matsim.freight.carriers.*;
 import org.matsim.testcases.MatsimTestUtils;
-
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.util.Collections;
 
 public class CarrierReadWriteV2_1Test {
 
@@ -36,7 +32,7 @@ public class CarrierReadWriteV2_1Test {
 	private MatsimTestUtils utils = new MatsimTestUtils();
 
 	@Test
-	void readWriteTest() throws FileNotFoundException, IOException {
+	void readWriteTest() {
 
 		Carriers carriers = new Carriers(Collections.emptyList());
 		CarrierVehicleTypes carrierVehicleTypes = new CarrierVehicleTypes();
@@ -45,7 +41,7 @@ public class CarrierReadWriteV2_1Test {
 		String outputFilename = utils.getOutputDirectory() + "outputCarriers.xml";
 
 		CarrierVehicleTypeReader vehicleTypeReader = new CarrierVehicleTypeReader(carrierVehicleTypes);
-		vehicleTypeReader.readFile(utils.getClassInputDirectory() + "vehicles.xml");
+		vehicleTypeReader.readFile(utils.getPackageInputDirectory() + "vehicleTypes_v2.xml");
 
 		CarrierPlanXmlReader carrierReader = new CarrierPlanXmlReader(carriers, carrierVehicleTypes);
 		carrierReader.readFile(inputFilename);
@@ -57,7 +53,7 @@ public class CarrierReadWriteV2_1Test {
 
 
 	@Test
-	void readWriteReadTest() throws FileNotFoundException, IOException {
+	void readWriteReadTest() {
 
 		Carriers carriers = new Carriers(Collections.emptyList());
 		CarrierVehicleTypes carrierVehicleTypes = new CarrierVehicleTypes();
@@ -67,7 +63,7 @@ public class CarrierReadWriteV2_1Test {
 		String outputFilename2 = utils.getOutputDirectory() + "/outputCarriers2.xml";
 
 		CarrierVehicleTypeReader vehicleTypeReader = new CarrierVehicleTypeReader(carrierVehicleTypes);
-		vehicleTypeReader.readFile(utils.getClassInputDirectory() + "vehicles.xml");
+		vehicleTypeReader.readFile(utils.getPackageInputDirectory() + "vehicleTypes_v2.xml");
 
 		CarrierPlanXmlReader reader1 = new CarrierPlanXmlReader(carriers, carrierVehicleTypes);
 		reader1.readFile(utils.getClassInputDirectory() + "carriers.xml");

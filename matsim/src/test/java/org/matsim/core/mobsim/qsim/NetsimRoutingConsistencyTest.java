@@ -46,6 +46,7 @@ import org.matsim.api.core.v01.population.Population;
 import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.config.groups.RoutingConfigGroup;
 import org.matsim.core.config.groups.ScoringConfigGroup.ActivityParams;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
@@ -165,9 +166,9 @@ import org.matsim.vehicles.VehicleUtils;
 			person.addPlan(plan);
 
 			Vehicle vehicle = scenario.getVehicles().getFactory().createVehicle(VehicleUtils.createVehicleId(person, TransportMode.car),
-					VehicleUtils.getDefaultVehicleType());
+					VehicleUtils.createDefaultVehicleType());
 			VehicleUtils.insertVehicleIdsIntoAttributes(person, Map.of(TransportMode.car, vehicle.getId()));
-			scenario.getVehicles().addVehicleType(VehicleUtils.getDefaultVehicleType());
+			scenario.getVehicles().addVehicleType(VehicleUtils.createDefaultVehicleType());
 			scenario.getVehicles().addVehicle(vehicle);
 
 			TravelTime travelTime = new FreeSpeedTravelTime();
@@ -213,7 +214,7 @@ import org.matsim.vehicles.VehicleUtils;
 		@Test
 	 void testRoutingVsSimulationFullStack() {
 			Config config = ConfigUtils.createConfig();
-
+			config.routing().setNetworkRouteConsistencyCheck(RoutingConfigGroup.NetworkRouteConsistencyCheck.disable);
 			config.controller().setOverwriteFileSetting(OverwriteFileSetting.deleteDirectoryIfExists);
 			config.controller().setLastIteration(0);
 
@@ -251,8 +252,8 @@ import org.matsim.vehicles.VehicleUtils;
 			Arrays.asList(link12, link23, link34, link45).forEach(l -> l.setFreespeed(10.0));
 
 			Vehicle vehicle = scenario.getVehicles().getFactory().createVehicle(Id.createVehicleId("P"),
-					VehicleUtils.getDefaultVehicleType());
-			scenario.getVehicles().addVehicleType(VehicleUtils.getDefaultVehicleType());
+					VehicleUtils.createDefaultVehicleType());
+			scenario.getVehicles().addVehicleType(VehicleUtils.createDefaultVehicleType());
 			scenario.getVehicles().addVehicle(vehicle);
 
 			Population population = scenario.getPopulation();

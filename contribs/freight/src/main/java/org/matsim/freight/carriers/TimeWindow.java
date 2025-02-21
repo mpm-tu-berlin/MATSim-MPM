@@ -24,7 +24,6 @@ package org.matsim.freight.carriers;
 
 import org.matsim.core.utils.misc.Time;
 
-
 /**
  * Q: What happens/should happen if the time window is not sufficient to unload, or
  * the vehicle arrives after the time window?
@@ -96,11 +95,9 @@ public class TimeWindow {
 	@Override
 	public int hashCode(){
 		int result = 59;
-		long startLong  = Double.doubleToLongBits(start);
-		int startHash = (int) (startLong^(startLong>>>32));
+		int startHash = Double.hashCode(start);
 		result = 31 * result + startHash;
-		long endLong  = Double.doubleToLongBits(end);
-		int endHash = (int) (endLong^(endLong>>>32));
+		int endHash = Double.hashCode(end);
 		result = 31 * result + endHash;
 		return result;
 	}

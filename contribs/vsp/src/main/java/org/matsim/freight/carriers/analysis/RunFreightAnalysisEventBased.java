@@ -35,7 +35,6 @@ import org.matsim.core.events.MatsimEventsReader;
 import org.matsim.core.scenario.ScenarioUtils;
 
 import java.io.File;
-import java.io.IOException;
 
 
 /**
@@ -48,11 +47,15 @@ import java.io.IOException;
  *
  * @author kturner (Kai Martins-Turner)
  */
+@Deprecated(since = "apr23", forRemoval = true)
 public class RunFreightAnalysisEventBased {
 
+	//What are the settings?
+	protected static final String fileExtension = ".csv";
+	protected static final String delimiter = ";";
 	private static final Logger log = LogManager.getLogger(RunFreightAnalysisEventBased.class);
 
-	//Were is your simulation output, that should be analysed?
+	//Where is your simulation output, that should be analysed?
 	private final String SIM_OUTPUT_PATH ;
 	private final String ANALYSIS_OUTPUT_PATH;
 	private final String GLOBAL_CRS;
@@ -68,7 +71,7 @@ public class RunFreightAnalysisEventBased {
 		this.GLOBAL_CRS = globalCrs;
 	}
 
-	public void runAnalysis() throws IOException {
+	public void runAnalysis() throws Exception {
 
 		Config config = ConfigUtils.createConfig();
 		config.vehicles().setVehiclesFile(SIM_OUTPUT_PATH + "output_allVehicles.xml.gz");
@@ -81,7 +84,7 @@ public class RunFreightAnalysisEventBased {
 		//freight settings
 		FreightCarriersConfigGroup freightCarriersConfigGroup = ConfigUtils.addOrGetModule( config, FreightCarriersConfigGroup.class ) ;
 		freightCarriersConfigGroup.setCarriersFile( SIM_OUTPUT_PATH + "output_carriers.xml.gz");
-		freightCarriersConfigGroup.setCarriersVehicleTypesFile(SIM_OUTPUT_PATH + "output_allVehicles.xml.gz");
+		freightCarriersConfigGroup.setCarriersVehicleTypesFile(SIM_OUTPUT_PATH + "output_carriersVehicleTypes.xml.gz");
 
 		//Were to store the analysis output?
 		String analysisOutputDirectory = ANALYSIS_OUTPUT_PATH;
@@ -98,18 +101,24 @@ public class RunFreightAnalysisEventBased {
 		//load carriers according to freight config
 		CarriersUtils.loadCarriersAccordingToFreightConfig( scenario );
 
+		//Log analysis
+		//added bei AUE
+		//ToDo: add log analysis for jsprit
+		LogFileAnalysis logFileAnalysis = new LogFileAnalysis(log,SIM_OUTPUT_PATH,analysisOutputDirectory);
+		logFileAnalysis.runLogFileAnalysis();
 
 		// CarrierPlanAnalysis
-		CarrierPlanAnalysis carrierPlanAnalysis = new CarrierPlanAnalysis(CarriersUtils.getCarriers(scenario));
-		carrierPlanAnalysis.runAnalysisAndWriteStats(analysisOutputDirectory);
+		//CarrierPlanAnalysis carrierPlanAnalysis = new CarrierPlanAnalysis(CarriersUtils.getCarriers(scenario));
+		//carrierPlanAnalysis.runAnalysisAndWriteStats(analysisOutputDirectory);
 
 		// Prepare eventsManager - start of event based Analysis;
 		EventsManager eventsManager = EventsUtils.createEventsManager();
 
-		FreightTimeAndDistanceAnalysisEventsHandler freightTimeAndDistanceAnalysisEventsHandler = new FreightTimeAndDistanceAnalysisEventsHandler(scenario);
+		FreightTimeAndDistanceAnalysisEventsHandler freightTimeAndDistanceAnalysisEventsHandler =
+				new FreightTimeAndDistanceAnalysisEventsHandler(delimiter, scenario);
 		eventsManager.addHandler(freightTimeAndDistanceAnalysisEventsHandler);
 
-		CarrierLoadAnalysis carrierLoadAnalysis = new CarrierLoadAnalysis(CarriersUtils.getCarriers(scenario));
+		CarrierLoadAnalysis carrierLoadAnalysis = new CarrierLoadAnalysis(delimiter, CarriersUtils.getCarriers(scenario));
 		eventsManager.addHandler(carrierLoadAnalysis);
 
 		eventsManager.initProcessing();
@@ -120,8 +129,12 @@ public class RunFreightAnalysisEventBased {
 
 		log.info("Analysis completed.");
 		log.info("Writing output...");
-		freightTimeAndDistanceAnalysisEventsHandler.writeTravelTimeAndDistance(analysisOutputDirectory, scenario);
+		freightTimeAndDistanceAnalysisEventsHandler.writeTravelTimeAndDistancePerVehicle(analysisOutputDirectory, scenario);
 		freightTimeAndDistanceAnalysisEventsHandler.writeTravelTimeAndDistancePerVehicleType(analysisOutputDirectory, scenario);
+		freightTimeAndDistanceAnalysisEventsHandler.writeTravelTimeAndDistancePerCarrier(analysisOutputDirectory, scenario);
+		CarrierPlanAnalysis carrierPlanAnalysis = new CarrierPlanAnalysis(delimiter, CarriersUtils.getCarriers(scenario));
+		carrierPlanAnalysis.runAnalysisAndWriteStats(analysisOutputDirectory, CarriersAnalysis.CarrierAnalysisType.carriersPlans);
+
 		carrierLoadAnalysis.writeLoadPerVehicle(analysisOutputDirectory, scenario);
 	}
 

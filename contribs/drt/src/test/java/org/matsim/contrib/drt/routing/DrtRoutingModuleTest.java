@@ -21,6 +21,7 @@ package org.matsim.contrib.drt.routing;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -36,9 +37,14 @@ import org.matsim.api.core.v01.population.Person;
 import org.matsim.api.core.v01.population.Plan;
 import org.matsim.api.core.v01.population.PlanElement;
 import org.matsim.api.core.v01.population.PopulationFactory;
+import org.matsim.contrib.drt.optimizer.constraints.DefaultDrtOptimizationConstraintsSet;
 import org.matsim.contrib.drt.run.DrtConfigGroup;
 import org.matsim.contrib.drt.run.DrtControlerCreator;
 import org.matsim.contrib.drt.run.MultiModeDrtConfigGroup;
+import org.matsim.contrib.dvrp.load.DvrpLoadType;
+import org.matsim.contrib.dvrp.load.IntegerLoadType;
+import org.matsim.contrib.dvrp.passenger.DefaultDvrpLoadFromTrip;
+import org.matsim.contrib.dvrp.passenger.DvrpLoadFromTrip;
 import org.matsim.contrib.dvrp.router.ClosestAccessEgressFacilityFinder;
 import org.matsim.contrib.dvrp.router.DefaultMainLegRouter;
 import org.matsim.contrib.dvrp.router.DvrpRoutingModule;
@@ -80,9 +86,15 @@ public class DrtRoutingModuleTest {
 		DrtConfigGroup drtCfg = DrtConfigGroup.getSingleModeDrtConfig(scenario.getConfig());
 		String drtMode = "DrtX";
 		drtCfg.mode = drtMode;
-		drtCfg.maxTravelTimeAlpha = 1.5;
-		drtCfg.maxTravelTimeBeta = 5 * 60;
-		drtCfg.maxWaitTime = 5 * 60;
+		DefaultDrtOptimizationConstraintsSet defaultConstraintsSet =
+				(DefaultDrtOptimizationConstraintsSet) drtCfg.addOrGetDrtOptimizationConstraintsParams()
+						.addOrGetDefaultDrtOptimizationConstraintsSet();
+		defaultConstraintsSet.maxTravelTimeAlpha = 1.5;
+		defaultConstraintsSet.maxTravelTimeBeta = 5 * 60;
+		defaultConstraintsSet.maxWaitTime = 5 * 60;
+
+		DvrpLoadType loadType = new IntegerLoadType("passengers");
+		DvrpLoadFromTrip loadCreator = new DefaultDvrpLoadFromTrip(loadType, "passengers");
 
 		ImmutableMap<Id<DrtStopFacility>, DrtStopFacility> drtStops = scenario.getTransitSchedule()
 				.getFacilities()
@@ -91,10 +103,14 @@ public class DrtRoutingModuleTest {
 				.map(DrtStopFacilityImpl::createFromFacility)
 				.collect(ImmutableMap.toImmutableMap(DrtStopFacility::getId, f -> f));
 
-		AccessEgressFacilityFinder stopFinder = new ClosestAccessEgressFacilityFinder(drtCfg.maxWalkDistance,
+		AccessEgressFacilityFinder stopFinder = new ClosestAccessEgressFacilityFinder(
+				defaultConstraintsSet.maxWalkDistance,
 				scenario.getNetwork(), QuadTrees.createQuadTree(drtStops.values()));
 		DrtRouteCreator drtRouteCreator = new DrtRouteCreator(drtCfg, scenario.getNetwork(),
-				new SpeedyDijkstraFactory(), new FreeSpeedTravelTime(), TimeAsTravelDisutility::new);
+				new SpeedyDijkstraFactory(), new FreeSpeedTravelTime(), TimeAsTravelDisutility::new,
+				new DefaultDrtRouteConstraintsCalculator(drtCfg, 
+						(departureTime, accessActLink, egressActLink, person, tripAttributes) -> Optional.of(defaultConstraintsSet)),
+						loadCreator, loadType);
 		DefaultMainLegRouter mainRouter = new DefaultMainLegRouter(drtMode, scenario.getNetwork(),
 				scenario.getPopulation().getFactory(), drtRouteCreator);
 		DvrpRoutingModule dvrpRoutingModule = new DvrpRoutingModule(mainRouter, walkRouter, walkRouter, stopFinder,
@@ -259,7 +275,7 @@ public class DrtRoutingModuleTest {
 	private Scenario createTestScenario() {
 		Config config = ConfigUtils.createConfig();
 		DrtConfigGroup drtConfigGroup = new DrtConfigGroup();
-		drtConfigGroup.maxWalkDistance = 200;
+		drtConfigGroup.addOrGetDrtOptimizationConstraintsParams().addOrGetDefaultDrtOptimizationConstraintsSet().maxWalkDistance = 200;
 		drtConfigGroup.transitStopFile = utils.getClassInputDirectory() + "testCottbus/drtstops.xml.gz";
 		MultiModeDrtConfigGroup multiModeDrtConfigGroup = new MultiModeDrtConfigGroup();
 		multiModeDrtConfigGroup.addParameterSet(drtConfigGroup);

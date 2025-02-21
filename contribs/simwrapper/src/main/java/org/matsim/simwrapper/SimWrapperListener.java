@@ -11,13 +11,11 @@ import org.matsim.core.controler.events.StartupEvent;
 import org.matsim.core.controler.listener.ShutdownListener;
 import org.matsim.core.controler.listener.StartupListener;
 
+import javax.annotation.Nullable;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.ServiceLoader;
+import java.util.*;
 import java.util.stream.StreamSupport;
 
 /**
@@ -31,12 +29,21 @@ public class SimWrapperListener implements StartupListener, ShutdownListener {
 	 */
 	public static double PRIORITY = -1000;
 	private final SimWrapper simWrapper;
+	private final Set<Dashboard> bindings;
 	private final Config config;
 
 	@Inject
-	public SimWrapperListener(SimWrapper simWrapper, Config config) {
+	public SimWrapperListener(SimWrapper simWrapper, Set<Dashboard> bindings, Config config) {
 		this.simWrapper = simWrapper;
+		this.bindings = bindings;
 		this.config = config;
+	}
+
+	/**
+	 * Create a new listener with no default bindings.
+	 */
+	public SimWrapperListener(SimWrapper simWrapper, Config config) {
+		this(simWrapper, Collections.emptySet(), config);
 	}
 
 	@Override
@@ -69,6 +76,9 @@ public class SimWrapperListener implements StartupListener, ShutdownListener {
 			}
 		}
 
+		// Lambda provider which uses dashboards from bindings
+		addFromProvider(config, List.of((c, sw) -> new ArrayList<>(bindings)));
+
 		// Dashboard provider services
 		if (config.defaultDashboards != SimWrapperConfigGroup.Mode.disabled) {
 			ServiceLoader<DashboardProvider> loader = ServiceLoader.load(DashboardProvider.class);
@@ -94,6 +104,9 @@ public class SimWrapperListener implements StartupListener, ShutdownListener {
 			for (Dashboard d : provider.getDashboards(this.config, this.simWrapper)) {
 
 				if (config.exclude.contains(d.getClass().getSimpleName()) || config.exclude.contains(d.getClass().getName()))
+					continue;
+
+				if (!config.include.isEmpty() && (!config.include.contains(d.getClass().getSimpleName()) && !config.include.contains(d.getClass().getName())))
 					continue;
 
 				if (!simWrapper.hasDashboard(d.getClass(), d.context()) || d instanceof Dashboard.Customizable) {
@@ -134,8 +147,12 @@ public class SimWrapperListener implements StartupListener, ShutdownListener {
 	 * Run dashboard creation and execution. This method is useful when used outside MATSim.
 	 */
 	public void run(Path output) throws IOException {
+		run(output, null);
+	}
+
+	void run(Path output, @Nullable String configPath) throws IOException {
 		generate(output);
-		simWrapper.run(output);
+		simWrapper.run(output, configPath);
 	}
 
 }

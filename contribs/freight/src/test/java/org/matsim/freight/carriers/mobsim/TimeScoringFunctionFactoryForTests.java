@@ -22,6 +22,8 @@
 package org.matsim.freight.carriers.mobsim;
 
 import jakarta.inject.Inject;
+import java.util.HashSet;
+import java.util.Set;
 import org.junit.jupiter.api.Disabled;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.network.Link;
@@ -38,13 +40,10 @@ import org.matsim.deprecated.scoring.ScoringFunctionAccumulator.BasicScoring;
 import org.matsim.deprecated.scoring.ScoringFunctionAccumulator.LegScoring;
 import org.matsim.freight.carriers.Carrier;
 import org.matsim.freight.carriers.CarrierConstants;
-import org.matsim.freight.carriers.CarriersUtils;
 import org.matsim.freight.carriers.CarrierVehicle;
-import org.matsim.freight.carriers.controler.CarrierScoringFunctionFactory;
+import org.matsim.freight.carriers.CarriersUtils;
+import org.matsim.freight.carriers.controller.CarrierScoringFunctionFactory;
 import org.matsim.vehicles.Vehicle;
-
-import java.util.HashSet;
-import java.util.Set;
 
 @Disabled
 public class TimeScoringFunctionFactoryForTests implements CarrierScoringFunctionFactory{
@@ -94,8 +93,7 @@ public class TimeScoringFunctionFactoryForTests implements CarrierScoringFunctio
 
 			@Override
 			public void endLeg(double time) {
-				if(currentLeg.getRoute() instanceof NetworkRoute){
-					NetworkRoute nRoute = (NetworkRoute) currentLeg.getRoute();
+				if(currentLeg.getRoute() instanceof NetworkRoute nRoute){
 					Id<Vehicle> vehicleId = nRoute.getVehicleId();
 					CarrierVehicle vehicle = CarriersUtils.getCarrierVehicle(carrier, vehicleId);
 					assert vehicle != null : "cannot find vehicle with id=" + vehicleId;
@@ -200,7 +198,7 @@ public class TimeScoringFunctionFactoryForTests implements CarrierScoringFunctio
 
 	static class NumberOfToursAward implements BasicScoring{
 
-		private Carrier carrier;
+		private final Carrier carrier;
 
 		public NumberOfToursAward(Carrier carrier) {
 			super();
