@@ -29,7 +29,7 @@ public class RunEvExampleTest{
 			new RunEvExample().run( args );
 			{
 				Population expected = PopulationUtils.createPopulation( ConfigUtils.createConfig() ) ;
-				PopulationUtils.readPopulation( expected, utils.getInputDirectory() + "/output_plans.xml.gz" );
+				PopulationUtils.readPopulation( expected, utils.getInputDirectory() + "/output_plans_V2.xml.gz" );
 
 				Population actual = PopulationUtils.createPopulation( ConfigUtils.createConfig() ) ;
 				PopulationUtils.readPopulation( actual, utils.getOutputDirectory() + "/output_plans.xml.gz" );
@@ -38,7 +38,7 @@ public class RunEvExampleTest{
 				Assertions.assertEquals(PopulationComparison.Result.equal, result);
 			}
 			{
-				String expected = utils.getInputDirectory() + "/output_events.xml.gz" ;
+				String expected = utils.getInputDirectory() + "/output_events_V2.xml.gz" ;
 				String actual = utils.getOutputDirectory() + "/output_events.xml.gz" ;
 				ComparisonResult result = EventsUtils.compareEventsFiles( expected, actual );
 				Assertions.assertEquals(ComparisonResult.FILES_ARE_EQUAL, result);
@@ -62,7 +62,7 @@ public class RunEvExampleTest{
 			new RunEvExample().run( args );
 			{
 				Population expected = PopulationUtils.createPopulation( ConfigUtils.createConfig() ) ;
-				PopulationUtils.readPopulation( expected, utils.getInputDirectory() + "/output_plans.xml.gz" );
+				PopulationUtils.readPopulation( expected, utils.getInputDirectory() + "/output_plans_V2.xml.gz" );
 
 				Population actual = PopulationUtils.createPopulation( ConfigUtils.createConfig() ) ;
 				PopulationUtils.readPopulation( actual, utils.getOutputDirectory() + "/output_plans.xml.gz" );
@@ -71,7 +71,7 @@ public class RunEvExampleTest{
 				Assertions.assertEquals(PopulationComparison.Result.equal, result);
 			}
 			{
-				String expected = utils.getInputDirectory() + "/output_events.xml.gz" ;
+				String expected = utils.getInputDirectory() + "/output_events_V2.xml.gz" ;
 				String actual = utils.getOutputDirectory() + "/output_events.xml.gz" ;
 				ComparisonResult result = EventsUtils.compareEventsFiles( expected, actual );
 				Assertions.assertEquals(ComparisonResult.FILES_ARE_EQUAL, result);
