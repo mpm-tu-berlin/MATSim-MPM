@@ -29,8 +29,8 @@ import org.matsim.core.router.util.TravelTime;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 
-public class EvNetworkRoutingProvider implements Provider<RoutingModule> {
-	private static final Logger log = LogManager.getLogger(EvNetworkRoutingProvider.class);
+public class MPMEvNetworkRoutingProvider implements Provider<RoutingModule> {
+	private static final Logger log = LogManager.getLogger(MPMEvNetworkRoutingProvider.class);
 
 	private final String routingMode;
 	@Inject
@@ -75,7 +75,7 @@ public class EvNetworkRoutingProvider implements Provider<RoutingModule> {
 	 *
 	 * @param mode
 	 */
-	public EvNetworkRoutingProvider(String mode) {
+	public MPMEvNetworkRoutingProvider(String mode) {
 		this(mode, mode);
 	}
 
@@ -87,7 +87,7 @@ public class EvNetworkRoutingProvider implements Provider<RoutingModule> {
 	 * @param mode
 	 * @param routingMode
 	 */
-	public EvNetworkRoutingProvider(String mode, String routingMode) {
+	public MPMEvNetworkRoutingProvider(String mode, String routingMode) {
 		this.mode = mode;
 		this.routingMode = routingMode;
 	}
@@ -132,7 +132,7 @@ public class EvNetworkRoutingProvider implements Provider<RoutingModule> {
 		if (!routingConfigGroup.getAccessEgressType().equals(AccessEgressType.none)) {
 			throw new IllegalArgumentException("Bushwacking is not currently supported by the EV routing module");
 		} else {
-			return new EvNetworkRoutingModule(mode, filteredNetwork,
+			return new MPMEvNetworkRoutingModule(mode, filteredNetwork,
 				DefaultRoutingModules.createPureNetworkRouter(mode, populationFactory, filteredNetwork, routeAlgo),
 				electricFleetSpecification, chargingInfrastructureSpecification, travelTime,
 				driveConsumptionFactory, auxConsumptionFactory, EvConfigGroup.get(config));
