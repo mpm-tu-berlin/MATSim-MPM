@@ -25,7 +25,7 @@ def filter_detailed_edges(gdf_detailed, osmid, reversed_val):
 
 
 if __name__ == "__main__":
-    area = ("Brandenburg, Germany")
+    area = ("Germany")
     highway_types = '["highway"~"motorway|trunk|primary"]'
     output_file_simplified = f"data/test_{area.split(',')[0].lower()}_simplified"
     output_file_detailed_sorted= f"data/test_{area.split(',')[0].lower()}_detailed_sorted"
