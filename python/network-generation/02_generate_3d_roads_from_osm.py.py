@@ -13,8 +13,8 @@ from collections import defaultdict
 
 # --- Pfade ---
 TIF_PATH      = Path(r"data\DTM Germany 20m v3b by Sonny.tif")
-OSM_PATH      = Path(r"data\germany_detailed_sorted.gpkg")
-OUTPUT_GPKG   = Path(r"data\germany_3d_raster_clamped.gpkg")
+OSM_PATH      = Path(r"data\Märkisch-Oderland_detailed_sorted.gpkg")
+OUTPUT_GPKG   = Path(r"data\Märkisch-Oderland_3d_raster_clamped.gpkg")
 OUTPUT_LAYER  = "roads_3d"
 OUTPUT_HTML   = Path(r"data\roads_3d_interactive_brandenburg.html")  # alter Plotly-3D (optional)
 OUTPUT_HTML_OSM = Path(r"data\roads_3d_points_over_osm.html")        # OSM-Punkte

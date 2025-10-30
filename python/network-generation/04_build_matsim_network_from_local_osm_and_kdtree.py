@@ -1,657 +1,736 @@
-from collections import defaultdict
+# -*- coding: utf-8 -*-
+"""
+MATSim Edge Shortener & Network Exporter
 
-import numpy as np
+This script builds a MATSim network from local (simplified + detailed) OSM data and a height
+KDTree (lon/lat EPSG:4326), while enforcing a maximum link length constraint by replacing long
+simplified edges with the corresponding directed sequence of detailed segments and recursively
+splitting at the nearest detailed segment boundary around the simplified half-length.
+
+Key features
+------------
+- Only simplified edges with length > `max_allowed_link_length` are replaced.
+- Replacement follows the matched *directed* detailed sequence between (u, v).
+- The split point is chosen by summing from both ends and taking the first detailed boundary
+  that exceeds half of the simplified edge length, minimizing imbalance.
+- Recursive halving continues until all parts are <= `max_allowed_link_length`.
+- Robust attribute handling and geometry length fallbacks (EPSG:3857) for safety.
+- Outputs a MATSim network_v2 DTD XML (gzipped) with optional node Z (height).
+
+Dependencies
+------------
+- numpy, pandas, geopandas, shapely, scipy (KDTree), tqdm
+
+Inputs (example from __main__)
+-----------------------------
+- data/{area}_kdtree_from_roads3d_epsg4326.npz  (npz with 'coords' [lon, lat] & 'heights')
+- data/{area}_simplified.gpkg                    (layers: 'nodes', 'edges')
+- data/{area}_detailed_sorted.gpkg               (layers: 'nodes', 'edges')
+
+Author
+------
+Refactored and documented in English.
+"""
+
+import math
+from collections import defaultdict
+import gzip
 import xml.etree.ElementTree as ET
 import xml.dom.minidom as md
-import gzip
+
+import numpy as np
 import pandas as pd
 import geopandas as gpd
-from scipy.spatial import cKDTree as KDTree  # cKDTree ist schneller als KDTree und ausreichend für .query()
-import matplotlib.pyplot as plt
 from shapely.geometry import LineString
-from shapely.ops import linemerge
 from tqdm import tqdm
-import contextily as ctx
-from pyproj import Transformer
+from scipy.spatial import cKDTree as KDTree
 
-# --- Schnellere Projektion & KDTree-Vektorabfrage ---
-TF_4326_TO_3857 = Transformer.from_crs(4326, 3857, always_xy=True)
-TF_3857_TO_4326 = Transformer.from_crs(3857, 4326, always_xy=True)
-
-def _to_4326_xy(X, Y):
-    x, y = TF_3857_TO_4326.transform(X, Y)
-    return x, y
+# --------------------------- Utils / KDTree ---------------------------
 
 def kdtree_heights_vectorized(tree: KDTree, heights: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
-    """Holt Höhen für viele Punkte auf einmal (EPSG:4326), xs/ys = lon/lat!"""
-    pts = np.column_stack([xs, ys])
+    """Return heights for (xs, ys) by nearest-neighbor lookup in a KDTree (lon, lat in EPSG:4326)."""
+    pts = np.column_stack([xs, ys])  # lon, lat
     _, idx = tree.query(pts, k=1)
     return heights[idx].astype(float)
 
-# ---------- Gemeinsame Utilities ----------
+def load_kdtree(input_path):
+    """Load KDTree (npz with 'coords' [lon, lat] and 'heights')."""
+    data = np.load(input_path)
+    coords = data["coords"]      # lon, lat (EPSG:4326)
+    heights = data["heights"]
+    tree = KDTree(coords)
+    print("KDTree loaded.")
+    return tree, coords, heights
+
+def load_local_osm_file(local_osm_input_path):
+    """Load nodes and edges from a local GeoPackage with layers 'nodes' and 'edges' (EPSG:4326)."""
+    gdf_nodes = gpd.read_file(local_osm_input_path, layer="nodes").set_crs("EPSG:4326", allow_override=True)
+    gdf_edges = gpd.read_file(local_osm_input_path, layer="edges").set_crs("EPSG:4326", allow_override=True)
+    return gdf_nodes, gdf_edges
 
 def _truthy_flag(val) -> bool:
-    """Interpretiert OSM-ähnliche Flag-Werte robust."""
+    """Interpret a variety of truthy/falsy inputs as boolean."""
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return False
     s = str(val).strip().lower()
     return s not in ("", "no", "false", "0")
 
-def _collect_neighbors_contiguous(df3857: gpd.GeoDataFrame,
-                                  df4326: gpd.GeoDataFrame,
-                                  start_idx: int,
-                                  direction: int,
-                                  max_dist_m: float):
+def _num(x, default=None, as_int=False):
+    """Parse robust numeric value: return float/int or default. Removes NaN/inf."""
+    try:
+        v = float(x)
+        if not math.isfinite(v):
+            return default
+        return int(round(v)) if as_int else v
+    except Exception:
+        return default
+
+def _clean_text(val, default="unknown"):
+    """Return a clean string value without empty/'nan'."""
+    if val is None:
+        return default
+    s = str(val).strip()
+    if s == "" or s.lower() == "nan":
+        return default
+    return s
+
+def _maybe_bool(x):
+    """Tri-state bool parser: True/False or None if unknown."""
+    s = str(x).strip().lower()
+    if s in ("1", "true", "yes"):  return True
+    if s in ("0", "false", "no"):  return False
+    return None
+
+def _flatten_osmids_from_block(block: gpd.GeoDataFrame) -> list[int]:
+    """Extract ordered, de-duplicated OSMIDs from block['osmid']."""
+    out, seen = [], set()
+    for val in block.get('osmid', []):
+        for osm in _osmid_list(val):
+            if osm not in seen:
+                seen.add(osm)
+                out.append(osm)
+    return out
+
+
+# --------------------------- Detailed sequence (directed) ---------------------------
+def _osmid_list(val):
+    s = str(val).strip()
+    if s.startswith("[") and s.endswith("]"):
+        s = s[1:-1]
+    return [int(x) for x in s.replace(" ", "").split(",") if x]
+
+def build_osmid_index_for_detailed(gdf_edges_detailed: gpd.GeoDataFrame,
+                                   reversed_col: str = "reversed"):
     """
-    Sammelt Nachbarsegmente NEBEN der Gruppe ausschließlich dann,
-    wenn sie topologisch anliegen (passende u/v-Knoten).
-    direction: -1 (vor der Gruppe), +1 (nach der Gruppe).
-    Gibt eine Liste von Indexen in richtiger Reihenfolge zurück.
+    Build indices for quick candidate lookup by OSMID and optional 'reversed' flag.
+    Returns a dict with:
+      - 'any': osmid -> [row_idx]
+      - 'rev': (osmid, reversed_bool) -> [row_idx]
+      - 'has_rev': whether the column exists
     """
-    acc = 0.0
-    res = []
-    j = start_idx + direction
+    idx_any = defaultdict(list)              # osmid -> [row_idx]
+    idx_rev = defaultdict(list)              # (osmid, rev_bool) -> [row_idx]
+    has_rev = reversed_col in gdf_edges_detailed.columns
 
-    expected = str(df4326.loc[start_idx, "u"] if direction == -1 else df4326.loc[start_idx, "v"])
+    for i, row in gdf_edges_detailed.iterrows():
+        # collect OSMIDs for this detailed edge row
+        for osmid in str(row.get('osmid', '')).strip('[]').replace(' ', '').split(','):
+            if not osmid:
+                continue
+            try:
+                osm = int(osmid)
+            except Exception:
+                continue
 
-    # Wir laufen im DataFrame, brechen aber ab, wenn Topologie nicht passt.
-    while (j in df3857.index) and (acc < max_dist_m):
-        row_m = df3857.loc[j]
-        row_g = df4326.loc[j]
+            idx_any[osm].append(i)
 
-        if direction == -1:
-            # rückwärts: require v == expected, dann expected = u
-            if str(row_g.get("v")) != expected:
-                break
-            expected = str(row_g.get("u"))
+            if has_rev:
+                rev = _maybe_bool(row.get(reversed_col))
+                if rev is not None:
+                    idx_rev[(osm, rev)].append(i)
+
+    return {"any": idx_any, "rev": idx_rev, "has_rev": has_rev}
+
+def _empty_like(df, crs="EPSG:4326"):
+    cols = list(df.columns) if isinstance(df, (pd.DataFrame, gpd.GeoDataFrame)) else []
+    return gpd.GeoDataFrame(columns=cols).set_crs(crs)
+
+def get_directed_detailed_sequence(edge, gdf_edges_detailed, osmid_index, DEBUG=False) -> gpd.GeoDataFrame:
+    """
+    Build a *directed* sequence of detailed segments from u0 -> v0.
+
+    Priority when extending from the *current* set (primary/alt):
+      1) same OSMID,   u == current (forward within OSMID block)
+      2) same OSMID,   v == current (flip within OSMID block)
+      3) other OSMID,  u == current (forward at OSMID boundary)
+      4) other OSMID,  v == current (flip at OSMID boundary)
+
+    Switching between primary/alt is kept as fallback. When reconstructing:
+      - Segments from 'alt' toggle the 'reversed' flag (if present).
+      - Steps taken via 'v' (reverse direction) flip geometry and swap u/v.
+    """
+    try:
+        # --- Simplified edge meta ---
+        u0, v0 = int(edge["u"]), int(edge["v"])
+        osmid_str = str(edge.get("osmid", "")).strip("[]").replace(" ", "")
+        osmids = [int(x) for x in osmid_str.split(",") if x]
+
+        edge_rev = _maybe_bool(edge.get("reversed")) if ("reversed" in edge) else None
+        has_rev = bool(osmid_index.get("has_rev"))
+
+        # --- Candidate selection via OSMIDs (+ optional reversed) ---
+        cand_idx_set = set()
+        if has_rev and (edge_rev is not None):
+            for osm in osmids:
+                cand_idx_set.update(osmid_index["rev"].get((osm, edge_rev), []))
+            if DEBUG and not cand_idx_set:
+                print(f"[osmid+rev] no candidates for {u0}->{v0} (osmids={osmids}, reversed={edge_rev})")
         else:
-            # vorwärts: require u == expected, dann expected = v
-            if str(row_g.get("u")) != expected:
-                break
-            expected = str(row_g.get("v"))
+            for osm in osmids:
+                cand_idx_set.update(osmid_index["any"].get(osm, []))
+            if DEBUG and not cand_idx_set:
+                print(f"[osmid] no candidates for {u0}->{v0} (osmids={osmids})")
 
-        seg_len = float(row_m.get("length", row_m.geometry.length))
-        res.append(j)
-        acc += seg_len
-        j += direction
+        if not cand_idx_set:
+            return _empty_like(gdf_edges_detailed)
 
-    return res if direction == +1 else res[::-1]
+        cand = gdf_edges_detailed.loc[sorted(cand_idx_set)].copy()
+        if cand.empty:
+            if DEBUG:
+                print("[cand] empty after OSMID(+reversed) filter")
+            return _empty_like(gdf_edges_detailed)
 
-def _concat_by_pos(df: gpd.GeoDataFrame, pos_list: list[int]) -> LineString:
-    if not pos_list:
-        return LineString()
-    coords = []
-    first = True
-    for p in pos_list:
-        line: LineString = df.loc[p, "geometry"]
-        if line is None or line.is_empty:
-            continue
-        c = list(line.coords)
-        if first:
-            coords.extend(c); first = False
-        else:
-            if coords and c and coords[-1] == c[0]:
-                coords.extend(c[1:])
+        # --- Cleanup u/v ---
+        def _cleanup_uv(df):
+            df = df.copy()
+            df["u"] = pd.to_numeric(df["u"], errors="coerce")
+            df["v"] = pd.to_numeric(df["v"], errors="coerce")
+            df = df.dropna(subset=["u", "v"]).copy()
+            df["u"] = df["u"].astype(int)
+            df["v"] = df["v"].astype(int)
+            return df
+
+        cand = _cleanup_uv(cand)
+
+        # --- Build lookups ---
+        def build_by_start(df):
+            m = {}
+            for i, r in df.iterrows():
+                m.setdefault(int(r["u"]), []).append(i)
+            return m
+
+        def build_by_end(df):
+            m = {}
+            for i, r in df.iterrows():
+                m.setdefault(int(r["v"]), []).append(i)
+            return m
+
+        by_u_primary   = build_by_start(cand)
+        by_end_primary = build_by_end(cand)
+
+        # --- Alt set: reversed == not edge_rev ---
+        cand_alt = _empty_like(gdf_edges_detailed)
+        by_u_alt, by_end_alt = {}, {}
+        if has_rev and (edge_rev is not None):
+            alt_idx_set = set()
+            for osm in osmids:
+                alt_idx_set.update(osmid_index["rev"].get((osm, not edge_rev), []))
+            if alt_idx_set:
+                cand_alt = _cleanup_uv(gdf_edges_detailed.loc[sorted(alt_idx_set)].copy())
+                by_u_alt   = build_by_start(cand_alt)
+                by_end_alt = build_by_end(cand_alt)
+
+        # --- Stable first-OSMID accessor per row ---
+        def row_osmid_first(r):
+            try:
+                ids = _osmid_list(r.get('osmid', ''))
+                return ids[0] if ids else None
+            except Exception:
+                return None
+
+        # --- Select start: prefer primary u==u0, else alt u==u0 ---
+        used_primary, used_alt = set(), set()
+        seq = []  # list of (src, idx, how) with how in {'u','v','start'}
+
+        original_source = "primary"
+        current_source = "primary"
+        cand_cur, by_u_cur, by_end_cur = cand, by_u_primary, by_end_primary
+        cand_other, by_u_other, by_end_other, other_label = cand_alt, by_u_alt, by_end_alt, "alt"
+
+        start_list = by_u_cur.get(u0, [])
+        if not start_list:
+            alt_list = by_u_alt.get(u0, [])
+            if alt_list:
+                current_source = "alt"
+                cand_cur, by_u_cur, by_end_cur = cand_alt, by_u_alt, by_end_alt
+                cand_other, by_u_other, by_end_other, other_label = cand, by_u_primary, by_end_primary, "primary"
+                start_list = alt_list
             else:
-                coords.extend(c)
-    return LineString(coords) if coords else LineString()
+                if DEBUG:
+                    print(f"[start] no start segment via u==u0 in primary/alt | u0={u0}")
+                return _empty_like(gdf_edges_detailed)
 
-def _sample_height_from_point(tree: KDTree, heights: np.ndarray, lon: float, lat: float) -> float:
-    """KDTree-Abfrage mit (lon,lat)."""
-    _, idx = tree.query([lon, lat], k=1)
-    return float(heights[idx])
+        start_idx = start_list[0]
+        (used_primary if current_source == "primary" else used_alt).add(start_idx)
+        seq.append((current_source, start_idx, "start"))
 
-# ---------- Z-Overrides (robust) ----------
+        cur = int(cand_cur.loc[start_idx]["v"])
+        last_osm = row_osmid_first(cand_cur.loc[start_idx])  # active OSMID block
 
-def compute_bridge_tunnel_z_overrides_strict(
-        gdf_edges_detailed_4326: gpd.GeoDataFrame,
-        gdf_edges_detailed_3857: gpd.GeoDataFrame,
-        tree: KDTree,
-        heights: np.ndarray,
-        offset_m: float = 50.0,
-        max_delta_m: float = 20.0,   # maximal erlaubte Abweichung ggü. DEM am Endknoten
-        inner_eps_m: float = 1.0     # Fallback-Abstand innerhalb der Gruppe
-) -> dict[str, float]:
-    """
-    Ermittelt Z-Overrides für Start/Ende jeder Bridge-/Tunnel-Gruppe.
-    Nutzt topologisch angrenzende Vor-/Nachbarsegmente. Sanity-Check gegen DEM am Endknoten + 1m-Fallback.
-    """
-    df4326 = gdf_edges_detailed_4326.reset_index(drop=True)
-    df3857 = gdf_edges_detailed_3857.reset_index(drop=True)
+        if DEBUG:
+            ru = int(cand_cur.loc[start_idx]["u"]); rv = int(cand_cur.loc[start_idx]["v"])
+            print(f"[start] idx={start_idx} seg=({ru}->{rv}) source={current_source} cur={cur} target v0={v0} osmid={last_osm}")
 
-    overrides: dict[str, float] = {}
+        # For legacy fallback (once) when switching back to original_source
+        allow_v_once = False
 
-    def collect_groups_pos(flag_col: str):
-        if flag_col not in df4326.columns: return []
-        mask = df4326[flag_col].apply(_truthy_flag).to_numpy()
-        if not mask.any(): return []
-        true_pos = np.flatnonzero(mask)
-        if true_pos.size == 0: return []
-        cuts = np.where(np.diff(true_pos) != 1)[0] + 1
-        return [block for block in np.split(true_pos, cuts) if block.size > 0]
+        # --- Try to extend within current source with OSMID-aware priority ---
+        def try_current(cur_node, last_osm):
+            """
+            Priorities:
+              1) same OSMID, u==cur
+              2) same OSMID, v==cur (flip)
+              3) other OSMID, u==cur
+              4) other OSMID, v==cur (flip)
+            If all fail:
+              - optional legacy once-flip only in primary (allow_v_once)
+            """
+            nonlocal allow_v_once
+            df = cand_cur
+            used_set = used_primary if current_source == "primary" else used_alt
 
-    for flag in ["bridge", "tunnel"]:
-        for pos_arr in collect_groups_pos(flag):
-            i0 = int(pos_arr[0])
-            i1 = int(pos_arr[-1])
+            lst_u = by_u_cur.get(cur_node, [])
+            lst_v = by_end_cur.get(cur_node, [])
 
-            # Gruppen-Endpunkte (Node-IDs als Strings)
-            u_start = str(df4326.loc[i0, "u"])
-            v_end   = str(df4326.loc[i1, "v"])
+            def pick(candidates, prefer_same_osm: bool, via: str):
+                # via: 'u' (forward) or 'v' (flip)
+                for i in candidates:
+                    if i in used_set:
+                        continue
+                    osm_i = row_osmid_first(df.loc[i])
+                    same = (osm_i == last_osm) if (last_osm is not None and osm_i is not None) else False
+                    if (prefer_same_osm and same) or (not prefer_same_osm and not same):
+                        new_cur = int(df.loc[i]["v"] if via == 'u' else df.loc[i]["u"])
+                        used_set.add(i)
+                        seq.append((current_source, i, via))
+                        if DEBUG:
+                            u_i = int(df.loc[i]["u"]); v_i = int(df.loc[i]["v"])
+                            how = "via u==cur" if via == 'u' else "via v==cur (flip)"
+                            print(f"[step/{current_source}] idx={i} seg=({u_i}->{v_i}) {how} cur={cur_node} -> {new_cur} osm_same={same} osm={osm_i}")
+                        if via == 'v':
+                            allow_v_once = False  # flip consumed
+                        return new_cur, osm_i, True
+                return cur_node, last_osm, False
 
-            # Topologisch angrenzende Segmente sammeln
-            before_pos = _collect_neighbors_contiguous(df3857, df4326, i0, -1, offset_m)
-            after_pos  = _collect_neighbors_contiguous(df3857, df4326, i1, +1, offset_m)
+            # 1) same OSMID, u==cur
+            new_cur, new_osm, ok = pick(lst_u, prefer_same_osm=True, via='u')
+            if ok: return new_cur, new_osm, True
 
-            # Pfad zusammenbauen
-            before_line = _concat_by_pos(df3857, before_pos)
-            group_line  = _concat_by_pos(df3857, list(pos_arr))
-            after_line  = _concat_by_pos(df3857, after_pos)
+            # 2) same OSMID, v==cur (flip)
+            new_cur, new_osm, ok = pick(lst_v, prefer_same_osm=True, via='v')
+            if ok: return new_cur, new_osm, True
 
-            parts = [l for l in (before_line, group_line, after_line) if (l and not l.is_empty)]
-            if not parts:
+            # 3) other OSMID, u==cur
+            new_cur, new_osm, ok = pick(lst_u, prefer_same_osm=False, via='u')
+            if ok: return new_cur, new_osm, True
+
+            # 4) other OSMID, v==cur (flip)
+            new_cur, new_osm, ok = pick(lst_v, prefer_same_osm=False, via='v')
+            if ok: return new_cur, new_osm, True
+
+            # last resort: legacy once-flip only in primary
+            if current_source == "primary" and allow_v_once:
+                for i in lst_v:
+                    if i not in used_set:
+                        new_cur = int(df.loc[i]["u"])
+                        used_set.add(i)
+                        seq.append((current_source, i, "v"))
+                        if DEBUG:
+                            u_i = int(df.loc[i]["u"]); v_i = int(df.loc[i]["v"])
+                            print(f"[step/{current_source}] idx={i} seg=({u_i}->{v_i}) via v==cur (legacy once) cur={cur_node} -> {new_cur}")
+                        allow_v_once = False
+                        return new_cur, row_osmid_first(df.loc[i]), True
+
+            return cur_node, last_osm, False
+
+        # --- Main chaining loop ---
+        guard = 0
+        while guard < (len(cand) + len(cand_alt) + 10):
+            guard += 1
+
+            new_cur, last_osm_new, ok = try_current(cur, last_osm)
+            if ok:
+                cur, last_osm = new_cur, last_osm_new
+                if cur == v0:
+                    break
                 continue
 
-            merged = linemerge(parts)
-            if merged.geom_type == "MultiLineString":
-                merged = LineString([pt for geom in merged.geoms for pt in geom.coords])
+            # switch primary <-> alt
+            current_source, other_label = other_label, current_source
+            cand_cur,  cand_other  = cand_other,  cand_cur
+            by_u_cur,  by_u_other  = by_u_other,  by_u_cur
+            by_end_cur, by_end_other = by_end_other, by_end_cur
 
-            before_len = before_line.length
-            group_len  = group_line.length
-            if group_len <= 0:
+            # When switching back to the original source, allow one legacy flip
+            allow_v_once = (current_source == original_source)
+
+            if DEBUG:
+                print(f"[switch] now={current_source} allow_v_once={allow_v_once}  cur={cur} last_osm={last_osm}")
+
+            new_cur, last_osm_new, ok = try_current(cur, last_osm)
+            if ok:
+                cur, last_osm = new_cur, last_osm_new
+                if cur == v0:
+                    break
                 continue
 
-            # Zielpositionen
-            s_start   = before_len
-            s_end     = before_len + group_len
-            s_before  = max(0.0,          s_start - offset_m)
-            s_after   = min(merged.length, s_end   + offset_m)
+            if DEBUG:
+                print(f"[chain] no continuation at cur={cur} (now={current_source})")
+            break
 
-            # Fallbacks, wenn keine Nachbarn vorhanden: nutze 1 m innerhalb der Gruppe
-            if before_len == 0.0:
-                s_before = max(0.0, s_start + min(inner_eps_m, group_len) - s_start)  # == inner_eps_m innerhalb Gruppe
-            if after_line.length == 0.0:
-                s_after = min(merged.length, s_end - min(inner_eps_m, group_len))
+        if not seq:
+            if DEBUG:
+                print("[end] empty sequence")
+            return _empty_like(gdf_edges_detailed)
 
-            P_before = merged.interpolate(s_before)
-            P_after  = merged.interpolate(s_after)
+        # --- Reconstruct output rows with harmonized orientation ---
+        rows = []
+        for src, idx, how in seq:
+            # choose source row
+            if src == "primary":
+                if idx not in cand.index:
+                    continue
+                row = cand.loc[idx].copy()
+            else:  # 'alt'
+                if idx not in cand_alt.index:
+                    continue
+                row = cand_alt.loc[idx].copy()
 
-            xb, yb = _to_4326_xy(P_before.x, P_before.y)
-            xa, ya = _to_4326_xy(P_after.x,  P_after.y)
+            # 1) toggle 'reversed' for segments from 'alt'
+            if src == "alt" and "reversed" in row:
+                r = _maybe_bool(row["reversed"])
+                if r is not None:
+                    row["reversed"] = (not r)
 
-            # Sanity: DEM direkt am Gruppen-Endknoten (Start/Ende der Gruppe in 4326)
-            ux, uy = list(df4326.loc[i0, "geometry"].coords)[0]
-            vx, vy = list(df4326.loc[i1, "geometry"].coords)[-1]
-            z_u_dem = _sample_height_from_point(tree, heights, ux, uy)
-            z_v_dem = _sample_height_from_point(tree, heights, vx, vy)
+            # 2) flip geometry + swap u/v if chosen via v==cur (reverse)
+            if how == "v":
+                u_old, v_old = row["u"], row["v"]
+                row["u"], row["v"] = v_old, u_old
+                try:
+                    row["geometry"] = LineString(list(row.geometry.coords)[::-1])
+                except Exception:
+                    pass
 
-            zs = kdtree_heights_vectorized(tree, heights, np.array([xb, xa]), np.array([yb, ya]))
-            z_u_off, z_v_off = float(zs[0]), float(zs[1])
+            rows.append(row)
 
-            def guard(z_off, z_dem, max_delta=max_delta_m):
-                return z_off if abs(z_off - z_dem) <= max_delta else z_dem
+        if not rows:
+            return _empty_like(gdf_edges_detailed)
 
-            overrides[u_start] = guard(z_u_off, z_u_dem)
-            overrides[v_end]   = guard(z_v_off, z_v_dem)
+        out = gpd.GeoDataFrame(rows, crs="EPSG:4326")
+        return out.set_crs("EPSG:4326", allow_override=True)
 
-    return overrides
+    except Exception as e:
+        if DEBUG:
+            print("[get_directed_detailed_sequence:osmid-aware] EXCEPTION:", repr(e))
+        return _empty_like(gdf_edges_detailed)
 
-
-def compute_bridge_tunnel_z_overrides_fast(
-        gdf_edges_detailed_4326: gpd.GeoDataFrame,
-        gdf_edges_detailed_3857: gpd.GeoDataFrame,
-        tree: KDTree,
-        heights: np.ndarray,
-        offset_m: float = 50.0,
-        max_delta_m: float = 20.0,
-        inner_eps_m: float = 1.0
-) -> dict[str, float]:
+def split_once_at_half(edge, seq_det: gpd.GeoDataFrame):
     """
-    Schnellere Variante (arbeitet in 3857), ergänzt um:
-    - topologische Nachbarschaft,
-    - Sanity-Check vs. DEM am Endknoten,
-    - 1-m-Fallback innerhalb der Gruppe.
+    Split 'edge' at its half simplified length *on a detailed segment boundary*.
+
+    Returns:
+      (left_edge_df, right_edge_df, split_meta, left_seq, right_seq)
+    or (None, None, None, None, None).
     """
-    overrides: dict[str, float] = {}
+    L = float(edge['length'])
+    if L <= 0 or seq_det.empty:
+        return None, None, None, None, None
 
-    def collect_groups(flag_col: str):
-        if flag_col not in gdf_edges_detailed_4326.columns:
-            return []
-        mask = gdf_edges_detailed_4326[flag_col].apply(_truthy_flag)
-        if mask.sum() == 0:
-            return []
-        group_id = (mask != mask.shift(1)).cumsum()
-        tmp = gdf_edges_detailed_4326.copy()
-        tmp["_grp"] = group_id.where(mask)
-        groups = []
-        for gid, grp in tmp.groupby("_grp"):
-            if pd.isna(gid) or len(grp) == 0:
-                continue
-            groups.append(grp.index.to_list())
-        return groups
+    n = len(seq_det)
+    if n < 2:
+        return None, None, None, None, None
 
-    def concat_lines(rows_iter):
+    seq = seq_det.copy()
+    seq['len_det'] = pd.to_numeric(seq['length'], errors='coerce').fillna(0.0).astype(float)
+
+    half = 0.5 * L
+    cum_fwd = seq['len_det'].cumsum().to_numpy()
+    cum_bwd = seq['len_det'][::-1].cumsum().to_numpy()
+
+    k_fwd = int(np.searchsorted(cum_fwd, half, side='left'))
+    k_bwd = int(np.searchsorted(cum_bwd, half, side='left'))
+
+    over_fwd = cum_fwd[k_fwd] - half if k_fwd < n else float('inf')
+    over_bwd = cum_bwd[k_bwd] - half if k_bwd < n else float('inf')
+
+    use_front = (over_fwd <= over_bwd)
+    cut_idx = (k_fwd if use_front else (n - k_bwd))
+
+    if cut_idx <= 0:
+        cut_idx = 1
+    elif cut_idx >= n:
+        cut_idx = n - 1
+
+    left_seg  = seq.iloc[:cut_idx].copy()
+    right_seg = seq.iloc[cut_idx:].copy()
+    if left_seg.empty or right_seg.empty:
+        return None, None, None, None, None
+
+    # Split node + XY
+    if use_front:
+        split_nid = str(int(left_seg.iloc[-1]['v']))
+        split_xy  = left_seg.iloc[-1].geometry.coords[-1]
+    else:
+        split_nid = str(int(right_seg.iloc[0]['u']))
+        split_xy  = right_seg.iloc[0].geometry.coords[0]
+    split_meta = {"nid": split_nid, "xy": (float(split_xy[0]), float(split_xy[1]))}
+
+    # Helper: build a simplified sub-edge from a detailed block
+    def make_block(block):
+        row = edge.copy()
+        row['u'] = str(int(block.iloc[0]['u']))
+        row['v'] = str(int(block.iloc[-1]['v']))
+
         coords = []
-        first = True
-        for r in rows_iter:
-            line: LineString = r.geometry
-            if line is None or line.is_empty:
-                continue
-            c = list(line.coords)
-            if first:
-                coords.extend(c); first = False
+        prev_end = None
+        for _, s in block.iterrows():
+            g = s.geometry
+            if prev_end is not None and g.coords[0] != prev_end:
+                g = LineString(list(g.coords)[::-1])
+            if not coords:
+                coords.extend(list(g.coords))
             else:
-                if coords and c and coords[-1] == c[0]:
-                    coords.extend(c[1:])
-                else:
-                    coords.extend(c)
-        return LineString(coords) if coords else LineString()
+                coords.extend(list(g.coords)[1:])
+            prev_end = g.coords[-1]
+        row['geometry'] = LineString(coords)
 
-    for flag in ["bridge", "tunnel"]:
-        for idx_list in collect_groups(flag):
-            idx_list = sorted(idx_list)
+        # length
+        L_sum = pd.to_numeric(block['len_det'], errors='coerce').sum()
+        if not np.isfinite(L_sum) or L_sum <= 0:
+            try:
+                L_sum = float(gpd.GeoSeries([row['geometry']], crs="EPSG:4326").to_crs(3857).length.iloc[0])
+            except Exception:
+                L_sum = 1.0
+        row['length'] = float(max(1.0, L_sum))
 
-            grp4326 = gdf_edges_detailed_4326.loc[idx_list]
-            grp3857 = gdf_edges_detailed_3857.loc[idx_list]
-
-            u_start = str(grp4326.iloc[0]["u"])
-            v_end   = str(grp4326.iloc[-1]["v"])
-
-            first_idx = idx_list[0]
-            last_idx  = idx_list[-1]
-
-            # topologische Nachbarn statt blindem Index-Wandern
-            before_pos = _collect_neighbors_contiguous(gdf_edges_detailed_3857, gdf_edges_detailed_4326, first_idx, -1, offset_m)
-            after_pos  = _collect_neighbors_contiguous(gdf_edges_detailed_3857, gdf_edges_detailed_4326, last_idx,  +1, offset_m)
-
-            before_line = concat_lines([gdf_edges_detailed_3857.loc[j] for j in before_pos])
-            group_line  = concat_lines([r for _, r in grp3857.iterrows()])
-            after_line  = concat_lines([gdf_edges_detailed_3857.loc[j] for j in after_pos])
-
-            parts = [l for l in (before_line, group_line, after_line) if (l and not l.is_empty)]
-            if not parts:
-                continue
-
-            merged = linemerge(parts)
-            if merged.geom_type == "MultiLineString":
-                merged = LineString([pt for geom in merged.geoms for pt in geom.coords])
-
-            before_len = before_line.length
-            group_len  = group_line.length
-            if group_len <= 0:
-                continue
-
-            s_start = before_len
-            s_end   = before_len + group_len
-            s_before = max(0.0, s_start - offset_m)
-            s_after  = min(merged.length, s_end + offset_m)
-
-            # Fallbacks innerhalb der Gruppe
-            if before_len == 0.0:
-                s_before = min(s_start + min(inner_eps_m, group_len), s_end)
-            if after_line.length == 0.0:
-                s_after = max(s_end - min(inner_eps_m, group_len), s_start)
-
-            P_before = merged.interpolate(s_before)
-            P_after  = merged.interpolate(s_after)
-
-            xb, yb = _to_4326_xy(P_before.x, P_before.y)
-            xa, ya = _to_4326_xy(P_after.x,  P_after.y)
-
-            # DEM direkt am Gruppen-Endknoten
-            ux, uy = list(grp4326.iloc[0].geometry.coords)[0]
-            vx, vy = list(grp4326.iloc[-1].geometry.coords)[-1]
-            z_u_dem = _sample_height_from_point(tree, heights, ux, uy)
-            z_v_dem = _sample_height_from_point(tree, heights, vx, vy)
-
-            zs = kdtree_heights_vectorized(tree, heights, np.array([xb, xa]), np.array([yb, ya]))
-            z_u_off, z_v_off = float(zs[0]), float(zs[1])
-
-            def guard(z_off, z_dem, max_delta=max_delta_m):
-                return z_off if abs(z_off - z_dem) <= max_delta else z_dem
-
-            overrides[u_start] = guard(z_u_off, z_u_dem)
-            overrides[v_end]   = guard(z_v_off, z_v_dem)
-
-    return overrides
-
-# ---------- Laden / Plot / Split etc. (unverändert außer kleinen Kosmetik) ----------
-
-def load_kdtree(input_path):
-    """
-    Lädt einen KDTree sowie Koordinaten und Höhen aus einer .npz-Datei.
-    Erwartet coords in EPSG:4326 als (lon, lat)!
-    """
-    data = np.load(input_path)
-    coords = data["coords"]      # Koordinaten im Quell-KS (EPSG:4326), Reihenfolge: lon,lat
-    heights = data["heights"]    # Höhenwerte
-    tree = KDTree(coords)
-    print("KDTree erfolgreich geladen.")
-    return tree, coords, heights
-
-def load_local_osm_file(local_osm_input_path):
-    gdf_nodes = gpd.read_file(local_osm_input_path, layer="nodes").set_crs("EPSG:4326", allow_override=True)
-    gdf_edges = gpd.read_file(local_osm_input_path, layer="edges").set_crs("EPSG:4326", allow_override=True)
-    return gdf_nodes, gdf_edges
-
-def plot_edge_length_distribution(gdf_edges):
-    total_links = len(gdf_edges)
-    min_length = gdf_edges['length'].min()
-    max_length = gdf_edges['length'].max()
-    sum_length = gdf_edges['length'].sum()
-    print(f"Gesamtanzahl der Links: {total_links}")
-    print(f"Minimale Länge: {min_length:.0f} m")
-    print(f"Maximale Länge: {max_length:.0f} m")
-    print(f"Durchschnittliche Länge: {gdf_edges['length'].mean():.0f} m")
-    print(f"Gesamtlänge: {sum_length:.0f} m")
-    print("------------------------------")
-
-    bins = range(0, min(5000, int(gdf_edges['length'].max())), 100)
-    gdf_edges['length_bin'] = pd.cut(gdf_edges['length'], bins=bins, right=False)
-    pivot = gdf_edges.groupby('length_bin', observed=False).size()
-    labels = [f"<{bins[i + 1]}" for i in range(len(bins) - 1)]
-    pivot.index = labels
-    pivot.plot(kind='bar', legend=False)
-    plt.ylabel('Anzahl der Kanten')
-    plt.title('Verteilung der Kantenlängen')
-    plt.tight_layout()
-    plt.show()
-
-def plot_edges(gdf_edges, title="Network Edges"):
-    fig, ax = plt.subplots(figsize=(10, 10))
-    gdf_edges.plot(ax=ax, linewidth=1, color='blue')
-    plt.title(title)
-    plt.xlabel('Longitude')
-    plt.ylabel('Latitude')
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
-
-def check_edges_for_bridges(gdf_edges, gdf_bridges):
-    bridge_mask = gdf_edges['bridge'] == 'yes'
-    bridge_edges = gdf_edges[bridge_mask]
-
-    for idx, edge in bridge_edges.iterrows():
-        osmid_str = str(edge['osmid']).strip('[]').replace(' ', '')
-        osmids = [int(id) for id in osmid_str.split(',') if id]
-        is_bridge = any(id in gdf_bridges['id'].values for id in osmids)
-        gdf_edges.loc[idx, 'is_confirmed_bridge'] = is_bridge
-
-    return gdf_edges
-
-def get_nearest_height(tree, heights, point):
-    distances, indices = tree.query(point, k=1)
-    nearest_height = heights[indices]
-    print("Nächste Höhe gefunden:", nearest_height)
-    return nearest_height
-
-def get_detailed_sequence(current_edge, gdf_edges_detailed, osmid_index):
-    osmid_str = str(current_edge['osmid']).strip('[]').replace(' ', '')
-    osmids = [int(id) for id in osmid_str.split(',') if id]
-
-    detailed_edges = gpd.GeoDataFrame(columns=gdf_edges_detailed.columns).set_crs("EPSG:4326")
-
-    candidate_indices = set()
-    for osmid in osmids:
-        candidate_indices.update(osmid_index.get(osmid, []))
-
-    candidates = gdf_edges_detailed.loc[sorted(candidate_indices)]
-
-    for _, edge in candidates.iterrows():
-        if all(coord in current_edge['geometry'].coords for coord in edge['geometry'].coords):
-            if (edge['geometry'] not in detailed_edges['geometry'].values and
-                    str(edge['reversed']) == str(current_edge['reversed'])):
-                detailed_edges = pd.concat([detailed_edges, edge.to_frame().T])
-
-    return detailed_edges
-
-def short_edges(gdf_edges, gdf_edges_detailed, max_allowed_length):
-    def split_edge(current_edge, detailed_edges):
-        """Teilt eine Kante in zwei kürzere Kanten."""
-        half_length = current_edge['length'] / 2
-
-        forward_edges = calculate_cumulative_edges(detailed_edges, half_length, forward=True)
-        backward_edges = calculate_cumulative_edges(detailed_edges, half_length, forward=False)
-
-        smaller_cum_length = min(forward_edges['length'].sum(), backward_edges['length'].sum())
-        if smaller_cum_length == forward_edges['length'].sum():
-            if len(backward_edges) > 1:
-                backward_edges = backward_edges.iloc[:-1]
+        # attributes (conservative)
+        row['highway']  = block.iloc[0].get('highway', row.get('highway', 'unknown'))
+        if 'maxspeed' in block:
+            try:
+                row['maxspeed'] = float(pd.to_numeric(block['maxspeed'], errors='coerce').max())
+            except Exception:
+                row['maxspeed'] = row.get('maxspeed', 50.0)
         else:
-            if len(forward_edges) > 1:
-                forward_edges = forward_edges.iloc[:-1]
+            row['maxspeed'] = row.get('maxspeed', 50.0)
+        if 'oneway' in block:
+            try:
+                flags = block['oneway'].astype(str).str.lower().isin(['1', 'true', 'yes'])
+                row['oneway'] = bool(flags.any())
+            except Exception:
+                row['oneway'] = False
+        else:
+            row['oneway'] = False
 
-        backward_edges = backward_edges.iloc[::-1]
-        return create_split_edges(current_edge, forward_edges, backward_edges)
+        # OSMIDs taken exactly from the block, filtered by original set (if present)
+        orig_ids = set(_osmid_list(edge.get('osmid', '')))
+        block_ids = _flatten_osmids_from_block(block)
+        filtered_ids = [osm for osm in block_ids if (not orig_ids) or (osm in orig_ids)]
+        row['osmid'] = "[" + ",".join(str(x) for x in filtered_ids) + "]"
 
-    def calculate_cumulative_edges(detailed_edges, target_length, forward):
-        """Berechnet kumulative Kantenlängen vorwärts oder rückwärts."""
-        cum_length = 0
-        selected_edges = []
-        edges_iter = detailed_edges.iterrows() if forward else detailed_edges.iloc[::-1].iterrows()
+        row['origin'] = 'split'
+        return gpd.GeoDataFrame([row]).set_crs("EPSG:4326", allow_override=True)
 
-        for _, det_edge in edges_iter:
-            selected_edges.append(det_edge)
-            cum_length += det_edge['length']
-            if cum_length >= target_length:
-                break
-        return gpd.GeoDataFrame(selected_edges)
+    left_edge  = make_block(left_seg)
+    right_edge = make_block(right_seg)
 
-    def create_split_edges(original_edge, forward_edges, backward_edges):
-        """Erstellt zwei neue Kanten basierend auf den aufgeteilten Kanten."""
-        edge1 = gpd.GeoDataFrame([{
-            **original_edge,
-            'u': forward_edges.iloc[0]['u'],
-            'v': forward_edges.iloc[-1]['v'],
-            'length': forward_edges['length'].sum(),
-            'osmid': '[' + ','.join(str(id) for id in forward_edges['osmid'].explode().unique()) + ']',
-            'geometry': LineString([pt for geom in forward_edges.geometry for pt in geom.coords]),
-        }]).set_crs("EPSG:4326", allow_override=True)
+    # Provide sequence halves as well
+    left_seq = left_seg.drop(columns=[c for c in left_seg.columns if c not in seq_det.columns], errors='ignore').copy()
+    right_seq = right_seg.drop(columns=[c for c in right_seg.columns if c not in seq_det.columns], errors='ignore').copy()
+    left_seq  = left_seq.set_crs("EPSG:4326", allow_override=True)
+    right_seq = right_seq.set_crs("EPSG:4326", allow_override=True)
 
-        edge2 = gpd.GeoDataFrame([{
-            **original_edge,
-            'u': backward_edges.iloc[0]['u'],
-            'v': backward_edges.iloc[-1]['v'],
-            'length': backward_edges['length'].sum(),
-            'osmid': '[' + ','.join(str(id) for id in backward_edges['osmid'].explode().unique()) + ']',
-            'geometry': LineString([pt for geom in backward_edges.geometry for pt in geom.coords]),
-        }]).set_crs("EPSG:4326", allow_override=True)
+    return left_edge, right_edge, split_meta, left_seq, right_seq
 
-        return edge1, edge2
+import sys
 
-    long_edges = gdf_edges[gdf_edges['length'] > max_allowed_length]
-    total_length_to_process = long_edges['length'].sum()
-    if long_edges.empty:
-        return gdf_edges
+def short_edges(gdf_edges_simplified: gpd.GeoDataFrame,
+                gdf_edges_detailed: gpd.GeoDataFrame,
+                max_allowed_length: float):
+    """
+    Replace overly long simplified edges with directed sequences of detailed segments and
+    recursively split until each part is <= max_allowed_length.
+    Returns a tuple (edges_out_gdf, split_nodes_xy_dict).
+    """
 
-    pbar = tqdm(total=len(long_edges), desc="Edge Shortening", unit="edge", mininterval=0.5)
-    indices_to_drop = []
-    final_edges = gpd.GeoDataFrame(columns=gdf_edges.columns).set_crs("EPSG:4326")
-    if not final_edges.empty and final_edges.crs is None:
-        final_edges = final_edges.set_crs("EPSG:4326", allow_override=True)
-    if not gdf_edges.crs:
-        gdf_edges = gdf_edges.set_crs("EPSG:4326", allow_override=True)
+    # Ensure CRS
+    if not gdf_edges_simplified.crs:
+        gdf_edges_simplified = gdf_edges_simplified.set_crs("EPSG:4326", allow_override=True)
+    if not gdf_edges_detailed.crs:
+        gdf_edges_detailed = gdf_edges_detailed.set_crs("EPSG:4326", allow_override=True)
 
-    osmid_index = defaultdict(list)
+    osmid_index = build_osmid_index_for_detailed(gdf_edges_detailed)
 
-    # --- Brücken-Gruppen zusammenfassen (nur in detailed) ---
-    if 'bridge' in gdf_edges_detailed.columns:
-        is_bridge = gdf_edges_detailed['bridge'] == 'yes'
-        group_id = (is_bridge != is_bridge.shift(1)).cumsum()
-        gdf_edges_detailed['bridge_group'] = group_id.where(is_bridge)
+    is_long = pd.to_numeric(gdf_edges_simplified['length'], errors='coerce').fillna(0.0) > float(max_allowed_length)
+    long_edges = gdf_edges_simplified[is_long]
+    keep_edges = gdf_edges_simplified[~is_long].copy()
+    keep_edges['origin'] = 'keep'
 
-        group_sizes = gdf_edges_detailed.groupby('bridge_group').size()
-        valid_groups = group_sizes[group_sizes > 1].index
+    result_parts = [keep_edges]
+    split_nodes_xy = {}
+    to_process = []
 
-        merged_rows = []
-        for gid in valid_groups:
-            group = gdf_edges_detailed[gdf_edges_detailed['bridge_group'] == gid]
-            merged = group.iloc[0].copy()
-            merged['start'] = group.iloc[0]['start']
-            merged['end'] = group.iloc[-1]['end']
-            merged['geometry'] = LineString([
-                group.iloc[0]['geometry'].coords[0],
-                group.iloc[-1]['geometry'].coords[-1]
-            ])
-            merged['length'] = group['length'].sum()
-            merged['osmid'] = group.iloc[0]['osmid']
-            merged['v'] = group.iloc[-1]['v']
-            merged_rows.append((group.index[0], merged))
+    # -------- Progress target estimation --------
+    def _needed_segments(L, maxlen):
+        try:
+            Lf = float(L)
+        except Exception:
+            return 0
+        if not np.isfinite(Lf) or Lf <= 0:
+            return 0
+        return int(np.ceil(Lf / float(maxlen)))
 
-        drop_indices = gdf_edges_detailed[gdf_edges_detailed['bridge_group'].isin(valid_groups)].index
-        keep_indices = [idx for idx, _ in merged_rows]
-        drop_indices = drop_indices.difference(keep_indices)
-        gdf_edges_detailed = gdf_edges_detailed.drop(drop_indices)
+    needed_total = (
+            sum(_needed_segments(e['length'], max_allowed_length) for _, e in long_edges.iterrows()) +
+            len(keep_edges)
+    )
 
-        for idx, row in merged_rows:
-            gdf_edges_detailed.loc[idx] = row
+    # -------- Progress bars --------
+    pbar_tasks = tqdm(total=0, desc="Splitting work", position=0,
+                      unit="task", mininterval=0.3,
+                      dynamic_ncols=True, leave=False, file=sys.stdout)
 
-        gdf_edges_detailed = gdf_edges_detailed.drop(columns='bridge_group')
+    pbar_final = tqdm(total=needed_total, desc="Final edges", position=1,
+                      unit="edge", mininterval=0.3,
+                      dynamic_ncols=True, leave=False, file=sys.stdout)
 
-    # --- Tunnel-Gruppen zusammenfassen (nur in detailed) ---
-    if 'tunnel' in gdf_edges_detailed.columns:
-        is_tunnel = gdf_edges_detailed['tunnel'] == 'yes'
-        group_id = (is_tunnel != is_tunnel.shift(1)).cumsum()
-        gdf_edges_detailed['tunnel_group'] = group_id.where(is_tunnel)
+    # -------- Initial sequences --------
+    for _, e in long_edges.iterrows():
+        seq = get_directed_detailed_sequence(e, gdf_edges_detailed, osmid_index)
+        if seq.empty:
+            ee = gpd.GeoDataFrame([e], crs="EPSG:4326"); ee['origin'] = 'keep'
+            result_parts.append(ee)
+            pbar_final.update(1)
+            if pbar_final.n > pbar_final.total:
+                pbar_final.total = pbar_final.n
+                pbar_final.refresh()
+        else:
+            to_process.append({'edge_row': e, 'seq_det': seq})
+            pbar_tasks.total += 1
+            pbar_tasks.refresh()
 
-        group_sizes = gdf_edges_detailed.groupby('tunnel_group').size()
-        valid_groups = group_sizes[group_sizes > 1].index
+    # guard against infinite loops
+    def _part_key(edge_row, seq_det):
+        return (str(edge_row['u']), str(edge_row['v']),
+                int(round(float(edge_row['length']))),
+                str(edge_row.get('osmid')), int(len(seq_det)))
 
-        merged_rows = []
-        for gid in valid_groups:
-            group = gdf_edges_detailed[gdf_edges_detailed['tunnel_group'] == gid]
-            merged = group.iloc[0].copy()
-            merged['start'] = group.iloc[0]['start']
-            merged['end'] = group.iloc[-1]['end']
-            merged['geometry'] = LineString([
-                group.iloc[0]['geometry'].coords[0],
-                group.iloc[-1]['geometry'].coords[-1]
-            ])
-            merged['length'] = group['length'].sum()
-            merged['osmid'] = group.iloc[0]['osmid']
-            merged['v'] = group.iloc[-1]['v']
-            merged_rows.append((group.index[0], merged))
+    seen_parts = set()
 
-        drop_indices = gdf_edges_detailed[gdf_edges_detailed['tunnel_group'].isin(valid_groups)].index
-        keep_indices = [idx for idx, _ in merged_rows]
-        drop_indices = drop_indices.difference(keep_indices)
-        gdf_edges_detailed = gdf_edges_detailed.drop(drop_indices)
+    # -------- Main processing loop --------
+    while to_process:
+        item = to_process.pop(0)
+        edge = item['edge_row']
+        seq  = item['seq_det']
+        L = float(edge['length'])
 
-        for idx, row in merged_rows:
-            gdf_edges_detailed.loc[idx] = row
-
-        gdf_edges_detailed = gdf_edges_detailed.drop(columns='tunnel_group')
-
-    # --- Index für detailed osmid -> Zeilen ---
-    for idx, row in gdf_edges_detailed.iterrows():
-        osmids = [int(x) for x in str(row['osmid']).strip('[]').replace(' ', '').split(',') if x]
-        for osmid in osmids:
-            osmid_index[osmid].append(idx)
-
-    # --- Lange Kanten iterativ halbieren ---
-    for idx, edge in long_edges.iterrows():
-        edges_to_process = [edge]
-        processed_edges = set()
-        processed_length = 0
-        while edges_to_process:
-            current_edge = edges_to_process.pop(0)
-            edge_id = (current_edge['u'], current_edge['v'])
-            if edge_id in processed_edges:
-                final_edges = pd.concat(
-                    [final_edges, gpd.GeoDataFrame([current_edge]).set_crs("EPSG:4326", allow_override=True)],
-                    ignore_index=True
-                )
-                processed_length += float(current_edge['length'])
-                edges_to_process = [e for e in edges_to_process if not e.equals(current_edge)]
-                continue
-
-            processed_edges.add(edge_id)
-            detailed_edges = get_detailed_sequence(current_edge, gdf_edges_detailed, osmid_index)
-            if detailed_edges.empty:
-                current_edge_gdf = gpd.GeoDataFrame([current_edge]).set_crs("EPSG:4326", allow_override=True)
-                final_edges = pd.concat([final_edges, current_edge_gdf], ignore_index=True)
-                continue
-            edge1, edge2 = split_edge(current_edge, detailed_edges)
-            for e2 in [edge1, edge2]:
-                if float(e2['length'].iloc[0]) <= max_allowed_length:
-                    final_edges = pd.concat([final_edges, e2], ignore_index=True)
-                    processed_length = processed_length + e2['length'].iloc[0]
-                else:
-                    edges_to_process.append(e2.iloc[0])
-
-        indices_to_drop.append(idx)
-        pbar.update(1)  # pro fertig behandelter Original-Kante
-
-    gdf_edges = gdf_edges.drop(indices_to_drop)
-    pbar.close()
-
-    if not final_edges.empty and final_edges.crs is None:
-        final_edges = final_edges.set_crs("EPSG:4326", allow_override=True)
-    if not gdf_edges.crs:
-        gdf_edges = gdf_edges.set_crs("EPSG:4326", allow_override=True)
-
-    if not final_edges.empty:
-        final_edges = final_edges.reindex(columns=gdf_edges.columns, fill_value=pd.NA)
-        final_edges = final_edges.set_crs(gdf_edges.crs or "EPSG:4326", allow_override=True)
-        gdf_edges = pd.concat([gdf_edges, final_edges], ignore_index=True)
-
-    return gdf_edges
-
-# --------------------------- No-Z-Knoten ---------------------------
-
-def _collect_endpoints_for_flag(gdf_edges_detailed: gpd.GeoDataFrame, flag_col: str) -> set:
-    """Start/Ende von Brücken-/Tunnelgruppen als Set von Node-IDs (Strings)."""
-    if flag_col not in gdf_edges_detailed.columns:
-        return set()
-
-    mask = gdf_edges_detailed[flag_col].apply(_truthy_flag)
-    if mask.sum() == 0:
-        return set()
-
-    group_id = (mask != mask.shift(1)).cumsum()
-    gtmp = gdf_edges_detailed.copy()
-    gtmp["_grp"] = group_id.where(mask)
-
-    endpoints = set()
-    for gid, grp in gtmp.groupby("_grp"):
-        if pd.isna(gid):
+        if L <= max_allowed_length:
+            out_df = gpd.GeoDataFrame([edge], crs="EPSG:4326")
+            out_df['origin'] = 'split'
+            result_parts.append(out_df)
+            pbar_final.update(1)
+            pbar_tasks.update(1)
             continue
-        first_u = grp.iloc[0]["u"]
-        last_v = grp.iloc[-1]["v"]
-        endpoints.add(str(first_u))
-        endpoints.add(str(last_v))
-    return endpoints
 
-def get_nodes_without_z_from_detailed(gdf_edges_detailed: gpd.GeoDataFrame) -> set:
-    """Start/Ende von Brücken- oder Tunnelabschnitten → diese Knoten ohne z exportieren."""
-    bridge_endpoints = _collect_endpoints_for_flag(gdf_edges_detailed, "bridge")
-    tunnel_endpoints = _collect_endpoints_for_flag(gdf_edges_detailed, "tunnel")
-    return set(bridge_endpoints).union(tunnel_endpoints)
+        left, right, split_meta, left_seq, right_seq = split_once_at_half(edge, seq)
+        if left is None or right is None:
+            ee = gpd.GeoDataFrame([edge], crs="EPSG:4326"); ee['origin'] = 'keep'
+            result_parts.append(ee)
+            pbar_final.update(1)
+            pbar_tasks.update(1)
+            continue
 
-# --------------------------- Export ---------------------------
+        split_nodes_xy[split_meta['nid']] = split_meta['xy']
 
-from lxml import etree as ET2  # optional
+        new_tasks = 0
+
+        # --- left ---
+        L_edge = left.iloc[0]
+        if float(L_edge['length']) > max_allowed_length:
+            key = _part_key(L_edge, left_seq)
+            if key not in seen_parts:
+                seen_parts.add(key)
+                to_process.append({'edge_row': L_edge, 'seq_det': left_seq})
+                new_tasks += 1
+        else:
+            df_out = gpd.GeoDataFrame([L_edge], crs="EPSG:4326"); df_out['origin'] = 'split'
+            result_parts.append(df_out)
+            pbar_final.update(1)
+
+        # --- right ---
+        R_edge = right.iloc[0]
+        if float(R_edge['length']) > max_allowed_length:
+            key = _part_key(R_edge, right_seq)
+            if key not in seen_parts:
+                seen_parts.add(key)
+                to_process.append({'edge_row': R_edge, 'seq_det': right_seq})
+                new_tasks += 1
+        else:
+            df_out = gpd.GeoDataFrame([R_edge], crs="EPSG:4326"); df_out['origin'] = 'split'
+            result_parts.append(df_out)
+            pbar_final.update(1)
+
+        # finished one task
+        pbar_tasks.update(1)
+
+        if new_tasks:
+            pbar_tasks.total += new_tasks
+            pbar_tasks.refresh()
+
+        if pbar_final.n > pbar_final.total:
+            pbar_final.total = pbar_final.n
+            pbar_final.refresh()
+
+    pbar_tasks.close()
+    pbar_final.close()
+
+    out = pd.concat(result_parts, ignore_index=True)
+    if not out.crs:
+        out = out.set_crs("EPSG:4326", allow_override=True)
+
+    return out, split_nodes_xy
+
 def write_matsim_network(gdf_nodes, gdf_edges, epsg_code, output_path, nodes_without_z: set = None):
     """
-    Schreibt ein MATSim-Netzwerk.
-    Knoten in nodes_without_z erhalten KEIN z-Attribut.
-    """
-    print("Schreibe Matsim-Netzwerk...")
+    Write a MATSim network (network_v2 DTD). For non-oneway links, produce two directed links.
 
-    # CRS vereinheitlichen (Geometrien in Projektion für x/y)
+    Parameters
+    ----------
+    gdf_nodes : GeoDataFrame (EPSG:4326)
+        Must contain column 'height' for node Z (optional) and 'geometry' points.
+    gdf_edges : GeoDataFrame (EPSG:4326)
+        Must contain columns 'u', 'v', 'length', 'maxspeed' (km/h), 'capacity', 'lanes',
+        'highway', 'oneway', and LineString geometry.
+    epsg_code : int
+        Target planar CRS for x/y coordinates in the MATSim file.
+    output_path : str
+        Path to write gzipped MATSim network XML.
+    nodes_without_z : set[str], optional
+        Node IDs for which 'z' should be omitted even if height is present.
+    """
+    print("Writing MATSim network...")
+    # unify CRS (x/y in target EPSG)
     gdf_nodes = gdf_nodes.set_crs(epsg=4326, allow_override=True).to_crs(epsg=epsg_code)
     gdf_edges = gdf_edges.set_crs(epsg=4326, allow_override=True).to_crs(epsg=epsg_code)
 
-    # OSM-IDs der Nodes bereitstellen
+    # Node-ID series (robust, ensure single scalar value)
     if "osmid" in gdf_nodes.columns:
         osmid_series = gdf_nodes["osmid"].copy()
         osmid_series = osmid_series.apply(lambda v: (v[0] if isinstance(v, (list, tuple, np.ndarray)) else v))
     else:
         osmid_series = gdf_nodes.index.to_series()
-
     osmid_series = osmid_series.astype(str)
 
-    # Lookup: osmid -> (x, y, z)
+    # Node lookup: id -> (x, y, z)
     has_height = "height" in gdf_nodes.columns
     node_lookup = {}
     for idx, row in gdf_nodes.iterrows():
@@ -668,80 +747,68 @@ def write_matsim_network(gdf_nodes, gdf_edges, epsg_code, output_path, nodes_wit
                 z = None
         node_lookup[osm_id] = (x, y, z)
 
-    # Kante-Attribute vorbereiten
+    # Build links (possibly bidirectional)
     links_data = []
+
+    def parse_maxspeed(val, default=130.0):
+        if isinstance(val, (list, tuple, np.ndarray)):
+            cand = [_num(x) for x in val]
+            cand = [c for c in cand if c is not None]
+            return max(cand) if cand else default
+        return _num(val, default=default)
+
     for _, row in gdf_edges.iterrows():
-        from_node = str(row["u"])
-        to_node = str(row["v"])
-        link_id = f"{from_node}-{to_node}"
+        u = _clean_text(row.get("u"), None)
+        v = _clean_text(row.get("v"), None)
+        # Skip if u/v missing
+        if (u is None) or (v is None):
+            continue
 
-        length = str(int(round(float(row.get("length", 0.0)))))
-
-        maxspeed = row.get("maxspeed", 130)
-        if maxspeed is None:
-            maxspeed = 130
-        elif isinstance(maxspeed, (list, tuple, np.ndarray)):
-            cand = []
-            for s in maxspeed:
-                try:
-                    cand.append(float(str(s).replace(",", ".")))
-                except Exception:
-                    pass
-            maxspeed = max(cand) if cand else 130
-        else:
+        length_m = _num(row.get("length"), default=1.0)
+        if length_m is None or length_m <= 0:
+            # fallback from 3857 length
             try:
-                maxspeed = float(str(maxspeed).replace(",", "."))
+                length_m = float(gpd.GeoSeries([row.geometry], crs=gdf_edges.crs).to_crs(3857).length.iloc[0])
             except Exception:
-                maxspeed = 130
-        freespeed = round(float(maxspeed) / 3.6, 2)
+                length_m = 1.0
+        length = str(int(round(max(1.0, length_m))))
 
-        capacity = row.get("capacity", 3000)
-        try:
-            capacity = str(int(capacity))
-        except Exception:
-            capacity = "3000"
+        maxspeed = parse_maxspeed(row.get("maxspeed", 50.0), default=50.0)
+        freespeed = round((maxspeed or 50.0) / 3.6, 2)
 
-        lanes = row.get("lanes", 1)
-        if lanes is None:
-            lanes = 1
-        elif isinstance(lanes, (list, tuple, np.ndarray)):
-            valid = []
-            for l in lanes:
-                try:
-                    if l is not None and str(l) != "" and not pd.isna(l):
-                        valid.append(float(l))
-                except Exception:
-                    pass
-            lanes = int(max(valid)) if valid else 1
-        else:
-            try:
-                val = float(lanes)
-                lanes = 1 if pd.isna(val) else int(round(val))
-            except Exception:
-                lanes = 1
-        permlanes = str(max(1, lanes))
+        cap = _num(row.get("capacity"), default=3000, as_int=True) or 3000
+        permlanes = _num(row.get("lanes"), default=1, as_int=True) or 1
 
-        highway_type = str(row.get("highway", "unknown"))
+        highway_type = _clean_text(row.get("highway"), "unknown")
+        one_way_flag = _truthy_flag(row.get("oneway", None))
+        if (not one_way_flag) and highway_type in ("motorway", "motorway_link"):
+            one_way_flag = True
 
-        links_data.append({
-            "id": link_id,
-            "from": from_node,
-            "to": to_node,
-            "length": length,
-            "freespeed": freespeed,
-            "capacity": capacity,
-            "permlanes": permlanes,
-            "highway_type": highway_type
-        })
+        def add_link(u_, v_):
+            lid = f"{u_}-{v_}"
+            links_data.append({
+                "id": lid, "from": u_, "to": v_,
+                "length": length,
+                "freespeed": float(freespeed),
+                "capacity": str(int(cap)),
+                "permlanes": str(int(max(1, permlanes))),
+                "highway_type": highway_type,
+                "oneway_attr": "1" if one_way_flag else "0",
+            })
 
-    # Duplikate nach id entfernen: behalte die mit höchster freespeed
+        add_link(u, v)
+        if not one_way_flag:
+            add_link(v, u)
+
+
+    # Deduplicate by ID (keep the faster freespeed if duplicates exist)
     unique_links = {}
     for link in links_data:
         lid = link["id"]
         if (lid not in unique_links) or (link["freespeed"] > unique_links[lid]["freespeed"]):
             unique_links[lid] = link
 
-    # Netz-XML
+    # XML structure
     network = ET.Element("network")
     network.insert(1, ET.Comment("======================================================================"))
     nodes_element = ET.SubElement(network, "nodes")
@@ -752,13 +819,12 @@ def write_matsim_network(gdf_nodes, gdf_edges, epsg_code, output_path, nodes_wit
     )
     network.append(ET.Comment("======================================================================"))
 
-    # Links schreiben & verwendete Nodes sammeln
+    # Write links & collect used nodes
     used_node_ids = set()
     for link in unique_links.values():
         if link["from"] not in node_lookup or link["to"] not in node_lookup:
             continue
-
-        link_elem = ET.SubElement(
+        le = ET.SubElement(
             links_element, "link",
             id=link["id"],
             **{
@@ -768,112 +834,194 @@ def write_matsim_network(gdf_nodes, gdf_edges, epsg_code, output_path, nodes_wit
                 "freespeed": str(link["freespeed"]),
                 "capacity": link["capacity"],
                 "permlanes": link["permlanes"],
-                "oneway": "1",
                 "modes": "car",
             }
         )
-        attributes = ET.SubElement(link_elem, "attributes")
-        a_speed = ET.SubElement(attributes, "attribute", name="allowed_speed", **{"class": "java.lang.Double"})
+        attrs = ET.SubElement(le, "attributes")
+        a_speed = ET.SubElement(attrs, "attribute", name="allowed_speed", **{"class": "java.lang.Double"})
         a_speed.text = str(link["freespeed"])
-        a_type = ET.SubElement(attributes, "attribute", name="type", **{"class": "java.lang.String"})
-        a_type.text = link["highway_type"]
+        a_type = ET.SubElement(attrs, "attribute", name="type", **{"class": "java.lang.String"})
+        a_type.text = _clean_text(link["highway_type"], "unknown")
+        a_oneway = ET.SubElement(attrs, "attribute", name="oneway_source", **{"class": "java.lang.String"})
+        a_oneway.text = "1" if link.get("oneway_attr") == "1" else "0"
 
-        used_node_ids.add(link["from"])
-        used_node_ids.add(link["to"])
+        used_node_ids.add(link["from"]); used_node_ids.add(link["to"])
 
-    # --- Nur verwendete Nodes schreiben; z ggf. weglassen ---
+    # Write only used nodes; optionally omit z
     nodes_without_z = nodes_without_z or set()
-
     for osm_id in used_node_ids:
         x, y, z = node_lookup[osm_id]
         node_attrs = {"id": str(osm_id), "x": f"{x}", "y": f"{y}"}
-        if (z is not None) and (str(osm_id) not in nodes_without_z):
+        # only write z if it is a finite number and not in the omit-list
+        if (z is not None) and math.isfinite(z) and (str(osm_id) not in nodes_without_z):
             node_attrs["z"] = f"{z}"
         ET.SubElement(nodes_element, "node", **node_attrs)
 
-    # pretty print & schreiben (inkl. DTD)
     xml_string = ET.tostring(network, encoding="utf-8")
     pretty_xml = md.parseString(xml_string).toprettyxml()
     with gzip.open(output_path, "wt", encoding="utf-8") as f:
         f.write('<?xml version="1.0" ?>\n')
         f.write('<!DOCTYPE network SYSTEM "http://www.matsim.org/files/dtd/network_v2.dtd">\n')
         f.write("\n".join(pretty_xml.splitlines()[1:]))
+    print("Done:", output_path)
 
-    print("Fertig:", output_path)
+def sanitize_edges_for_export(gdf_edges: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """
+    Clean edges before export:
+    - Length: fix invalid/missing values from geometry (EPSG:3857), min=1 m
+    - lanes/capacity/maxspeed/highway/oneway with robust defaults without NaN
+    - keep u/v as strings (as required by MATSim)
+    """
+    df = gdf_edges.copy()
 
-# --------------------------- Main ---------------------------
+    # ensure CRS
+    if not df.crs:
+        df = df.set_crs("EPSG:4326", allow_override=True)
+
+    # length
+    if 'length' not in df.columns:
+        df['length'] = np.nan
+    len_num = pd.to_numeric(df['length'], errors='coerce')
+    bad_len = len_num.isna() | (len_num <= 0)
+    if bad_len.any():
+        df3857 = df.to_crs(3857)
+        df.loc[bad_len, 'length'] = df3857.loc[bad_len, 'geometry'].length.values
+    df['length'] = pd.to_numeric(df['length'], errors='coerce').fillna(1.0).clip(lower=1.0)
+
+    # lanes
+    if 'lanes' not in df.columns:
+        df['lanes'] = 1
+    df['lanes'] = pd.to_numeric(df['lanes'], errors='coerce').fillna(1).clip(lower=1).round().astype(int)
+
+    # capacity
+    if 'capacity' not in df.columns:
+        df['capacity'] = 3000
+    df['capacity'] = pd.to_numeric(df['capacity'], errors='coerce').fillna(3000).clip(lower=100).round().astype(int)
+
+    # maxspeed
+    if 'maxspeed' not in df.columns:
+        df['maxspeed'] = 50.0
+    else:
+        def _mx(v):
+            if isinstance(v, (list, tuple, np.ndarray, pd.Series)):
+                try:
+                    vals = pd.to_numeric(pd.Series(list(v)), errors='coerce')
+                    vals = vals[vals.notna()]
+                    return float(vals.max()) if not vals.empty else np.nan
+                except Exception:
+                    return np.nan
+            try:
+                return float(str(v).replace(",", "."))
+            except Exception:
+                return np.nan
+        df['maxspeed'] = df['maxspeed'].apply(_mx)
+        df['maxspeed'] = pd.to_numeric(df['maxspeed'], errors='coerce').fillna(50.0).clip(lower=1.0)
+
+    # highway
+    if 'highway' not in df.columns:
+        df['highway'] = 'unknown'
+    df['highway'] = df['highway'].astype(str)
+    df.loc[df['highway'].str.strip().isin(['', 'nan', 'None']), 'highway'] = 'unknown'
+
+    # oneway -> bool
+    if 'oneway' not in df.columns:
+        df['oneway'] = False
+    df['oneway'] = df['oneway'].apply(lambda x: str(x).strip().lower() in ('1', 'true', 'yes'))
+
+    # u/v as strings
+    df['u'] = df['u'].astype(str)
+    df['v'] = df['v'].astype(str)
+
+    return df
+
+
+# --------------------------- MAIN ---------------------------
 
 if __name__ == "__main__":
-    kdtree_input_path = r"data\germany_kdtree_from_roads3d_epsg4326.npz"
-    area = "germany"
+    # --- Parameters ---
+    area = "Märkisch-Oderland"  # e.g., "Maerkisch-Oderland" or "Potsdam"
+    kdtree_input_path = f"data/{area}_kdtree_from_roads3d_epsg4326.npz"
     local_osm_input_path_simplified = f"data/{area}_simplified.gpkg"
-    local_osm_input_path_detailed = f"data/{area}_detailed_sorted.gpkg"
-    output_path = f"data/{area}_max_200m_long.xml.gz"
-    target_epsg = 4839  # EPSG:4839 (Germany)
-    max_allowed_link_lengths = [200 + i * 0 for i in range(1)]  # in meters
-    BR_TU_OFFSET_M = 50.0  # Offset zur Höhenzuweisung vor&nach Brücken und Tunneln
+    local_osm_input_path_detailed   = f"data/{area}_detailed_sorted.gpkg"
+    output_path = f"data/{area}_max_1000m_long_V0.xml.gz"
+    target_epsg = 4839  # Germany (ETRS89 / GK zone 3D-like), adjust to your region CRS as needed
+    max_allowed_link_length = 10000  # << set maximum link length in meters
 
+    # --- Data loading ---
     tree, coords, heights = load_kdtree(kdtree_input_path)
     gdf_nodes_simplified, gdf_edges_simplified = load_local_osm_file(local_osm_input_path_simplified)
-    gdf_nodes_detailed, gdf_edges_detailed = load_local_osm_file(local_osm_input_path_detailed)
+    gdf_nodes_detailed,   gdf_edges_detailed   = load_local_osm_file(local_osm_input_path_detailed)
 
-    # nur einmal projizieren
-    gdf_edges_detailed_3857 = gdf_edges_detailed.to_crs(epsg=3857)
+    # --- Shorten edges (returns edges + split-node XY dict) ---
+    print(f"\nShortening edges with max_allowed_link_length={max_allowed_link_length} m ...")
+    gdf_edges_shortened, split_nodes_xy = short_edges(
+        gdf_edges_simplified=gdf_edges_simplified,
+        gdf_edges_detailed=gdf_edges_detailed,
+        max_allowed_length=max_allowed_link_length
+    )
 
-    # Originale detailed-Edges/Nodes einfrieren (für XY-Referenz und Gruppenbildung)
-    gdf_nodes_detailed_orig  = gdf_nodes_detailed.copy(deep=True)
-    gdf_edges_detailed_orig  = gdf_edges_detailed.copy(deep=True)
-    gdf_edges_detailed_orig_3857 = gdf_edges_detailed_orig.to_crs(epsg=3857)
+    # --- Used node IDs (strings) ---
+    used_nodes = set(map(str, gdf_edges_shortened['u'])) | set(map(str, gdf_edges_shortened['v']))
 
-    for max_allowed_link_length in max_allowed_link_lengths:
-        print(f"\nProcessing max allowed link length: {max_allowed_link_length}m")
-        gdf_edges_shortened = short_edges(
-            gdf_edges_simplified, gdf_edges_detailed, max_allowed_link_length
-        )
+    # --- Map OSM node id -> XY from detailed nodes ---
+    from shapely.geometry import Point
+    def _first_scalar(v):
+        if isinstance(v, (list, tuple, np.ndarray)) and len(v) > 0:
+            return v[0]
+        return v
 
-        # Höheninformationen hinzufügen (nur für verwendete Nodes)
-        gdf_edges_shortened["u"] = gdf_edges_shortened["u"].astype(int)
-        gdf_edges_shortened["v"] = gdf_edges_shortened["v"].astype(int)
-        nodes_in_shortened_edges = set(gdf_edges_shortened['u']).union(set(gdf_edges_shortened['v']))
+    gdf_nodes_detailed = gdf_nodes_detailed.copy()
+    gdf_nodes_detailed["osmid_norm"] = pd.to_numeric(
+        gdf_nodes_detailed["osmid"].apply(_first_scalar), errors='coerce'
+    )
+    gdf_nodes_detailed = gdf_nodes_detailed.dropna(subset=["osmid_norm"]).copy()
+    gdf_nodes_detailed["osmid_norm"] = gdf_nodes_detailed["osmid_norm"].astype(int)
 
-        mask = gdf_nodes_detailed['osmid'].isin(nodes_in_shortened_edges)
-        gdf_nodes_detailed_reduced = gdf_nodes_detailed[mask].copy()
+    osm_xy = {
+        str(int(r["osmid_norm"])): (float(r.geometry.x), float(r.geometry.y))
+        for _, r in gdf_nodes_detailed.iterrows()
+    }
 
-        print("Start compute z_overrides …")
-        z_overrides = compute_bridge_tunnel_z_overrides_strict(
-            gdf_edges_detailed_4326=gdf_edges_detailed_orig,
-            gdf_edges_detailed_3857=gdf_edges_detailed_orig_3857,
-            tree=tree,
-            heights=heights,
-            offset_m=BR_TU_OFFSET_M
-        )
-        print(f"Done z_overrides: {len(z_overrides)} Knoten")
-
-        # Standardhöhen für alle verwendeten Knoten
-        xs = gdf_nodes_detailed_reduced.geometry.x.to_numpy()
-        ys = gdf_nodes_detailed_reduced.geometry.y.to_numpy()
-        gdf_nodes_detailed_reduced['height'] = kdtree_heights_vectorized(tree, heights, xs, ys)
-
-        # Overrides anwenden (nur u/v-Knoten der kurzen Kanten)
-        if "osmid" in gdf_nodes_detailed_reduced.columns:
-            gdf_nodes_detailed_reduced["osmid_str"] = gdf_nodes_detailed_reduced["osmid"].astype(str)
+    # --- Fallback: XY from edge geometry, if neither OSM nor split_nodes_xy present ---
+    def _xy_from_edge(nid: str) -> tuple | None:
+        rows = gdf_edges_shortened[(gdf_edges_shortened['u'].astype(str) == nid) |
+                                   (gdf_edges_shortened['v'].astype(str) == nid)]
+        if rows.empty:
+            return None
+        r = rows.iloc[0]
+        line: LineString = r.geometry
+        if str(r['u']) == nid:
+            return (float(line.coords[0][0]), float(line.coords[0][1]))
         else:
-            gdf_nodes_detailed_reduced["osmid_str"] = gdf_nodes_detailed_reduced.index.astype(str)
+            return (float(line.coords[-1][0]), float(line.coords[-1][1]))
 
-        mask_override = gdf_nodes_detailed_reduced["osmid_str"].isin(z_overrides.keys())
-        gdf_nodes_detailed_reduced.loc[mask_override, "height"] = (
-            gdf_nodes_detailed_reduced.loc[mask_override, "osmid_str"].map(z_overrides).astype(float)
-        )
+    # --- Build node list (priority: OSM-XY > Split-XY > Fallback-XY) + heights (z) ---
+    node_rows, seen = [], set()
+    for nid in used_nodes:
+        if nid in seen:
+            continue
+        if nid in osm_xy:
+            x, y = osm_xy[nid]
+        elif nid in split_nodes_xy:
+            x, y = split_nodes_xy[nid]
+        else:
+            fb = _xy_from_edge(nid)
+            if fb is None:
+                continue
+            x, y = fb
+        node_rows.append({'osmid': nid, 'geometry': Point(x, y)})
+        seen.add(nid)
 
-        # Optional: Knoten ohne z (Start/Ende Brücke/Tunnel) bestimmen und beim Export z weglassen
-        # nodes_without_z = get_nodes_without_z_from_detailed(gdf_edges_detailed_orig)
-        nodes_without_z = set()
+    gdf_nodes_export = gpd.GeoDataFrame(node_rows, crs="EPSG:4326")
+    xs = gdf_nodes_export.geometry.x.to_numpy()
+    ys = gdf_nodes_export.geometry.y.to_numpy()
+    gdf_nodes_export['height'] = kdtree_heights_vectorized(tree, heights, xs, ys)
 
-        # MATSim-Netzwerk schreiben
-        write_matsim_network(
-            gdf_nodes_detailed_reduced,
-            gdf_edges_shortened,
-            target_epsg,
-            output_path,
-            nodes_without_z=nodes_without_z
-        )
+    # --- MATSim export ---
+    write_matsim_network(
+        gdf_nodes=gdf_nodes_export,
+        gdf_edges=gdf_edges_shortened,
+        epsg_code=target_epsg,
+        output_path=output_path,
+        nodes_without_z=set()
+    )

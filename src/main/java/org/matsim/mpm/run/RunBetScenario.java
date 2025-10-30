@@ -39,7 +39,7 @@ public class RunBetScenario {
 
 		Config config;
 		if ( args==null || args.length==0 || args[0]==null ){
-			config = ConfigUtils.loadConfig( "scenarios/BETs/1.0pctBETs_1Iteration_unlimited/config.xml" );
+			config = ConfigUtils.loadConfig( "scenarios/BETs/consumption_test/config.xml" );
 		} else {
 			config = ConfigUtils.loadConfig( args );
 		}

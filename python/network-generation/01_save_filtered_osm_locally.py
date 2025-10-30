@@ -22,13 +22,101 @@ def filter_detailed_edges(gdf_detailed, osmid, reversed_val):
             (gdf_detailed['osmid'] == osmid) &
             (gdf_detailed['reversed'] == reversed_val)
             ]
+def normalize_reversed_flags(gdf_edges_simplified, starts_by_osmid, ends_by_osmid):
+    import pandas as pd
+    from pandas.api.types import is_list_like
+
+    def to_osmid_list(x):
+        if is_list_like(x) and not isinstance(x, (str, bytes)):
+            return list(x)
+        return [x]
+
+    def is_false_true_list(x):
+        return (is_list_like(x) and not isinstance(x, (str, bytes))
+                and len(x) == 2 and bool(x[0]) is False and bool(x[1]) is True)
+
+    def xy5_tuple(pt):
+        return (round(pt[0], 5), round(pt[1], 5))
+
+    # Hilfsspalten
+    if 'first5' not in gdf_edges_simplified.columns:
+        gdf_edges_simplified['first5'] = gdf_edges_simplified['geometry'].apply(lambda g: xy5_tuple(g.coords[0]))
+    if 'last5' not in gdf_edges_simplified.columns:
+        gdf_edges_simplified['last5'] = gdf_edges_simplified['geometry'].apply(lambda g: xy5_tuple(g.coords[-1]))
+
+    # Gegenstück-Lookup (OSMID-Satz + Start/Ende)
+    def osmid_key_set(x):
+        return frozenset(to_osmid_list(x))
+
+    key_rows = []
+    for idx, r in gdf_edges_simplified.iterrows():
+        key_rows.append((idx, osmid_key_set(r['osmid']), r['first5'], r['last5']))
+    key_df = pd.DataFrame(key_rows, columns=['idx', 'osmids', 's5', 'e5'])
+    key_lookup = {(osmids, s5, e5): idx for idx, osmids, s5, e5 in key_df.itertuples(index=False)}
+
+    # --- WICHTIG: live über Indizes iterieren, keinen Snapshot verarbeiten ---
+    mask_ft = gdf_edges_simplified['reversed'].apply(is_false_true_list)
+    idx_list = list(gdf_edges_simplified.index[mask_ft])
+
+    for idx in idx_list:
+        # Skip, wenn zwischenzeitlich schon festgelegt (weil Gegenstück uns schon gesetzt hat)
+        cur_val = gdf_edges_simplified.at[idx, 'reversed']
+        if not is_false_true_list(cur_val):
+            continue
+
+        row = gdf_edges_simplified.loc[idx]
+        osmid_list = to_osmid_list(row['osmid'])
+        s_start, s_end = row['first5'], row['last5']
+
+        # Vergleichsbasis
+        available_starts, available_ends = set(), set()
+        for os in osmid_list:
+            if os in starts_by_osmid:
+                available_starts |= starts_by_osmid[os]
+            if os in ends_by_osmid:
+                available_ends   |= ends_by_osmid[os]
+
+        if not available_starts and not available_ends:
+            continue
+
+        # 1) Bevorzugte, eindeutige Entscheidung über beide Enden:
+        decision = None
+        if (s_start in available_starts) and (s_end in available_ends):
+            decision = False  # forward
+        elif (s_start in available_ends) and (s_end in available_starts):
+            decision = True   # reversed
+
+        # 2) Falls noch unentschieden, alte Heuristik:
+        if decision is None:
+            if s_start in available_starts:
+                decision = False
+            elif s_start in available_ends:
+                decision = True
+            else:
+                continue  # keine Änderung
+
+        # aktuelle Edge festschreiben
+        gdf_edges_simplified.at[idx, 'reversed'] = decision
+
+        # Gegenstück finden und – wenn noch [False, True] – Gegenteil setzen
+        key_cur = (osmid_key_set(row['osmid']), row['first5'], row['last5'])
+        key_rev = (key_cur[0], key_cur[2], key_cur[1])
+        opp_idx = key_lookup.get(key_rev)
+
+        if opp_idx is not None:
+            opp_val = gdf_edges_simplified.at[opp_idx, 'reversed']
+            if is_false_true_list(opp_val):
+                gdf_edges_simplified.at[opp_idx, 'reversed'] = (not decision)
+
+    return gdf_edges_simplified
+
 
 
 if __name__ == "__main__":
     area = ("Germany")
     highway_types = '["highway"~"motorway|trunk|primary"]'
-    output_file_simplified = f"data/test_{area.split(',')[0].lower()}_simplified"
-    output_file_detailed_sorted= f"data/test_{area.split(',')[0].lower()}_detailed_sorted"
+    output_file_simplified = f"data/{area.split(',')[0].lower()}_simplified"
+    output_file_detailed_sorted= f"data/{area.split(',')[0].lower()}_detailed_sorted"
     #------------------------------------------------------
 
     print(f"Lade vereinfachtes Straßennetz für: {area}")
@@ -70,28 +158,7 @@ if __name__ == "__main__":
         lambda length: round(length, 1)
     )
 
-    # Ändere die Spalten 'oneway' & 'reversed' für Einträge mit 'oneway' == False und wenn sie eine Liste sind ([True, False]), weil sie doppelt geführt würden
-    oneway_mask = (
-            (gdf_edges_simplified['oneway'] == False) &
-            gdf_edges_simplified['reversed'].apply(lambda x: isinstance(x, list))
-    )
-    matching_indices = gdf_edges_simplified.index[oneway_mask].tolist()
-    gdf_edges_simplified.loc[oneway_mask, 'oneway'] = True
-    gdf_edges_simplified.loc[oneway_mask, 'reversed'] = False
 
-    processed_indices = []
-    for index in matching_indices:
-        if gdf_edges_simplified.at[index, 'osmid'] not in processed_indices:
-            gdf_edges_simplified.loc[index, 'oneway'] = True
-            gdf_edges_simplified.loc[index, 'reversed'] = False
-            processed_indices.append(gdf_edges_simplified.at[index, 'osmid'])
-        else:
-            gdf_edges_simplified.loc[index, 'oneway'] = True
-            gdf_edges_simplified.loc[index, 'reversed'] = True
-
-    matching_indices.clear()
-
-    gdf_edges_simplified_final = gdf_edges_simplified.copy()
 
     #------------------------------------------------------------------------------------------------------------------------------------------------------------------
     #------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -136,6 +203,58 @@ if __name__ == "__main__":
         lambda length: round(length, 1)
     )
 
+
+    # --- NORMALISIERUNG 'reversed' FÜR SIMPLIFIED-EDGES MIT MEHREREN OSMIDs ---
+    # Einfügen NACH dem Runden beider GeoDataFrames und VOR der while-Schleife.
+
+    from collections import defaultdict
+    from pandas.api.types import is_list_like
+
+    # 1) Start-/End-Koordinaten (5 Nachkommastellen) für detailed vorbereiten
+    def xy5(pt):
+        return (round(pt[0], 5), round(pt[1], 5))
+
+    def start_xy5(g):
+        return xy5(g.coords[0])
+
+    def end_xy5(g):
+        return xy5(g.coords[-1])
+
+    gdf_edges_detailed['start5'] = gdf_edges_detailed['geometry'].apply(start_xy5)
+    gdf_edges_detailed['end5']   = gdf_edges_detailed['geometry'].apply(end_xy5)
+
+    # 2) Indizes für schnellen Lookup je OSM-ID:
+    #    - starts_by_osmid[osmid] -> Menge aller Startpunkte
+    starts_by_osmid = defaultdict(set)
+    ends_by_osmid = defaultdict(set)
+
+    for osmid_val, s5, e5 in zip(gdf_edges_detailed['osmid'],
+                                 gdf_edges_detailed['start5'],
+                                 gdf_edges_detailed['end5']):
+        if is_list_like(osmid_val) and not isinstance(osmid_val, (str, bytes)):
+            for os in osmid_val:
+                starts_by_osmid[os].add(s5)
+                ends_by_osmid[os].add(e5)
+        else:
+            os = osmid_val
+            starts_by_osmid[os].add(s5)
+            ends_by_osmid[os].add(e5)
+
+    # 3) Für simplified-Edges die erste Koordinate (first5) und ALLE Koordinaten (als Set) vorbereiten
+    def first_xy5_line(g):
+        return xy5(g.coords[0])
+
+    #def all_coords5_set(g):
+    #    return {xy5(pt) for pt in g.coords}
+
+    gdf_edges_simplified['first5']    = gdf_edges_simplified['geometry'].apply(first_xy5_line)
+    #gdf_edges_simplified['coords5set'] = gdf_edges_simplified['geometry'].apply(all_coords5_set)
+
+    gdf_edges_simplified = normalize_reversed_flags(gdf_edges_simplified, starts_by_osmid, ends_by_osmid)
+
+    gdf_edges_simplified_final = gdf_edges_simplified.copy()
+
+
     #------------------------------------------------------------------------------------------------------------------------------------------------------------------
     #------------------------------------------------------------------------------------------------------------------------------------------------------------------
     total_detailed_length = gdf_edges_simplified['length'].sum()
@@ -157,10 +276,6 @@ if __name__ == "__main__":
 
         index, row = get_first_edge(gdf_edges_simplified)
         geometry = row['geometry']
-
-        if geometry.is_empty or len(geometry.coords) < 1:
-            gdf_edges_simplified = gdf_edges_simplified.drop(index=index)
-            continue
 
         first_coords = geometry.coords[0]
         all_coords = list(geometry.coords)
@@ -273,6 +388,76 @@ if __name__ == "__main__":
     # Anwendung auf das GeoDataFrame
     result_gdf['u'] = result_gdf['geometry'].apply(get_u)
     result_gdf['v'] = result_gdf['geometry'].apply(get_v)
+
+    # --- Konsistenter Node-Lookup: Rundung wie bei Kanten (5 Nachkommastellen) ---
+    geom_to_index = {
+        (round(geom.x, 5), round(geom.y, 5)): idx
+        for idx, geom in zip(gdf_nodes_detailed.index, gdf_nodes_detailed.geometry)
+    }
+
+    def get_u(geom):
+        x, y = geom.coords[0]
+        return geom_to_index.get((round(x, 5), round(y, 5)), None)
+
+    def get_v(geom):
+        x, y = geom.coords[-1]  # echtes Ende statt coords[1]
+        return geom_to_index.get((round(x, 5), round(y, 5)), None)
+
+    # Falls noch nicht geschehen:
+    result_gdf['u'] = result_gdf['geometry'].apply(get_u)
+    result_gdf['v'] = result_gdf['geometry'].apply(get_v)
+
+    # --- Reparatur: fehlende u/v über gegenläufige Kante in derselben osmid-Gruppe füllen ---
+    from pandas.api.types import is_list_like
+
+    def osmid_key(x):
+        # robuste Gruppierung: list -> tuple; scalar bleibt scalar in tuple
+        return tuple(x) if is_list_like(x) and not isinstance(x, (str, bytes)) else (x,)
+
+    df = result_gdf.copy()
+
+    # Nur bidirektionale OSMIDs bearbeiten (oneway == False)
+    mask = (df['oneway'] == False)
+    df = df.loc[mask].copy()
+
+    # Start/End-Koordinaten (wie oben, 5 Nachkommastellen)
+    df['start'] = df['geometry'].apply(lambda g: (round(g.coords[0][0], 5),  round(g.coords[0][1], 5)))
+    df['end']   = df['geometry'].apply(lambda g: (round(g.coords[-1][0], 5), round(g.coords[-1][1], 5)))
+    df['osmid_key'] = df['osmid'].apply(osmid_key)
+
+    # Hilfs-DataFrame mit Index für Rückschreiben
+    helper = df[['osmid_key', 'start', 'end', 'u', 'v']].reset_index().rename(columns={'index': 'idx'})
+
+    # Gegenkante ist (end,start) in derselben osmid_key-Gruppe
+    rev = helper.rename(columns={
+        'start': 'rev_start', 'end': 'rev_end', 'u': 'opp_u', 'v': 'opp_v'
+    })
+
+    merged = helper.merge(
+        rev,
+        how='left',
+        left_on=['osmid_key', 'start', 'end'],
+        right_on=['osmid_key', 'rev_end', 'rev_start'],
+        suffixes=('', '_opp')
+    )
+
+    # Fehlende u/v füllen: u <- opp_v, v <- opp_u
+    merged['u_filled'] = merged['u'].where(merged['u'].notna(), merged['opp_v'])
+    merged['v_filled'] = merged['v'].where(merged['v'].notna(), merged['opp_u'])
+
+    # Änderungen zurück in result_gdf schreiben (nur wo oneway==False)
+    result_gdf.loc[merged['idx'], 'u'] = merged['u_filled'].values
+    result_gdf.loc[merged['idx'], 'v'] = merged['v_filled'].values
+
+    ## --- Reihenfolge aller Einträge in result_gdf umkehren, sodass sie korrekt weiterverarbeitet werden können ---
+    result_gdf = result_gdf.iloc[::-1].reset_index(drop=True)
+    print("Reihenfolge von result_gdf wurde vollständig umgekehrt.")
+
+# (Optional) kurze Diagnose
+    #num_u_fixed = int((merged['u'].isna()) & (merged['u_filled'].notna())).sum()
+    #num_v_fixed = int((merged['v'].isna()) & (merged['v_filled'].notna())).sum()
+    #print(f"Repariert: u={num_u_fixed}, v={num_v_fixed} (nur oneway==False)")
+
 
     print(f"Speichere Daten in {output_file_detailed_sorted}.gpkg ...")
     #result_gdf.to_file(f"{output_file_detailed_sorted}.gpkg", layer="nodes", driver="GPKG")
