@@ -58,7 +58,7 @@
 		<param name="earlyDeparture" value="-0"/>
 		<param name="performing" value="+6"/>
 		<param name="traveling" value="-6"/>
-		<param name="waiting" value="-0"/>
+		<param name="waiting" value="-6"/>
 
 		<parameterset type="activityParams">
 			<param name="activityType" value="loaded"/>

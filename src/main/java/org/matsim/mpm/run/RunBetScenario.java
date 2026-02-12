@@ -26,8 +26,10 @@ import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
 import org.matsim.core.controler.OutputDirectoryHierarchy.OverwriteFileSetting;
 import org.matsim.core.scenario.ScenarioUtils;
+import org.matsim.core.scoring.functions.SubpopulationScoringParameters;
 import org.matsim.mpm.MpmEvModule;
 import org.matsim.mpm.routing.MpmEvNetworkRoutingProvider;
+import org.matsim.mpm.scoring.ChargingWaitingScoringFunctionFactory;
 
 /**
  * @author nagel
@@ -39,7 +41,7 @@ public class RunBetScenario {
 
 		Config config;
 		if ( args==null || args.length==0 || args[0]==null ){
-			config = ConfigUtils.loadConfig( "scenarios/BETs/consumption_test/config.xml" );
+			config = ConfigUtils.loadConfig( "scenarios/BETs/10_BETs_Test/config.xml" );
 		} else {
 			config = ConfigUtils.loadConfig( args );
 		}
@@ -57,6 +59,16 @@ public class RunBetScenario {
 		
 		Controler controler = new Controler( scenario ) ;
 		
+		// Set custom scoring function that includes waiting time penalties
+		SubpopulationScoringParameters scoringParametersForPerson = new SubpopulationScoringParameters(scenario);
+		ChargingWaitingScoringFunctionFactory scoringFunctionFactory =
+			new ChargingWaitingScoringFunctionFactory(
+				config.scoring(),
+				scoringParametersForPerson,
+				scenario.getNetwork()
+			);
+		controler.setScoringFunctionFactory(scoringFunctionFactory);
+
 		// possibly modify controler here
 		controler.addOverridingModule(new AbstractModule(){
 
@@ -69,4 +81,4 @@ public class RunBetScenario {
 		controler.run();
 	}
 	
-}
+}//TODO charging points are made available directly when previous vehicle stops charging. Instead it should be available when vehicles leaves parking spot

@@ -4,13 +4,13 @@
 	<module name="ev">
 		<param name="auxDischargeTimeStep" value="10"/>
 		<param name="chargeTimeStep" value="5"/>
-		<param name="chargersFile" value="BETs_Chargers_unlimited.xml"/>
+		<param name="chargersFile" value="BETs_Chargers_limited.xml"/>
 		<param name="timeProfiles" value="true"/>
 		<param name="enforceChargingInteractionDuration" value="true"/>
 	</module>
 
 	<module name="vehicles">
-		<param name="vehiclesFile" value="10_BETs_Test_Vehicles.xml.gz"/>
+		<param name="vehiclesFile" value="eTrucks_Vehicle.xml"/>
 	</module>
 
 	<module name="global">
@@ -24,13 +24,13 @@
 	</module>
 
 	<module name="plans">
-		<param name="inputPlansFile" value="10_BETs_Test_plans.xml.gz"/>
+		<param name="inputPlansFile" value="BET_test_plans_queuing.xml"/>
 	</module>
 
 	<module name="controler">
-		<param name="outputDirectory" value="./output/BETs/10_BETs_Test"/>
+		<param name="outputDirectory" value="./output/BETs/BETs_queue_test"/>
 		<param name="firstIteration" value="0"/>
-		<param name="lastIteration" value="0"/>
+		<param name="lastIteration" value="5"/>
 		<param name="eventsFileFormat" value="xml"/>
 		<param name="mobsim" value="qsim"/>
 		<param name="routingAlgorithmType" value="SpeedyALT" />
@@ -58,7 +58,7 @@
 		<param name="earlyDeparture" value="-0"/>
 		<param name="performing" value="+6"/>
 		<param name="traveling" value="-6"/>
-		<param name="waiting" value="-0"/>
+		<param name="waiting" value="-12"/>
 
 		<parameterset type="activityParams">
 			<param name="activityType" value="loaded"/>

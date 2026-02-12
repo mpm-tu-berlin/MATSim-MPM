@@ -11,6 +11,7 @@ import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.MatsimServices;
 import org.matsim.core.controler.listener.ControlerListener;
 import org.matsim.core.mobsim.qsim.AbstractQSimModule;
+import org.matsim.mpm.scoring.ChargingQueueWaitingScoringHandler;
 import org.matsim.mpm.stats.ChargerQueuingCollector;
 
 public class MpmEvStatsModule extends AbstractModule {
@@ -22,6 +23,15 @@ public class MpmEvStatsModule extends AbstractModule {
         bind(ChargingEventSequenceCollector.class).asEagerSingleton();
         addEventHandlerBinding().to(ChargingEventSequenceCollector.class);
         addControlerListenerBinding().to(ChargingProceduresCSVWriter.class).in(Singleton.class);
+
+        // NOTE: ScoringFunctionFactory is set directly in RunBetScenario via setScoringFunctionFactory()
+        // to ensure it's not overridden by other modules
+
+        // Add waiting time tracking handler for statistics (CSV export)
+        bind(ChargingQueueWaitingScoringHandler.class).asEagerSingleton();
+        addEventHandlerBinding().to(ChargingQueueWaitingScoringHandler.class);
+        addControlerListenerBinding().to(ChargingQueueWaitingScoringHandler.class);
+
 
         if (evCfg.timeProfiles) {
             installQSimModule(new AbstractQSimModule() {
