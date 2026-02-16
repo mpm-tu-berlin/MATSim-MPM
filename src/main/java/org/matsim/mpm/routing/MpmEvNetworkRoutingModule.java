@@ -51,6 +51,9 @@ import org.matsim.facilities.Facility;
 import org.matsim.vehicles.Vehicle;
 
 import java.util.*;
+import java.util.Comparator;
+
+import org.matsim.mpm.stats.ChargerWaitingTimeTracker;
 
 import static org.matsim.api.core.v01.TransportMode.car;
 
@@ -77,6 +80,7 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
     private final String stageActivityModePrefix;
     private final String vehicleSuffix;
     private final EvConfigGroup evConfigGroup;
+    private final ChargerWaitingTimeTracker waitingTimeTracker;
     private static final double MIN_SOC = 0.2; // Minimum State of Charge
     private static final double MAX_DRIVE_TIME_WITHOUT_BREAK = 4.5 * 60 * 60; // Maximum driving time without a break in seconds
     private static final double MAX_OVERALL_DRIVE_TIME_PER_TRIP = 6 * 60 * 60; // Maximum overall allowed driving time in one go in seconds
@@ -90,7 +94,7 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                               ElectricFleetSpecification electricFleet,
                               ChargingInfrastructureSpecification chargingInfrastructureSpecification, TravelTime travelTime,
                               DriveEnergyConsumption.Factory driveConsumptionFactory, AuxEnergyConsumption.Factory auxConsumptionFactory,
-                              EvConfigGroup evConfigGroup) {
+                              EvConfigGroup evConfigGroup, ChargerWaitingTimeTracker waitingTimeTracker) {
         this.travelTime = travelTime;
         Gbl.assertNotNull(network);
         this.delegate = delegate;
@@ -102,6 +106,7 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
         this.auxConsumptionFactory = auxConsumptionFactory;
         stageActivityModePrefix = mode + VehicleChargingHandler.CHARGING_IDENTIFIER;
         this.evConfigGroup = evConfigGroup;
+        this.waitingTimeTracker = waitingTimeTracker;
         this.vehicleSuffix = mode.equals(car) ? "" : "_" + mode;
     }
 
@@ -319,13 +324,17 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
 
             for (Link stopLocation : stopLocations) {
                 StraightLineKnnFinder<Link, ChargerSpecification> straightLineKnnFinder = new StraightLineKnnFinder<>(
-                        2, Link::getCoord, s -> network.getLinks().get(s.getLinkId()).getCoord());
-                List<ChargerSpecification> nearestChargers = straightLineKnnFinder.findNearest(stopLocation, // Auswahl nächstgelegener Charger
+                        5, Link::getCoord, s -> network.getLinks().get(s.getLinkId()).getCoord());
+                List<ChargerSpecification> nearestChargers = straightLineKnnFinder.findNearest(stopLocation,
                         chargingInfrastructureSpecification.getChargerSpecifications()
                                 .values()
                                 .stream()
                                 .filter(charger -> ev.getChargerTypes().contains(charger.getChargerType())));
-                ChargerSpecification selectedCharger = nearestChargers.get(random.nextInt(1));
+                // Select charger with lowest average waiting time from previous iteration
+                // (falls back to nearest if no congestion data exists)
+                ChargerSpecification selectedCharger = nearestChargers.stream()
+                        .min(Comparator.comparingDouble(c -> waitingTimeTracker.getAverageWaitingTime(c.getId())))
+                        .orElse(nearestChargers.get(0));
                 Link selectedChargerLink = network.getLinks().get(selectedCharger.getLinkId());
                 Facility nexttoFacility = new LinkWrapperFacility(selectedChargerLink);
                 if (nexttoFacility.getLinkId().equals(lastFrom.getLinkId())) {

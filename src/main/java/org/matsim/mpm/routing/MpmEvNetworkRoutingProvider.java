@@ -13,6 +13,7 @@ import org.matsim.contrib.ev.discharging.AuxEnergyConsumption;
 import org.matsim.contrib.ev.discharging.DriveEnergyConsumption;
 import org.matsim.contrib.ev.fleet.ElectricFleetSpecification;
 import org.matsim.contrib.ev.infrastructure.ChargingInfrastructureSpecification;
+import org.matsim.mpm.stats.ChargerWaitingTimeTracker;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.groups.RoutingConfigGroup;
 import org.matsim.core.config.groups.RoutingConfigGroup.AccessEgressType;
@@ -68,6 +69,9 @@ public class MpmEvNetworkRoutingProvider implements Provider<RoutingModule> {
 
     @Inject
     private AuxEnergyConsumption.Factory auxConsumptionFactory;
+
+    @Inject
+    private ChargerWaitingTimeTracker chargerWaitingTimeTracker;
 
     /**
      * This is the older (and still more standard) constructor, where the routingMode and the resulting mode were the
@@ -135,7 +139,8 @@ public class MpmEvNetworkRoutingProvider implements Provider<RoutingModule> {
             return new MpmEvNetworkRoutingModule(mode, filteredNetwork,
                     DefaultRoutingModules.createPureNetworkRouter(mode, populationFactory, filteredNetwork, routeAlgo),
                     electricFleetSpecification, chargingInfrastructureSpecification, travelTime,
-                    driveConsumptionFactory, auxConsumptionFactory, EvConfigGroup.get(config));
+                    driveConsumptionFactory, auxConsumptionFactory, EvConfigGroup.get(config),
+                    chargerWaitingTimeTracker);
         }
     }
 }

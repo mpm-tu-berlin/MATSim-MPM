@@ -2,17 +2,15 @@ package org.matsim.mpm;
 
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
-import org.matsim.contrib.common.timeprofile.ProfileWriter;
 import org.matsim.contrib.ev.EvConfigGroup;
 import org.matsim.contrib.ev.EvModule;
 import org.matsim.contrib.ev.charging.ChargingEventSequenceCollector;
 import org.matsim.contrib.ev.stats.*;
 import org.matsim.core.controler.AbstractModule;
-import org.matsim.core.controler.MatsimServices;
-import org.matsim.core.controler.listener.ControlerListener;
 import org.matsim.core.mobsim.qsim.AbstractQSimModule;
 import org.matsim.mpm.scoring.ChargingQueueWaitingScoringHandler;
 import org.matsim.mpm.stats.ChargerQueuingCollector;
+import org.matsim.mpm.stats.ChargerWaitingTimeTracker;
 
 public class MpmEvStatsModule extends AbstractModule {
     @Inject
@@ -24,6 +22,7 @@ public class MpmEvStatsModule extends AbstractModule {
         addEventHandlerBinding().to(ChargingEventSequenceCollector.class);
         addControlerListenerBinding().to(ChargingProceduresCSVWriter.class).in(Singleton.class);
 
+
         // NOTE: ScoringFunctionFactory is set directly in RunBetScenario via setScoringFunctionFactory()
         // to ensure it's not overridden by other modules
 
@@ -31,6 +30,11 @@ public class MpmEvStatsModule extends AbstractModule {
         bind(ChargingQueueWaitingScoringHandler.class).asEagerSingleton();
         addEventHandlerBinding().to(ChargingQueueWaitingScoringHandler.class);
         addControlerListenerBinding().to(ChargingQueueWaitingScoringHandler.class);
+
+        // Per-charger waiting time tracker for congestion-aware routing
+        bind(ChargerWaitingTimeTracker.class).asEagerSingleton();
+        addEventHandlerBinding().to(ChargerWaitingTimeTracker.class);
+        addControlerListenerBinding().to(ChargerWaitingTimeTracker.class);
 
 
         if (evCfg.timeProfiles) {
