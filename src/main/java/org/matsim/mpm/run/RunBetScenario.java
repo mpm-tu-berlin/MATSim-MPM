@@ -26,7 +26,7 @@ import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
 import org.matsim.core.controler.OutputDirectoryHierarchy.OverwriteFileSetting;
 import org.matsim.core.scenario.ScenarioUtils;
-import org.matsim.core.scoring.functions.SubpopulationScoringParameters;
+import org.matsim.core.scoring.ScoringFunctionFactory;
 import org.matsim.mpm.MpmEvModule;
 import org.matsim.mpm.routing.MpmEvNetworkRoutingProvider;
 import org.matsim.mpm.scoring.ChargingWaitingScoringFunctionFactory;
@@ -58,16 +58,6 @@ public class RunBetScenario {
 		// ---
 		
 		Controler controler = new Controler( scenario ) ;
-		
-		// Set custom scoring function that includes waiting time penalties
-		SubpopulationScoringParameters scoringParametersForPerson = new SubpopulationScoringParameters(scenario);
-		ChargingWaitingScoringFunctionFactory scoringFunctionFactory =
-			new ChargingWaitingScoringFunctionFactory(
-				config.scoring(),
-				scoringParametersForPerson,
-				scenario.getNetwork()
-			);
-		controler.setScoringFunctionFactory(scoringFunctionFactory);
 
 		// possibly modify controler here
 		controler.addOverridingModule(new AbstractModule(){
@@ -75,6 +65,8 @@ public class RunBetScenario {
 			@Override public void install(){
 				install( new MpmEvModule() );
 				addRoutingModuleBinding(TransportMode.car).toProvider(new MpmEvNetworkRoutingProvider(TransportMode.car));
+				// Bind custom scoring factory (Guice injects the ChargingQueueWaitingScoringHandler singleton)
+				bind(ScoringFunctionFactory.class).to(ChargingWaitingScoringFunctionFactory.class);
 			}
 		} );
 		
