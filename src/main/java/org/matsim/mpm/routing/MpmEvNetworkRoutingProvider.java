@@ -26,6 +26,7 @@ import org.matsim.core.router.costcalculators.TravelDisutilityFactory;
 import org.matsim.core.router.util.LeastCostPathCalculator;
 import org.matsim.core.router.util.LeastCostPathCalculatorFactory;
 import org.matsim.core.router.util.TravelTime;
+import org.matsim.core.trafficmonitoring.FreeSpeedTravelTime;
 
 import com.google.inject.Inject;
 import com.google.inject.Provider;
@@ -119,14 +120,13 @@ public class MpmEvNetworkRoutingProvider implements Provider<RoutingModule> {
             }
         }
 
-        // the travel time & disutility refer to the routing mode:
+        // Use free-flow travel time for deterministic routing across all iterations.
+        // Route variation comes from congestion-aware charger selection, not from travel time differences.
+        TravelTime travelTime = new FreeSpeedTravelTime();
+
         TravelDisutilityFactory travelDisutilityFactory = this.travelDisutilityFactories.get(routingMode);
         if (travelDisutilityFactory == null) {
             throw new RuntimeException("No TravelDisutilityFactory bound for mode " + routingMode + ".");
-        }
-        TravelTime travelTime = travelTimes.get(routingMode);
-        if (travelTime == null) {
-            throw new RuntimeException("No TravelTime bound for mode " + routingMode + ".");
         }
 
         LeastCostPathCalculator routeAlgo = leastCostPathCalculatorFactory.createPathCalculator(filteredNetwork,

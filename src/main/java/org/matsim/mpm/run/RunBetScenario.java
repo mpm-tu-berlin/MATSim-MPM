@@ -26,10 +26,17 @@ import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.controler.Controler;
 import org.matsim.core.controler.OutputDirectoryHierarchy.OverwriteFileSetting;
 import org.matsim.core.scenario.ScenarioUtils;
+import org.matsim.contrib.ev.charging.ChargeUpToMaxSocStrategy;
+import org.matsim.contrib.ev.charging.ChargingLogic;
+import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.scoring.ScoringFunctionFactory;
 import org.matsim.mpm.MpmEvModule;
+import org.matsim.mpm.charging.HoldUntilLeaveChargingLogic;
 import org.matsim.mpm.routing.MpmEvNetworkRoutingProvider;
 import org.matsim.mpm.scoring.ChargingWaitingScoringFunctionFactory;
+
+import com.google.inject.Inject;
+import com.google.inject.Provider;
 
 /**
  * @author nagel
@@ -69,8 +76,21 @@ public class RunBetScenario {
 				bind(ScoringFunctionFactory.class).to(ChargingWaitingScoringFunctionFactory.class);
 			}
 		} );
-		
+
+		// Override ChargingLogic to keep charger occupied until vehicle leaves the charging activity
+		controler.addOverridingModule(new AbstractModule(){
+			@Override public void install(){
+				bind(ChargingLogic.Factory.class).toProvider(new Provider<>() {
+					@Inject private EventsManager eventsManager;
+					@Override public ChargingLogic.Factory get() {
+						return charger -> new HoldUntilLeaveChargingLogic(charger,
+								new ChargeUpToMaxSocStrategy(charger, 1.), eventsManager);
+					}
+				});
+			}
+		} );
+
 		controler.run();
 	}
-	
-}//TODO charging points are made available directly when previous vehicle stops charging. Instead it should be available when vehicles leaves parking spot
+
+}
