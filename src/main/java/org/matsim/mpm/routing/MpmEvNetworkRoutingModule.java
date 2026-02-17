@@ -88,7 +88,7 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
     private static final double BREAK_DURATION = 45 * 60; // in seconds
     private static final double REST_DURATION = 11 * 60 * 60; // in seconds
     private static final double CHARGER_POWER = 640 * 1000; // in Watt
-    private static final double MAX_VEHICLE_SPEED = 18.056; // in m/s (65 km/h)
+    static final double MAX_VEHICLE_SPEED = 18.056; // in m/s (65 km/h)
 
     MpmEvNetworkRoutingModule(final String mode, final Network network, RoutingModule delegate,
                               ElectricFleetSpecification electricFleet,
