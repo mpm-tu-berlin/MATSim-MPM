@@ -934,36 +934,34 @@ def sanitize_edges_for_export(gdf_edges: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
     return df
 
+def generate_network(
+        area: str,
+        max_allowed_link_length: float,
+        target_epsg: int = 4839,
+        version: str = "V0",
+):
+    # --- Pfade & Namen ---
+    kdtree_input_path = f"data/germany_3d_raster_clamped_DF_kdtree_from_roads3d_epsg4326.npz" #f"data/{area}_kdtree_from_roads3d_epsg4326.npz"
+    local_osm_input_path_simplified = f"data/germany_simplified_DF.gpkg" #f"data/{area}_simplified.gpkg"
+    local_osm_input_path_detailed   = f"data/germany_detailed_sorted_DF.gpkg" #f"data/{area}_detailed_sorted.gpkg"
+    output_path = f"data/Germany_max999999m_V0_DF.xml.gz" #f"data/{area}_max{int(max_allowed_link_length)}m_{version}.xml.gz"
 
-# --------------------------- MAIN ---------------------------
-
-if __name__ == "__main__":
-    # --- Parameters ---
-    area = "Märkisch-Oderland"  # e.g., "Maerkisch-Oderland" or "Potsdam"
-    kdtree_input_path = f"data/{area}_kdtree_from_roads3d_epsg4326.npz"
-    local_osm_input_path_simplified = f"data/{area}_simplified.gpkg"
-    local_osm_input_path_detailed   = f"data/{area}_detailed_sorted.gpkg"
-    output_path = f"data/{area}_max_1000m_long_V0.xml.gz"
-    target_epsg = 4839  # Germany (ETRS89 / GK zone 3D-like), adjust to your region CRS as needed
-    max_allowed_link_length = 10000  # << set maximum link length in meters
-
-    # --- Data loading ---
+    # --- Daten laden ---
     tree, coords, heights = load_kdtree(kdtree_input_path)
     gdf_nodes_simplified, gdf_edges_simplified = load_local_osm_file(local_osm_input_path_simplified)
     gdf_nodes_detailed,   gdf_edges_detailed   = load_local_osm_file(local_osm_input_path_detailed)
 
-    # --- Shorten edges (returns edges + split-node XY dict) ---
-    print(f"\nShortening edges with max_allowed_link_length={max_allowed_link_length} m ...")
+    # --- Kanten kürzen ---
+    print(f"\nShortening edges for area={area} with max_allowed_link_length={max_allowed_link_length} m ...")
     gdf_edges_shortened, split_nodes_xy = short_edges(
         gdf_edges_simplified=gdf_edges_simplified,
         gdf_edges_detailed=gdf_edges_detailed,
         max_allowed_length=max_allowed_link_length
     )
 
-    # --- Used node IDs (strings) ---
+    # --- genutzte Nodes bestimmen ---
     used_nodes = set(map(str, gdf_edges_shortened['u'])) | set(map(str, gdf_edges_shortened['v']))
 
-    # --- Map OSM node id -> XY from detailed nodes ---
     from shapely.geometry import Point
     def _first_scalar(v):
         if isinstance(v, (list, tuple, np.ndarray)) and len(v) > 0:
@@ -982,8 +980,7 @@ if __name__ == "__main__":
         for _, r in gdf_nodes_detailed.iterrows()
     }
 
-    # --- Fallback: XY from edge geometry, if neither OSM nor split_nodes_xy present ---
-    def _xy_from_edge(nid: str) -> tuple | None:
+    def _xy_from_edge(nid: str):
         rows = gdf_edges_shortened[(gdf_edges_shortened['u'].astype(str) == nid) |
                                    (gdf_edges_shortened['v'].astype(str) == nid)]
         if rows.empty:
@@ -995,7 +992,6 @@ if __name__ == "__main__":
         else:
             return (float(line.coords[-1][0]), float(line.coords[-1][1]))
 
-    # --- Build node list (priority: OSM-XY > Split-XY > Fallback-XY) + heights (z) ---
     node_rows, seen = [], set()
     for nid in used_nodes:
         if nid in seen:
@@ -1017,7 +1013,7 @@ if __name__ == "__main__":
     ys = gdf_nodes_export.geometry.y.to_numpy()
     gdf_nodes_export['height'] = kdtree_heights_vectorized(tree, heights, xs, ys)
 
-    # --- MATSim export ---
+    # --- Export ---
     write_matsim_network(
         gdf_nodes=gdf_nodes_export,
         gdf_edges=gdf_edges_shortened,
@@ -1025,3 +1021,22 @@ if __name__ == "__main__":
         output_path=output_path,
         nodes_without_z=set()
     )
+    return output_path
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Build MATSim networks with different max link lengths.")
+    parser.add_argument("--area", type=str, required=True, help="z.B. 'Germany'")
+    parser.add_argument("--max-length", type=float, required=True, help="Max. Linklänge in Metern")
+    parser.add_argument("--version", type=str, default="V0")
+    parser.add_argument("--epsg", type=int, default=4839)
+    args = parser.parse_args()
+
+    generate_network(
+        area=args.area,
+        max_allowed_link_length=args.max_length,
+        target_epsg=args.epsg,
+        version=args.version,
+    )
+

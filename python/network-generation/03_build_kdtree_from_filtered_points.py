@@ -20,9 +20,9 @@ except Exception:
 # Parameter
 # =========================
 # Beispiel: direkt das 3D-Straßen-GPKG verwenden:
-gpkg_path    = r"data\Märkisch-Oderland_3d_raster_clamped.gpkg"  # Eingabe (Punkte ODER Linien)
+gpkg_path    = r"data\germany_3d_raster_clamped_DF.gpkg"  # Eingabe (Punkte ODER Linien)
 layer_name   = None               # None = automatisch sinnvolle Layerwahl
-output_path  = r"data\Märkisch-Oderland_kdtree_from_roads3d_epsg4326.npz"
+output_path  = r"data\germany_3d_raster_clamped_DF_kdtree_from_roads3d_epsg4326.npz"
 height_col   = None               # Falls 2D-Geometrie: mögliche Höhen-Spalte (z.B. "z")
 
 # KDTree-Parameter

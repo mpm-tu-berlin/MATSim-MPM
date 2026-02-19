@@ -12,18 +12,18 @@ from scipy.interpolate import UnivariateSpline
 from collections import defaultdict
 
 # --- Pfade ---
-TIF_PATH      = Path(r"data\DTM Germany 20m v3b by Sonny.tif")
-OSM_PATH      = Path(r"data\Märkisch-Oderland_detailed_sorted.gpkg")
-OUTPUT_GPKG   = Path(r"data\Märkisch-Oderland_3d_raster_clamped.gpkg")
+TIF_PATH      = Path(r"data\DTM Germany 50m v3b by Sonny.tif")
+OSM_PATH      = Path(r"data\germany_detailed_sorted_DF.gpkg")
+OUTPUT_GPKG   = Path(r"data\germany_3d_raster_clamped_DF.gpkg")
 OUTPUT_LAYER  = "roads_3d"
-OUTPUT_HTML   = Path(r"data\roads_3d_interactive_brandenburg.html")  # alter Plotly-3D (optional)
-OUTPUT_HTML_OSM = Path(r"data\roads_3d_points_over_osm.html")        # OSM-Punkte
+OUTPUT_HTML   = Path(r"data\roads_3d_interactive_germany.html")
+OUTPUT_HTML_OSM = Path(r"data\roads_3d_points_over_osm.html")
 
 # --- Parameter ---
 SPACING_ALONG_M = 12
 ROUND_Z_DECIMALS = 1
 SMOOTH_LAMBDA = 0.1
-MAX_GRADE = 0.065
+MAX_GRADE = 0.08                        # Worst-Case für Landstraßen = 8% (Forschungsgesellschaft für Straßen- und Verkehrswesen: Richtlinien für die Anlage von Landstraßen – RAL. FGSV-Verlag, Köln 2012)
 NODE_PRECISION = 5
 
 MAKE_3D_PLOT = False
@@ -34,7 +34,7 @@ MAX_HTML_POINTS = 150_000              # hard cap für die HTML (dynamisch herun
 HTML_RANDOM_SEED = 42                  # für reproduzierbares Downsampling
 BBOX_FOR_HTML = None                   # (minx, miny, maxx, maxy) im Raster-CRS oder None
 
-MAKE_POINTS_GPKG   = True
+MAKE_POINTS_GPKG   = False
 POINTS_GPKG_PATH   = Path(r"data\roads_3d_points.gpkg")
 POINTS_GPKG_LAYER  = "sample_points"
 

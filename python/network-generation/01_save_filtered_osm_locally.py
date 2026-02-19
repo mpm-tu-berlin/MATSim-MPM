@@ -114,9 +114,9 @@ def normalize_reversed_flags(gdf_edges_simplified, starts_by_osmid, ends_by_osmi
 
 if __name__ == "__main__":
     area = ("Germany")
-    highway_types = '["highway"~"motorway|trunk|primary"]'
-    output_file_simplified = f"data/{area.split(',')[0].lower()}_simplified"
-    output_file_detailed_sorted= f"data/{area.split(',')[0].lower()}_detailed_sorted"
+    highway_types = ('["highway"~"motorway|trunk|primary"]') #'["highway"~"motorway|trunk|primary"]'
+    output_file_simplified = f"data/{area.split(',')[0].lower()}_simplified_DF"
+    output_file_detailed_sorted= f"data/{area.split(',')[0].lower()}_detailed_sorted_DF"
     #------------------------------------------------------
 
     print(f"Lade vereinfachtes Straßennetz für: {area}")
@@ -124,7 +124,7 @@ if __name__ == "__main__":
         query=area,
         network_type="drive",
         simplify=True, # Vereinfachte Kanten
-        retain_all=False,
+        retain_all=True,
         truncate_by_edge=False,
         custom_filter=highway_types
     )

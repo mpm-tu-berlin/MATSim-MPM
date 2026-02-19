@@ -10,18 +10,18 @@ import warnings
 # ==============================
 # Konfiguration
 # ==============================
-INPUT_FILE  = r"data\germany_max_1000m_long.xml.gz"
-OUTPUT_FILE = r"data\germany_max_1000m_long_smoothened_merged_0_05.xml.gz"
+INPUT_FILE  = r"data\Germany_max_unlimited_long_V0.xml.gz"
+OUTPUT_FILE = r"data\Germany_max_unlimitied_long_smoothened_not_merged_0_05.xml.gz"
 
 # Glättung (Spline)
 SMOOTH_METHOD = "spline"
 SPLINE_S = None            # None = auto (siehe SPLINE_TARGET_RMS), sonst fester Wert
 SPLINE_TARGET_RMS = 3      # Ziel-RMS in m
 
-DEBUG_PATH_PRINTS = True
+DEBUG_PATH_PRINTS = False
 
 # --- Zusammenführen von Links wenn Unterschied sehr klein (optional) ---
-MERGE_LINKS  = True   # <— Schalter: True = zusammenfügen, False = überspringen
+MERGE_LINKS  = False   # <— Schalter: True = zusammenfügen, False = überspringen
 GRADE_EPS    = 0.0005  # max. mittlere Steigung |Δz|/L (z. B. 0.01 %)
 PRESERVE_IDS = False  # neue ID = "L1+L2+..."; bei True: nimm ID des ersten Links
 

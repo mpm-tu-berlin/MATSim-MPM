@@ -24,3 +24,14 @@ hs_err_pid*
 # IntelliJ
 /.idea/
 *.iml
+/scenarios/BETs/consumption_test/1_BET_Test_plans.xml.gz
+
+# Python network generation – local artifacts
+python/network-generation/__pycache__/
+python/network-generation/cache/
+python/network-generation/old/
+python/network-generation/data/*
+!python/network-generation/data/README.md
+
+# Large scenario output files
+scenarios/BETs/consumption_test/*.xml.gz
