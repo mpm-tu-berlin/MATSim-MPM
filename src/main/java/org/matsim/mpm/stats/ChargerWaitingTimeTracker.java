@@ -3,6 +3,8 @@ package org.matsim.mpm.stats;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 import org.matsim.api.core.v01.Id;
+import org.matsim.contrib.ev.charging.ChargingStartEvent;
+import org.matsim.contrib.ev.charging.ChargingStartEventHandler;
 import org.matsim.contrib.ev.charging.QueuedAtChargerEvent;
 import org.matsim.contrib.ev.charging.QueuedAtChargerEventHandler;
 import org.matsim.contrib.ev.charging.QuitQueueAtChargerEvent;
@@ -14,7 +16,12 @@ import org.matsim.vehicles.Vehicle;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.DoubleSummaryStatistics;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,8 +32,8 @@ import java.util.Map;
  */
 @Singleton
 public class ChargerWaitingTimeTracker
-        implements QueuedAtChargerEventHandler, QuitQueueAtChargerEventHandler,
-                   IterationEndsListener {
+        implements QueuedAtChargerEventHandler, ChargingStartEventHandler,
+                   QuitQueueAtChargerEventHandler, IterationEndsListener {
 
     private static final Logger log = LogManager.getLogger(ChargerWaitingTimeTracker.class);
 
@@ -48,7 +55,20 @@ public class ChargerWaitingTimeTracker
     }
 
     @Override
+    public void handleEvent(ChargingStartEvent event) {
+        PendingEntry entry = pending.remove(event.getVehicleId());
+        if (entry != null) {
+            double waitSeconds = event.getTime() - entry.startTime();
+            currentWaitTimes
+                .computeIfAbsent(entry.chargerId(), id -> new ArrayList<>())
+                .add(waitSeconds);
+        }
+    }
+
+    @Override
     public void handleEvent(QuitQueueAtChargerEvent event) {
+        // Vehicle left the queue without charging (e.g., activity ended while waiting).
+        // Still record this as waiting time for congestion-aware charger selection.
         PendingEntry entry = pending.remove(event.getVehicleId());
         if (entry != null) {
             double waitSeconds = event.getTime() - entry.startTime();
@@ -82,6 +102,25 @@ public class ChargerWaitingTimeTracker
 
         if (newAverages.isEmpty()) {
             log.info("No charger queuing events in iteration {}", event.getIteration());
+        }
+
+        // Write CSV with per-charger waiting time statistics
+        String csvPath = event.getServices().getControlerIO()
+                .getIterationFilename(event.getIteration(), "charger_waiting_times.csv");
+        try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(csvPath))) {
+            writer.write("charger_id;num_vehicles;avg_wait_seconds;min_wait_seconds;max_wait_seconds");
+            writer.newLine();
+            for (Map.Entry<Id<Charger>, List<Double>> e : currentWaitTimes.entrySet()) {
+                DoubleSummaryStatistics stats = e.getValue().stream()
+                        .mapToDouble(Double::doubleValue)
+                        .summaryStatistics();
+                writer.write(String.format("%s;%d;%.1f;%.1f;%.1f",
+                        e.getKey(), stats.getCount(), stats.getAverage(),
+                        stats.getMin(), stats.getMax()));
+                writer.newLine();
+            }
+        } catch (IOException ex) {
+            log.error("Failed to write charger waiting times CSV to {}", csvPath, ex);
         }
     }
 

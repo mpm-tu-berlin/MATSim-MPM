@@ -83,11 +83,11 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
     private final ChargerWaitingTimeTracker waitingTimeTracker;
     private static final double MIN_SOC = 0.2; // Minimum State of Charge
     private static final double MAX_DRIVE_TIME_WITHOUT_BREAK = 4.5 * 60 * 60; // Maximum driving time without a break in seconds
-    private static final double MAX_OVERALL_DRIVE_TIME_PER_TRIP = 6 * 60 * 60; // Maximum overall allowed driving time in one go in seconds
     private static final double MAX_OVERALL_DRIVE_TIME_PER_DAY = 9 * 60 * 60; // Maximum overall allowed driving time per day in seconds
     private static final double BREAK_DURATION = 45 * 60; // in seconds
     private static final double REST_DURATION = 11 * 60 * 60; // in seconds
     private static final double CHARGER_POWER = 640 * 1000; // in Watt
+    private static final double CHARGER_SEARCH_BUFFER = 10*60; // in seconds, additional time buffer to consider for charger search to not exceed 4,5h driving limit
     static final double MAX_VEHICLE_SPEED = 18.056; // in m/s (65 km/h)
 
     MpmEvNetworkRoutingModule(final String mode, final Network network, RoutingModule delegate,
@@ -131,6 +131,7 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
             double usableCapcityAfterFirstBreak = 0;
             double usableCapcityAfterSecondBreak = 0;
             List<Link> stopLocations = new ArrayList<>();
+            Map<Link, Link> stopLocationToSearchLink = new LinkedHashMap<>();
             Map<Link, String> stopReasons = new LinkedHashMap<>();
             double currentConsumption = 0;
             double consumptionFirstPart = 0;
@@ -155,9 +156,13 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
             }
             currentConsumption = 0;
             counter = 0;
+            Link candidateLinkFirstStop = null;
             for (Map.Entry<Link, Double> e : estimatedTravelTime.entrySet()) { //Check when the journey duration is longer than permitted
                 currentTravelTime += e.getValue();
                 counter++;
+                if (currentTravelTime <= MAX_DRIVE_TIME_WITHOUT_BREAK - CHARGER_SEARCH_BUFFER) {
+                    candidateLinkFirstStop = e.getKey();
+                }
                 if (currentTravelTime >= MAX_DRIVE_TIME_WITHOUT_BREAK) {
                     stopSocOrBreakTime.put(e.getKey(), counter);
                     stopReasons.put(e.getKey(), "Breaktime after 4.5h1");
@@ -172,6 +177,10 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
             } else{
                 Link linkWithFirstBreakNecessity = Collections.min(stopSocOrBreakTime.entrySet(), Map.Entry.comparingByValue()).getKey();
                 stopLocations.add(linkWithFirstBreakNecessity);
+                String firstStopReason = stopReasons.get(linkWithFirstBreakNecessity);
+                boolean firstStopIsTiming = firstStopReason != null && firstStopReason.startsWith("Breaktime");
+                stopLocationToSearchLink.put(linkWithFirstBreakNecessity,
+                        (firstStopIsTiming && candidateLinkFirstStop != null) ? candidateLinkFirstStop : linkWithFirstBreakNecessity);
                 stopSocOrBreakTime.clear();
                 for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) {
                     consumptionFirstPart += e.getValue();
@@ -189,8 +198,9 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
             //////////////////////////////////////////////////////////////////////////////////////////////
             //Second stop:
             if(!stopReasons.get(stopLocations.get(0)).isEmpty()) {
+                Link secondLegStart = stopLocationToSearchLink.getOrDefault(stopLocations.get(0), stopLocations.get(0));
                 for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) { //See when energy demand is too high
-                    if (e.getKey().equals(stopLocations.get(0))) {
+                    if (e.getKey().equals(secondLegStart)) {
                         startFound = true;
                     }
                     if (startFound) {
@@ -206,18 +216,22 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                 currentConsumption = 0;
                 counter = 0;
                 startFound = false;
+                Link candidateLinkSecondStop = null;
                 for (Map.Entry<Link, Double> e : estimatedTravelTime.entrySet()) { //Check when the journey duration is longer than permitted
                     absoluteTravelTime += e.getValue();
-                    if (e.getKey().equals(stopLocations.get(0))) {
+                    if (e.getKey().equals(secondLegStart)) {
                         currentTravelTime = 0;
                         startFound = true;
                     }
                     if (startFound) {
                         counter++;
                         currentTravelTime += e.getValue();
-                        if (currentTravelTime >= MAX_OVERALL_DRIVE_TIME_PER_TRIP) {
+                        if (currentTravelTime <= MAX_DRIVE_TIME_WITHOUT_BREAK - CHARGER_SEARCH_BUFFER) {
+                            candidateLinkSecondStop = e.getKey();
+                        }
+                        if (currentTravelTime >= MAX_DRIVE_TIME_WITHOUT_BREAK) {
                             stopSocOrBreakTime.put(e.getKey(), counter);
-                            stopReasons.put(e.getKey(), "Breaktime after 6h2");
+                            stopReasons.put(e.getKey(), "Breaktime after 4.5h2");
                             break;
                         }
                         if (absoluteTravelTime >= MAX_OVERALL_DRIVE_TIME_PER_DAY) {
@@ -236,9 +250,13 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                 if (!stopSocOrBreakTime.isEmpty()) {
                     Link linkWithSecondBreakNecessity = Collections.min(stopSocOrBreakTime.entrySet(), Map.Entry.comparingByValue()).getKey();
                     stopLocations.add(linkWithSecondBreakNecessity);
+                    String secondStopReason2 = stopReasons.get(linkWithSecondBreakNecessity);
+                    boolean secondStopIsTiming = secondStopReason2 != null && secondStopReason2.startsWith("Breaktime");
+                    stopLocationToSearchLink.put(linkWithSecondBreakNecessity,
+                            (secondStopIsTiming && candidateLinkSecondStop != null) ? candidateLinkSecondStop : linkWithSecondBreakNecessity);
                     stopSocOrBreakTime.clear();
                     for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) {
-                        if (e.getKey().equals(stopLocations.get(0))) {
+                        if (e.getKey().equals(secondLegStart)) {
                             startFound = true;
                         }
                         if (startFound){
@@ -264,8 +282,9 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                     //Placeholder for further Implementations
                 }
                 else {
+                    Link thirdLegStart = stopLocationToSearchLink.getOrDefault(stopLocations.get(1), stopLocations.get(1));
                     for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) { //See when energy demand is too high
-                        if (e.getKey().equals(stopLocations.get(1))) {
+                        if (e.getKey().equals(thirdLegStart)) {
                             startFound = true;
                         }
                         if (startFound) {
@@ -280,18 +299,22 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                     }
                     counter = 0;
                     startFound = false;
+                    Link candidateLinkThirdStop = null;
                     for (Map.Entry<Link, Double> e : estimatedTravelTime.entrySet()) { //Check when the journey duration is longer than permitted
                         absoluteTravelTime += e.getValue();
-                        if (e.getKey().equals(stopLocations.get(1))) {
+                        if (e.getKey().equals(thirdLegStart)) {
                             currentTravelTime = 0;
                             startFound = true;
                         }
                         if (startFound) {
                             counter++;
                             currentTravelTime += e.getValue();
-                            if (currentTravelTime >= MAX_OVERALL_DRIVE_TIME_PER_TRIP) {
+                            if (currentTravelTime <= MAX_DRIVE_TIME_WITHOUT_BREAK - CHARGER_SEARCH_BUFFER) {
+                                candidateLinkThirdStop = e.getKey();
+                            }
+                            if (currentTravelTime >= MAX_DRIVE_TIME_WITHOUT_BREAK) {
                                 stopSocOrBreakTime.put(e.getKey(), counter);
-                                stopReasons.put(e.getKey(), "Breaktime after 6h3");
+                                stopReasons.put(e.getKey(), "Breaktime after 4.5h3");
                                 break;
                             }
                             if (absoluteTravelTime >= MAX_OVERALL_DRIVE_TIME_PER_DAY) {
@@ -305,6 +328,10 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                     if (!stopSocOrBreakTime.isEmpty()) {
                         Link linkWithFirstBreakNecessity = Collections.min(stopSocOrBreakTime.entrySet(), Map.Entry.comparingByValue()).getKey();
                         stopLocations.add(linkWithFirstBreakNecessity);
+                        String thirdStopReason = stopReasons.get(linkWithFirstBreakNecessity);
+                        boolean thirdStopIsTiming = thirdStopReason != null && thirdStopReason.startsWith("Breaktime");
+                        stopLocationToSearchLink.put(linkWithFirstBreakNecessity,
+                                (thirdStopIsTiming && candidateLinkThirdStop != null) ? candidateLinkThirdStop : linkWithFirstBreakNecessity);
                         stopSocOrBreakTime.clear();
 
                         //Remove elements from stopReasons that are not in stopLocations
@@ -325,7 +352,8 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
             for (Link stopLocation : stopLocations) {
                 StraightLineKnnFinder<Link, ChargerSpecification> straightLineKnnFinder = new StraightLineKnnFinder<>(
                         5, Link::getCoord, s -> network.getLinks().get(s.getLinkId()).getCoord());
-                List<ChargerSpecification> nearestChargers = straightLineKnnFinder.findNearest(stopLocation,
+                Link chargerSearchLink = stopLocationToSearchLink.getOrDefault(stopLocation, stopLocation);
+                List<ChargerSpecification> nearestChargers = straightLineKnnFinder.findNearest(chargerSearchLink,
                         chargingInfrastructureSpecification.getChargerSpecifications()
                                 .values()
                                 .stream()
