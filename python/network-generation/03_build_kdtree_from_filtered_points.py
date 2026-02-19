@@ -172,10 +172,21 @@ def extract_points_from_lines_gdf(gdf: gpd.GeoDataFrame):
 # Main
 # =========================
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Baue KDTree aus 3D-GPKG")
+    parser.add_argument("--input",  default=gpkg_path,   help="Pfad zur Eingabe-GPKG-Datei")
+    parser.add_argument("--output", default=output_path, help="Ausgabepfad für NPZ-Datei")
+    parser.add_argument("--layer",  default=layer_name,  help="Layername im GPKG (None = automatisch)")
+    args = parser.parse_args()
+
+    in_path  = args.input
+    out_path = args.output
+    lyr_name = args.layer or None
+
     # Layer wählen / lesen
-    lyr = layer_name or auto_pick_layer(gpkg_path)
-    print(f"Öffne: {gpkg_path}  |  Layer: {lyr or '(Standard)'}")
-    gdf = read_any_layer(gpkg_path, layer=lyr)
+    lyr = lyr_name or auto_pick_layer(in_path)
+    print(f"Öffne: {in_path}  |  Layer: {lyr or '(Standard)'}")
+    gdf = read_any_layer(in_path, layer=lyr)
     print(f"Features: {len(gdf):,}  |  Geometrietypen: {set(gdf.geometry.geom_type)}  |  CRS: {gdf.crs}")
 
     # Nach WGS84 reprojizieren (KDTree wird in EPSG:4326 gebaut)
@@ -205,12 +216,12 @@ def main():
 
     # Speichern – Koordinaten + Höhen genügen; Tree bei Bedarf neu aufbauen
     np.savez_compressed(
-        output_path,
+        out_path,
         coords=coords_deg.astype(np.float32, copy=False),
         heights=heights.astype(np.float32, copy=False),
         crs="EPSG:4326"
     )
-    print(f"Gespeichert: {output_path}")
+    print(f"Gespeichert: {out_path}")
     print("Hinweis: Zum Abfragen später den KDTree aus 'coords' neu bauen und den Index in 'heights' verwenden.")
 
 if __name__ == "__main__":

@@ -10,8 +10,8 @@ import warnings
 # ==============================
 # Konfiguration
 # ==============================
-INPUT_FILE  = r"data\Germany_max50m_V0.xml.gz"
-OUTPUT_FILE = r"data\Germany_max50m_V0_smoothed.xml.gz"
+INPUT_FILE  = r"data\Germany_max_unlimited_long_V0.xml.gz"
+OUTPUT_FILE = r"data\Germany_max_unlimited_long_smoothened_not_merged_0_05.xml.gz"
 
 # Glättung (Spline)
 SMOOTH_METHOD = "spline"
@@ -35,6 +35,14 @@ CRS_INPUT = "auto"         # "auto" | "epsg:4326" | "epsg:25833"
 MAX_POINTS_PER_SECTION = 1000
 SHOW_SECTION_POPUPS = False
 # ==============================
+
+import argparse as _ap
+_parser = _ap.ArgumentParser(description="Glättet Höhenprofile eines MATSim-Netzwerks")
+_parser.add_argument("--input",  default=INPUT_FILE,  help="Eingabe-Netzwerk (.xml.gz)")
+_parser.add_argument("--output", default=OUTPUT_FILE, help="Ausgabe-Netzwerk (.xml.gz)")
+_args, _ = _parser.parse_known_args()
+INPUT_FILE  = _args.input
+OUTPUT_FILE = _args.output
 
 # ------------------------------
 # Datei einlesen
@@ -417,7 +425,7 @@ for nid, data in nodes.items():
         if "z" in elem.attrib:
             del elem.attrib["z"]
 
-out_path = Path(OUTPUT_FILE)
+out_path = Path(OUTPUT_FILE)  # wird ggf. durch --output CLI-Argument überschrieben
 out_path.parent.mkdir(parents=True, exist_ok=True)
 
 xml_bytes = ET.tostring(root, encoding="utf-8")

@@ -218,7 +218,7 @@ def main():
         filter_zero_velocity=True,
         rel_spatial_tol=0.02,
         spatial_crop_buffer_m=20000.0,
-        max_km_from_start=100000000,  # nur erste X km ab Start
+        max_km_from_start=None,  # None = keine Beschränkung
     )
 
     max_workers = min(len(network_paths), os.cpu_count() or 1)

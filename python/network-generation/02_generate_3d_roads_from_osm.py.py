@@ -11,7 +11,7 @@ import rasterio
 from scipy.interpolate import UnivariateSpline
 from collections import defaultdict
 
-# --- Pfade ---
+# --- Pfade (Defaults; können per CLI-Argument überschrieben werden) ---
 TIF_PATH      = Path(r"data\DTM Germany 50m v3b by Sonny.tif")
 OSM_PATH      = Path(r"data\germany_detailed_sorted_DF.gpkg")
 OUTPUT_GPKG   = Path(r"data\germany_3d_raster_clamped_DF.gpkg")
@@ -498,12 +498,23 @@ def export_points_to_gpkg(points_records, crs, out_path: Path, layer_name: str, 
 
 # --- Hauptfunktion ---
 def main():
-    with rasterio.open(TIF_PATH) as src:
+    import argparse
+    parser = argparse.ArgumentParser(description="Erzeuge 3D-Straßen aus OSM + DTM")
+    parser.add_argument("--tif",    default=str(TIF_PATH),    help="Pfad zur DTM-TIF-Datei")
+    parser.add_argument("--osm",    default=str(OSM_PATH),    help="Pfad zur OSM-GPKG-Datei (detailed_sorted)")
+    parser.add_argument("--output", default=str(OUTPUT_GPKG), help="Ausgabepfad für 3D-GPKG")
+    args = parser.parse_args()
+
+    tif_path    = Path(args.tif)
+    osm_path    = Path(args.osm)
+    output_gpkg = Path(args.output)
+
+    with rasterio.open(tif_path) as src:
         rast_crs = src.crs
         if not ensure_meter_crs(rast_crs):
             raise ValueError(f"Raster-CRS {rast_crs} ist nicht metrisch.")
 
-        lines = load_osm_lines_gpkg(str(OSM_PATH)).to_crs(rast_crs)
+        lines = load_osm_lines_gpkg(str(osm_path)).to_crs(rast_crs)
 
         bounds_poly = box(*src.bounds)
         try:
@@ -636,9 +647,9 @@ def main():
         out = gpd.GeoDataFrame(out, geometry="geometry", crs=rast_crs)
 
     # speichern GPKG
-    OUTPUT_GPKG.parent.mkdir(parents=True, exist_ok=True)
-    out.to_file(OUTPUT_GPKG, layer=OUTPUT_LAYER, driver="GPKG")
-    print(f"[OK] 3D-Linien gespeichert: {OUTPUT_GPKG}")
+    output_gpkg.parent.mkdir(parents=True, exist_ok=True)
+    out.to_file(output_gpkg, layer=OUTPUT_LAYER, driver="GPKG")
+    print(f"[OK] 3D-Linien gespeichert: {output_gpkg}")
 
     # Optional: Plotly 3D
     if MAKE_3D_PLOT:

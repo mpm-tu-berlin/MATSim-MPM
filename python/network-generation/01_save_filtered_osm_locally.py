@@ -271,6 +271,7 @@ if __name__ == "__main__":
     # Fortschrittsbalken basierend auf Gesamtlänge
     pbar = tqdm(total=total_detailed_length, desc="Sorting progress", unit="m", mininterval=1, maxinterval=1)
 
+    result_gdf = None
     result_gdf_list = []
     while not gdf_edges_simplified.empty:
 
@@ -294,7 +295,7 @@ if __name__ == "__main__":
         # ------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
         if len(detailed_edges) == 1:
-            if 'result_gdf' not in locals():
+            if result_gdf is None:
                 result_gdf = detailed_edges.copy()
             else:
                 result_gdf = pd.concat([result_gdf, detailed_edges], ignore_index=True)
@@ -330,7 +331,7 @@ if __name__ == "__main__":
 
 
             # Füge die gefilterten detaillierten Kanten zum Ergebnis-GeoDataFrame hinzu
-            if 'result_gdf' not in locals():
+            if result_gdf is None:
                 result_gdf = detailed_edges.copy()
             else:
                 result_gdf = pd.concat([result_gdf, detailed_edges], ignore_index=True)

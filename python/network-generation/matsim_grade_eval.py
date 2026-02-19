@@ -97,7 +97,12 @@ def _meas_buffer_polygon(gdf_meas: gpd.GeoDataFrame, buf_m: float):
     return gdf_meas.buffer(buf_m).unary_union
 
 def _crop_network(nodes: gpd.GeoDataFrame, links: pd.DataFrame, geom):
-    return nodes, links
+    """Beschränkt das Netzwerk auf Knoten innerhalb von geom und behält nur
+    Links, bei denen beide Endknoten (from/to) im gefilterten Bereich liegen."""
+    nodes_in = nodes[nodes.geometry.within(geom)].copy()
+    node_ids = set(nodes_in["id"])
+    links_in = links[links["from"].isin(node_ids) & links["to"].isin(node_ids)].copy()
+    return nodes_in, links_in
 
 def _length_tolerance_m(link_len_m: float, abs_tol_m: float, rel_tol: float) -> float:
     return abs_tol_m + rel_tol * link_len_m
@@ -255,6 +260,10 @@ class GradeEvaluator:
         nodes_gdf, links_df = load_matsim_network(
             network_path, params.network_input_crs, params.work_crs
         )
+
+        # Netzwerk auf den räumlichen Bereich der Messdaten beschränken
+        meas_buffer = _meas_buffer_polygon(self.meas, params.spatial_crop_buffer_m)
+        nodes_gdf, links_df = _crop_network(nodes_gdf, links_df, meas_buffer)
 
         matches = []
         skipped = []
