@@ -14,9 +14,11 @@ import org.matsim.contrib.ev.discharging.DriveEnergyConsumption;
 import org.matsim.contrib.ev.fleet.ElectricFleetSpecification;
 import org.matsim.contrib.ev.infrastructure.ChargingInfrastructureSpecification;
 import org.matsim.mpm.stats.ChargerWaitingTimeTracker;
+import org.matsim.api.core.v01.TransportMode;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.groups.RoutingConfigGroup;
 import org.matsim.core.config.groups.RoutingConfigGroup.AccessEgressType;
+import org.matsim.core.config.groups.ScoringConfigGroup;
 import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.network.algorithms.TransportModeNetworkFilter;
 import org.matsim.core.router.DefaultRoutingModules;
@@ -130,8 +132,19 @@ public class MpmEvNetworkRoutingProvider implements Provider<RoutingModule> {
             throw new RuntimeException("No TravelDisutilityFactory bound for mode " + routingMode + ".");
         }
 
+        // Compute the same marginal cost of time used by OnlyTimeDependentTravelDisutility so that
+        // one second of expected charger waiting costs the same as one second of driving in routing.
+        ScoringConfigGroup scoringConfig = config.scoring();
+        double marginalCostOfTime_s =
+                (-scoringConfig.getModes().get(TransportMode.car).getMarginalUtilityOfTraveling() / 3600.0)
+                        + (scoringConfig.getPerforming_utils_hr() / 3600.0);
+
+        // Mutable wrapper: the routing module updates it between pass 1 and pass 2 each routing call.
+        ChargerPenaltyTravelDisutility chargerPenaltyDisutility = new ChargerPenaltyTravelDisutility(
+                travelDisutilityFactory.createTravelDisutility(travelTime), marginalCostOfTime_s);
+
         LeastCostPathCalculator routeAlgo = leastCostPathCalculatorFactory.createPathCalculator(filteredNetwork,
-                travelDisutilityFactory.createTravelDisutility(travelTime), travelTime);
+                chargerPenaltyDisutility, travelTime);
 
         // the following again refers to the (transport)mode, since it will determine the mode of the leg on the network:
         if (!routingConfigGroup.getAccessEgressType().equals(AccessEgressType.none)) {
@@ -141,7 +154,7 @@ public class MpmEvNetworkRoutingProvider implements Provider<RoutingModule> {
                     DefaultRoutingModules.createPureNetworkRouter(mode, populationFactory, filteredNetwork, routeAlgo),
                     electricFleetSpecification, chargingInfrastructureSpecification, travelTime,
                     driveConsumptionFactory, auxConsumptionFactory, EvConfigGroup.get(config),
-                    chargerWaitingTimeTracker);
+                    chargerWaitingTimeTracker, chargerPenaltyDisutility);
         }
     }
 }
