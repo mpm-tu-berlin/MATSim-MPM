@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<vehicleDefinitions xmlns="http://www.matsim.org/files/dtd"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://www.matsim.org/files/dtd https://www.matsim.org/files/dtd/vehicleDefinitions_v2.0.xsd">
+
+	<!-- === Testfahrzeug: IVECO S-eWay (EEA-ID: 0X03BF134A613B9524DC32BB26A13AB7B0B31AD74086EC7D927DA614801EB23271) === -->
+	<!-- Quelle: interne Stammdaten, Zeilen 19-20 (Regional Delivery) -->
+	<!-- Fahrzeugmasse: 19282 kg | CdxA: 5.515 m² | RRC: 0.00565 | RatedPower: 851 kW | BatKap: ~558 kWh -->
+
+	<vehicleType id="BET_IVECO_SEWAY_RD_low">
+		<description>IVECO S-eWay, Payload 2600 kg (VECTO Regional Delivery)</description>
+		<capacity seats="0" standingRoomInPersons="0"/>
+		<length meter="16.5"/>
+		<width meter="2.55"/>
+		<maximumVelocity meterPerSecond="23.06"/>
+		<engineInformation>
+			<attributes>
+				<attribute name="HbefaTechnology" class="java.lang.String">electricity</attribute>
+				<attribute name="chargerTypes" class="java.util.Arrays$ArrayList">["DC","default"]</attribute>
+				<attribute name="energyCapacityInKWhOrLiters" class="java.lang.Double">558.1</attribute>
+				<attribute name="energyConsumptionKWhPerMeter" class="java.lang.Double">0.001125</attribute>
+				<attribute name="mass" class="java.lang.Double">19282.0</attribute>
+				<attribute name="payload" class="java.lang.Double">2600.0</attribute>
+				<attribute name="cdXA" class="java.lang.Double">5.515</attribute>
+				<attribute name="rollingC" class="java.lang.Double">0.00565</attribute>
+				<attribute name="maxMotorPowerW" class="java.lang.Double">851000.0</attribute>
+				<!-- Nebenverbrauch gemaess VECTO-Fahrzeugdeklaration (konstante Leistung) -->
+				<attribute name="auxPowerW" class="java.lang.Double">4500.0</attribute>
+			</attributes>
+		</engineInformation>
+	</vehicleType>
+
+	<vehicleType id="BET_IVECO_SEWAY_RD_high">
+		<description>IVECO S-eWay, Payload 12900 kg (VECTO Regional Delivery)</description>
+		<capacity seats="0" standingRoomInPersons="0"/>
+		<length meter="16.5"/>
+		<width meter="2.55"/>
+		<maximumVelocity meterPerSecond="23.06"/>
+		<engineInformation>
+			<attributes>
+				<attribute name="HbefaTechnology" class="java.lang.String">electricity</attribute>
+				<attribute name="chargerTypes" class="java.util.Arrays$ArrayList">["DC","default"]</attribute>
+				<attribute name="energyCapacityInKWhOrLiters" class="java.lang.Double">557.9</attribute>
+				<attribute name="energyConsumptionKWhPerMeter" class="java.lang.Double">0.001302</attribute>
+				<attribute name="mass" class="java.lang.Double">19282.0</attribute>
+				<attribute name="payload" class="java.lang.Double">12900.0</attribute>
+				<attribute name="cdXA" class="java.lang.Double">5.515</attribute>
+				<attribute name="rollingC" class="java.lang.Double">0.00565</attribute>
+				<attribute name="maxMotorPowerW" class="java.lang.Double">851000.0</attribute>
+				<!-- Nebenverbrauch gemaess VECTO-Fahrzeugdeklaration (konstante Leistung) -->
+				<attribute name="auxPowerW" class="java.lang.Double">4500.0</attribute>
+			</attributes>
+		</engineInformation>
+	</vehicleType>
+
+	<!-- === Fahrzeuginstanzen === -->
+	<vehicle id="truck_iveco_seway_rd_low" type="BET_IVECO_SEWAY_RD_low">
+		<attributes>
+			<attribute name="initialSoc" class="java.lang.Double">0.5</attribute>
+		</attributes>
+	</vehicle>
+
+	<vehicle id="truck_iveco_seway_rd_high" type="BET_IVECO_SEWAY_RD_high">
+		<attributes>
+			<attribute name="initialSoc" class="java.lang.Double">0.5</attribute>
+		</attributes>
+	</vehicle>
+
+</vehicleDefinitions>

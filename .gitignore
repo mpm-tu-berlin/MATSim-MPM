@@ -24,3 +24,18 @@ hs_err_pid*
 # IntelliJ
 /.idea/
 *.iml
+
+# MATSim Debug-Ausgaben
+resistance_debug.csv
+dependency-reduced-pom.xml
+
+# Python-Kalibrierung
+python/calibration/.venv/
+python/calibration/results/
+python/calibration/__pycache__/
+python/calibration/**/__pycache__/
+python/calibration/*.db
+python/calibration/*.db-journal
+python/calibration/nul
+python/calibration/resistance_debug.csv
+python/calibration/~$*

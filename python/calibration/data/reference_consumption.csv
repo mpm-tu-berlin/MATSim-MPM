@@ -1,0 +1,15 @@
+# VECTO-Referenzverbrauch (EEA 2023)
+# Quelle: interne Stammdaten
+# vehicle_id entspricht den MATSim-Fahrzeug-IDs in vehicles.xml
+#
+# === Volvo FH 42T E (EEA-ID: 0x0030...DAAD) ===
+vehicle_id,vehicle_group,mission,payload_kg,ee_kwh_per_km,route_km,n_vehicles
+truck_fh42te_lh_low,Volvo_FH42TE,LongHaul,2600,1.0150,100.185,1
+truck_fh42te_lh_high,Volvo_FH42TE,LongHaul,19300,1.2590,100.185,1
+truck_fh42te_rd_low,Volvo_FH42TE,RegionalDelivery,2600,0.9758,100.000,1
+truck_fh42te_rd_high,Volvo_FH42TE,RegionalDelivery,12900,1.1530,100.000,1
+# === IVECO S-eWay (EEA-ID: 0X03BF134A613B9524DC32BB26A13AB7B0B31AD74086EC7D927DA614801EB23271) ===
+truck_iveco_seway_lh_low,IVECO_SeWay,LongHaul,2600,1.1890,100.185,1
+truck_iveco_seway_lh_high,IVECO_SeWay,LongHaul,19300,1.4570,100.185,1
+truck_iveco_seway_rd_low,IVECO_SeWay,RegionalDelivery,2600,1.1250,100.000,1
+truck_iveco_seway_rd_high,IVECO_SeWay,RegionalDelivery,12900,1.3020,100.000,1

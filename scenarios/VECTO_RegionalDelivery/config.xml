@@ -1,0 +1,90 @@
+<?xml version="1.0" ?>
+<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">
+<config>
+	<module name="ev">
+		<param name="auxDischargeTimeStep" value="10"/>
+		<param name="chargeTimeStep" value="5"/>
+		<param name="chargersFile" value="chargers.xml"/>
+		<param name="timeProfiles" value="true"/>
+		<param name="enforceChargingInteractionDuration" value="true"/>
+	</module>
+
+	<module name="vehicles">
+		<param name="vehiclesFile" value="vehicles.xml"/>
+	</module>
+
+	<module name="global">
+		<param name="randomSeed" value="4711"/>
+		<param name="coordinateSystem" value="Atlantis"/>
+		<param name="numberOfThreads" value="8"/>
+	</module>
+
+	<module name="network">
+		<param name="inputNetworkFile" value="regional_delivery_network.xml.gz"/>
+	</module>
+
+	<module name="plans">
+		<param name="inputPlansFile" value="plans.xml"/>
+	</module>
+
+	<module name="controller">
+		<param name="outputDirectory" value="./output/VECTO_RegionalDelivery"/>
+		<param name="firstIteration" value="0"/>
+		<param name="lastIteration" value="0"/>
+		<param name="eventsFileFormat" value="xml"/>
+		<param name="mobsim" value="qsim"/>
+		<param name="routingAlgorithmType" value="SpeedyALT"/>
+		<param name="createGraphsInterval" value="1"/>
+	</module>
+
+	<module name="qsim">
+		<param name="startTime" value="00:00:00"/>
+		<param name="endTime" value="24:00:00"/>
+		<param name="simStarttimeInterpretation" value="onlyUseStarttime"/>
+		<param name="numberOfThreads" value="8"/>
+		<param name="flowCapacityFactor" value="1.0"/>
+		<param name="storageCapacityFactor" value="1.0"/>
+		<param name="vehiclesSource" value="fromVehiclesData"/>
+	</module>
+
+	<module name="eventsManager">
+		<param name="numberOfThreads" value="1"/>
+	</module>
+
+	<module name="scoring">
+		<param name="learningRate" value="1.0"/>
+		<param name="brainExpBeta" value="1.0"/>
+		<param name="lateArrival" value="-18"/>
+		<param name="earlyDeparture" value="0"/>
+		<param name="performing" value="+6"/>
+		<param name="traveling" value="-6"/>
+		<param name="waiting" value="0"/>
+
+		<parameterset type="activityParams">
+			<param name="activityType" value="start"/>
+			<param name="typicalDuration" value="08:00:00"/>
+			<param name="scoringThisActivityAtAll" value="false"/>
+		</parameterset>
+
+		<parameterset type="activityParams">
+			<param name="activityType" value="end"/>
+			<param name="typicalDuration" value="08:00:00"/>
+			<param name="scoringThisActivityAtAll" value="false"/>
+		</parameterset>
+
+		<parameterset type="activityParams">
+			<param name="activityType" value="car charging interaction"/>
+			<param name="typicalDuration" value="00:45:00"/>
+			<param name="scoringThisActivityAtAll" value="false"/>
+		</parameterset>
+	</module>
+
+	<module name="replanning">
+		<param name="maxAgentPlanMemorySize" value="1"/>
+		<parameterset type="strategysettings">
+			<param name="strategyName" value="SelectExpBeta"/>
+			<param name="weight" value="1.0"/>
+		</parameterset>
+	</module>
+
+</config>
