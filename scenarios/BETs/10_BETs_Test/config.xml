@@ -30,7 +30,7 @@
 	<module name="controller">
 		<param name="outputDirectory" value="./output/BETs/BETs_queue_test"/>
 		<param name="firstIteration" value="0"/>
-		<param name="lastIteration" value="3"/>
+		<param name="lastIteration" value="0"/>
 		<param name="eventsFileFormat" value="xml"/>
 		<param name="mobsim" value="qsim"/>
 		<param name="routingAlgorithmType" value="SpeedyALT" />
