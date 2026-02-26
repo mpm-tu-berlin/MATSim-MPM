@@ -1,6 +1,8 @@
 package org.matsim.mpm.routing;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -9,6 +11,7 @@ import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.population.PopulationFactory;
 import org.matsim.contrib.ev.EvConfigGroup;
+import org.matsim.core.config.ConfigGroup;
 import org.matsim.contrib.ev.discharging.AuxEnergyConsumption;
 import org.matsim.contrib.ev.discharging.DriveEnergyConsumption;
 import org.matsim.contrib.ev.fleet.ElectricFleetSpecification;
@@ -146,6 +149,14 @@ public class MpmEvNetworkRoutingProvider implements Provider<RoutingModule> {
         LeastCostPathCalculator routeAlgo = leastCostPathCalculatorFactory.createPathCalculator(filteredNetwork,
                 chargerPenaltyDisutility, travelTime);
 
+        // Load rest areas from file if configured (optional — null restAreasFile preserves old behavior).
+        List<RestAreaSpecification> restAreas = new ArrayList<>();
+        MpmRoutingConfigGroup mpmCfg = (MpmRoutingConfigGroup) config.getModules().get(MpmRoutingConfigGroup.GROUP_NAME);
+        if (mpmCfg != null && mpmCfg.restAreasFile != null) {
+            new RestAreaReader(restAreas).parse(
+                    ConfigGroup.getInputFileURL(config.getContext(), mpmCfg.restAreasFile));
+        }
+
         // the following again refers to the (transport)mode, since it will determine the mode of the leg on the network:
         if (!routingConfigGroup.getAccessEgressType().equals(AccessEgressType.none)) {
             throw new IllegalArgumentException("Bushwacking is not currently supported by the EV routing module");
@@ -154,7 +165,7 @@ public class MpmEvNetworkRoutingProvider implements Provider<RoutingModule> {
                     DefaultRoutingModules.createPureNetworkRouter(mode, populationFactory, filteredNetwork, routeAlgo),
                     electricFleetSpecification, chargingInfrastructureSpecification, travelTime,
                     driveConsumptionFactory, auxConsumptionFactory, EvConfigGroup.get(config),
-                    chargerWaitingTimeTracker, chargerPenaltyDisutility);
+                    chargerWaitingTimeTracker, chargerPenaltyDisutility, restAreas);
         }
     }
 }

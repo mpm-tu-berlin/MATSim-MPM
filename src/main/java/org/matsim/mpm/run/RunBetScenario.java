@@ -32,6 +32,7 @@ import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.scoring.ScoringFunctionFactory;
 import org.matsim.mpm.MpmEvModule;
 import org.matsim.mpm.charging.HoldUntilLeaveChargingLogic;
+import org.matsim.mpm.charging.RejectIfFullChargingLogic;
 import org.matsim.mpm.routing.MpmEvNetworkRoutingProvider;
 import org.matsim.mpm.scoring.ChargingWaitingScoringFunctionFactory;
 
@@ -48,7 +49,7 @@ public class RunBetScenario {
 
 		Config config;
 		if ( args==null || args.length==0 || args[0]==null ){
-			config = ConfigUtils.loadConfig( "scenarios/BETs/10_BETs_Test/config.xml" );
+			config = ConfigUtils.loadConfig( "scenarios/BETs/1pct_diesel_reference/config.xml" );
 		} else {
 			config = ConfigUtils.loadConfig( args );
 		}
@@ -57,6 +58,7 @@ public class RunBetScenario {
 
 		// possibly modify config here
 		config.addModule(new org.matsim.contrib.ev.EvConfigGroup());
+		config.addModule(new org.matsim.mpm.routing.MpmRoutingConfigGroup());
 
 
 		Scenario scenario = ScenarioUtils.loadScenario(config) ;
@@ -83,8 +85,17 @@ public class RunBetScenario {
 				bind(ChargingLogic.Factory.class).toProvider(new Provider<>() {
 					@Inject private EventsManager eventsManager;
 					@Override public ChargingLogic.Factory get() {
-						return charger -> new HoldUntilLeaveChargingLogic(charger,
-								new ChargeUpToMaxSocStrategy(charger, 1.), eventsManager);
+						return charger -> {
+							if ("DC_slow".equals(charger.getChargerType())) {
+								// REST-stop chargers: reject if full, no queuing
+								return new RejectIfFullChargingLogic(charger,
+										new ChargeUpToMaxSocStrategy(charger, 1.), eventsManager);
+							} else {
+								// All other chargers: hold until vehicle leaves (queuing enabled)
+								return new HoldUntilLeaveChargingLogic(charger,
+										new ChargeUpToMaxSocStrategy(charger, 1.), eventsManager);
+							}
+						};
 					}
 				});
 			}

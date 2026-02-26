@@ -4,13 +4,13 @@
 	<module name="ev">
 		<param name="auxDischargeTimeStep" value="10"/>
 		<param name="chargeTimeStep" value="5"/>
-		<param name="chargersFile" value="BETs_Chargers_unlimited.xml"/>
+		<param name="chargersFile" value="potential_charging_locations_unlimited_operational.xml"/>
 		<param name="timeProfiles" value="true"/>
 		<param name="enforceChargingInteractionDuration" value="true"/>
 	</module>
 
 	<module name="vehicles">
-		<param name="vehiclesFile" value="BET_Vehicles.xml.gz"/>
+		<param name="vehiclesFile" value="eTrucks_Vehicle.xml"/>
 	</module>
 
 	<module name="global">
@@ -30,7 +30,7 @@
 	<module name="controler">
 		<param name="outputDirectory" value="./output/BETs/1.0pctBET_1Iteration_unlimited"/>
 		<param name="firstIteration" value="0"/>
-		<param name="lastIteration" value="0"/>
+		<param name="lastIteration" value="2"/>
 		<param name="eventsFileFormat" value="xml"/>
 		<param name="mobsim" value="qsim"/>
 		<param name="routingAlgorithmType" value="SpeedyALT" />
@@ -40,7 +40,7 @@
 	<module name="qsim">
 		<!-- "start/endTime" of MobSim (00:00:00 == take earliest activity time/ run as long as active vehicles exist) -->
 		<param name="startTime" value="00:00:00"/>
-		<param name="endTime" value="24:00:00"/>
+		<param name="endTime" value="96:00:00"/>
 		<param name="simStarttimeInterpretation" value="onlyUseStarttime"/>
 		<param name= "numberOfThreads" value= "31" />
 		<param name="flowCapacityFactor" value="1.0" />
@@ -51,9 +51,9 @@
 		<param name= "numberOfThreads" value= "1" />
 	</module>
 
-	<module name="planCalcScore">
+	<module name="scoring">
 		<param name="learningRate" value="1.0"/>
-		<param name="BrainExpBeta" value="1.0"/>
+		<param name="brainExpBeta" value="1.0"/>
 		<param name="lateArrival" value="-18"/>
 		<param name="earlyDeparture" value="-0"/>
 		<param name="performing" value="+6"/>
@@ -77,7 +77,47 @@
 			<param name="activityType" value="car charging interaction"/>
 			<param name="typicalDuration" value="00:45:00"/>
 			<param name="typicalDurationScoreComputation" value="relative"/>
-			<param name="scoringThisActivityAtAll" value="true"/>
+			<param name="scoringThisActivityAtAll" value="false"/>
+		</parameterset>
+
+		<parameterset type="activityParams">
+			<param name="priority"        value="1" />
+			<param name="activityType" value="car DC_fast charging interaction"/>
+			<param name="typicalDuration" value="00:45:00"/>
+			<param name="typicalDurationScoreComputation" value="relative"/>
+			<param name="scoringThisActivityAtAll" value="false"/>
+		</parameterset>
+
+		<parameterset type="activityParams">
+			<param name="priority"        value="1" />
+			<param name="activityType" value="car DC_slow charging interaction"/>
+			<param name="typicalDuration" value="11:00:00"/>
+			<param name="typicalDurationScoreComputation" value="relative"/>
+			<param name="scoringThisActivityAtAll" value="false"/>
+		</parameterset>
+
+		<parameterset type="activityParams">
+			<param name="priority"        value="1" />
+			<param name="activityType" value="car Energy charging interaction"/>
+			<param name="typicalDuration" value="00:45:00"/>
+			<param name="typicalDurationScoreComputation" value="relative"/>
+			<param name="scoringThisActivityAtAll" value="false"/>
+		</parameterset>
+
+		<parameterset type="activityParams">
+			<param name="priority"        value="1" />
+			<param name="activityType" value="car Timing charging interaction"/>
+			<param name="typicalDuration" value="00:45:00"/>
+			<param name="typicalDurationScoreComputation" value="relative"/>
+			<param name="scoringThisActivityAtAll" value="false"/>
+		</parameterset>
+
+		<parameterset type="activityParams">
+			<param name="priority"        value="1" />
+			<param name="activityType" value="car Rest charging interaction"/>
+			<param name="typicalDuration" value="11:00:00"/>
+			<param name="typicalDurationScoreComputation" value="relative"/>
+			<param name="scoringThisActivityAtAll" value="false"/>
 		</parameterset>
 
 		<parameterset type="activityParams">
@@ -90,18 +130,19 @@
 
 
 	</module>
-	<module name="strategy">
+	<module name="replanning">
 		<param name="maxAgentPlanMemorySize" value="5"/> <!-- 0 means unlimited -->
 		<!--<param name="ModuleProbability_1" value="0.7"/>-->
 
 		<parameterset type="strategysettings">
 			<param name="strategyName" value="SelectExpBeta" />
-			<param name="weight" value="0.9"/>
+			<param name="weight" value="0.7"/>
 		</parameterset>
 
 		<parameterset type="strategysettings">
 			<param name="strategyName" value="ReRoute"/>
-			<param name="weight" value="0.1"/>
+			<param name="weight" value="0.3"/>
+			<param name="disableAfterIteration" value="10"/>
 		</parameterset>
 
 		<!--<parameterset type="strategysettings">

@@ -52,6 +52,7 @@ import org.matsim.vehicles.Vehicle;
 
 import java.util.*;
 import java.util.Comparator;
+import java.util.stream.Collectors;
 
 import org.matsim.mpm.stats.ChargerWaitingTimeTracker;
 
@@ -65,6 +66,10 @@ import static org.matsim.api.core.v01.TransportMode.car;
  * <p>Two-pass routing: pass 1 computes the route with no charger penalty to identify which charger(s)
  * would be used; pass 2 re-routes with a penalty on those specific charger links so the LCPC can find
  * an alternative corridor if a less congested charger is reachable at comparable travel cost.
+ *
+ * <p>Timing-first design: mandatory regulatory stops (4.5 h → 45-min break; another 4.5 h → 11-h rest)
+ * are always inserted for trips exceeding 4.5 h. Energy stops are supplemental and only inserted when
+ * SoC would drop below MIN_SOC within a segment. The pattern repeats as a loop after each rest stop.
  *
  * @author jfbischoff
  */
@@ -86,13 +91,16 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
     private final EvConfigGroup evConfigGroup;
     private final ChargerWaitingTimeTracker waitingTimeTracker;
     private final ChargerPenaltyTravelDisutility chargerPenaltyDisutility;
+    private final Set<Id<Link>> restAreaLinks;
     private static final double MIN_SOC = 0.2; // Minimum State of Charge
     private static final double MAX_DRIVE_TIME_WITHOUT_BREAK = 4.5 * 60 * 60; // Maximum driving time without a break in seconds
     private static final double MAX_OVERALL_DRIVE_TIME_PER_DAY = 9 * 60 * 60; // Maximum overall allowed driving time per day in seconds
     private static final double BREAK_DURATION = 45 * 60; // in seconds
     private static final double REST_DURATION = 11 * 60 * 60; // in seconds
-    private static final double CHARGER_POWER = 640 * 1000; // in Watt
-    private static final double CHARGER_SEARCH_BUFFER = 10 * 60; // in seconds, additional time buffer to consider for charger search to not exceed 4,5h driving limit
+    private static final double CHARGER_POWER = 720 * 1000; // in Watt
+    private static final double CHARGING_OVERHEAD = 5 * 60; // seconds for plug/unplug/payment
+    private static final double CHARGER_SEARCH_BUFFER = 0 * 60; // in seconds, additional time buffer to consider for charger search to not exceed 4,5h driving limit
+    private static final double REST_AREA_GRACE = 15 * 60; // in seconds, grace period past 4.5h limit to still accept a rest area (Rastplatz)
     static final double MAX_VEHICLE_SPEED = 18.056; // in m/s (65 km/h)
 
     /**
@@ -110,15 +118,17 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
         final List<Link> stopLocations;
         final Map<Link, Link> stopLocationToSearchLink;
         final Map<Link, String> stopReasons;
+        final Map<Link, Link> stopLocationToRestAreaLink; // timingLink → rest area link on route (null = none found)
         final double totalTripConsumption;
         final double[] cumulativeConsumptionToStop; // length == stopLocations.size()
 
         StopPlan(List<Link> stopLocations, Map<Link, Link> stopLocationToSearchLink,
-                 Map<Link, String> stopReasons, double totalTripConsumption,
-                 double[] cumulativeConsumptionToStop) {
+                 Map<Link, String> stopReasons, Map<Link, Link> stopLocationToRestAreaLink,
+                 double totalTripConsumption, double[] cumulativeConsumptionToStop) {
             this.stopLocations = stopLocations;
             this.stopLocationToSearchLink = stopLocationToSearchLink;
             this.stopReasons = stopReasons;
+            this.stopLocationToRestAreaLink = stopLocationToRestAreaLink;
             this.totalTripConsumption = totalTripConsumption;
             this.cumulativeConsumptionToStop = cumulativeConsumptionToStop;
         }
@@ -133,7 +143,8 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                               ChargingInfrastructureSpecification chargingInfrastructureSpecification, TravelTime travelTime,
                               DriveEnergyConsumption.Factory driveConsumptionFactory, AuxEnergyConsumption.Factory auxConsumptionFactory,
                               EvConfigGroup evConfigGroup, ChargerWaitingTimeTracker waitingTimeTracker,
-                              ChargerPenaltyTravelDisutility chargerPenaltyDisutility) {
+                              ChargerPenaltyTravelDisutility chargerPenaltyDisutility,
+                              List<RestAreaSpecification> restAreas) {
         this.travelTime = travelTime;
         Gbl.assertNotNull(network);
         this.delegate = delegate;
@@ -147,6 +158,9 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
         this.evConfigGroup = evConfigGroup;
         this.waitingTimeTracker = waitingTimeTracker;
         this.chargerPenaltyDisutility = chargerPenaltyDisutility;
+        this.restAreaLinks = restAreas.stream()
+                .map(RestAreaSpecification::linkId)
+                .collect(Collectors.toSet());
         this.vehicleSuffix = mode.equals(car) ? "" : "_" + mode;
     }
 
@@ -174,11 +188,19 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                 return basicRoute;
             }
 
-            // Build penalty map: only the charger(s) this agent would actually stop at.
+            boolean starts100 = ev.getInitialSoc() >= 1.0 - 1e-9;
+
+            // Build penalty map: only stops that will definitely result in charging.
+            // Skip timing/rest stops for 100%-SoC agents (they might not charge there).
             Map<Id<Link>, Double> penalties = new LinkedHashMap<>();
             for (Link stopLocation : stopPlan.stopLocations) {
+                String r = stopPlan.stopReasons.get(stopLocation);
+                if (starts100 && !"Energy".equals(r)) {
+                    continue;  // 100% agents might not charge at timing/rest stops
+                }
+                String chargerType = "Rest".equals(r) ? "DC_slow" : "DC_fast";
                 Link searchLink = stopPlan.stopLocationToSearchLink.getOrDefault(stopLocation, stopLocation);
-                ChargerSpecification charger = selectCharger(searchLink, ev);
+                ChargerSpecification charger = selectCharger(searchLink, ev, chargerType);
                 double wait = waitingTimeTracker.getAverageWaitingTime(charger.getId());
                 if (wait > 0) {
                     penalties.put(charger.getLinkId(), wait);
@@ -208,72 +230,103 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                 Link stopLocation = stopPlan.stopLocations.get(stopIndex);
                 String stopReason = stopPlan.stopReasons.get(stopLocation);
 
-                StraightLineKnnFinder<Link, ChargerSpecification> straightLineKnnFinder = new StraightLineKnnFinder<>(
-                        5, Link::getCoord, s -> network.getLinks().get(s.getLinkId()).getCoord());
-                Link chargerSearchLink = stopPlan.stopLocationToSearchLink.getOrDefault(stopLocation, stopLocation);
-                List<ChargerSpecification> nearestChargers = straightLineKnnFinder.findNearest(chargerSearchLink,
-                        chargingInfrastructureSpecification.getChargerSpecifications()
-                                .values()
-                                .stream()
-                                .filter(charger -> ev.getChargerTypes().contains(charger.getChargerType())));
-                // Select charger with lowest average waiting time from previous iteration
-                // (falls back to nearest if no congestion data exists)
-                ChargerSpecification selectedCharger = nearestChargers.stream()
-                        .min(Comparator.comparingDouble(c -> waitingTimeTracker.getAverageWaitingTime(c.getId())))
-                        .orElse(nearestChargers.get(0));
-                Link selectedChargerLink = network.getLinks().get(selectedCharger.getLinkId());
-                Facility nexttoFacility = new LinkWrapperFacility(selectedChargerLink);
-                if (nexttoFacility.getLinkId().equals(lastFrom.getLinkId())) {
-                    continue;
-                }
-                List<? extends PlanElement> routeSegment = delegate.calcRoute(DefaultRoutingRequest.of(lastFrom, nexttoFacility,
-                        lastArrivaltime, person, request.getAttributes()));
-                Leg lastLeg = (Leg) routeSegment.get(0);
-                lastArrivaltime = lastLeg.getDepartureTime().seconds() + lastLeg.getTravelTime().seconds();
-                stagedRoute.add(lastLeg);
-
-                // Allocating a short break in the journey or a night-time standstill.
-                // 4.5h timing stops always result in a 45-min break.
-                // 9h daily-limit stops result in the mandatory 11h rest.
-                boolean isRestStop = "Breaktime after 9h2".equals(stopReason)
-                        || "Breaktime after 9h3".equals(stopReason);
-
-                if (isRestStop) {
-                    Activity restAct = PopulationUtils.createStageActivityFromCoordLinkIdAndModePrefix(selectedChargerLink.getCoord(), stopLocation.getId(), "resting");
-                    restAct = PopulationUtils.createActivity(restAct);
-                    restAct.setMaximumDuration(REST_DURATION);
-                    lastArrivaltime += restAct.getMaximumDuration().seconds();
-                    stagedRoute.add(restAct);
-                    lastFrom = nexttoFacility;
+                // Decide: charging stop or resting stop?
+                boolean isChargingStop;
+                if ("Energy".equals(stopReason)) {
+                    isChargingStop = true;
+                } else if (starts100) {
+                    // 100% agent: charge only if remaining route would drop below MIN_SOC without charging
+                    double energyAtStop = Math.max(0.0,
+                            ev.getInitialCharge() - stopPlan.cumulativeConsumptionToStop[stopIndex]);
+                    double remaining = stopPlan.totalTripConsumption
+                            - stopPlan.cumulativeConsumptionToStop[stopIndex];
+                    isChargingStop = remaining > energyAtStop - MIN_SOC * ev.getBatteryCapacity();
                 } else {
-                    // Charging activity. For energy stops: charge only enough to reach the next stop
-                    // (or destination), so the agent doesn't over-charge. Timing stops always use the
-                    // full 45-min regulatory break duration.
-                    double chargingDuration = BREAK_DURATION;
-                    if (stopReason != null && stopReason.startsWith("Energy")) {
-                        double energyAtStop = Math.max(0.0, ev.getInitialCharge()
-                                - stopPlan.cumulativeConsumptionToStop[stopIndex]);
-                        double consumptionToNext;
-                        if (stopIndex + 1 < stopPlan.cumulativeConsumptionToStop.length) {
-                            consumptionToNext = stopPlan.cumulativeConsumptionToStop[stopIndex + 1]
-                                    - stopPlan.cumulativeConsumptionToStop[stopIndex];
-                        } else {
-                            consumptionToNext = stopPlan.totalTripConsumption
-                                    - stopPlan.cumulativeConsumptionToStop[stopIndex];
+                    isChargingStop = true; // non-100% agents always charge
+                }
+
+                if (isChargingStop) {
+                    // Route to nearest charger of the appropriate type for this stop category
+                    String chargerType = "Rest".equals(stopReason) ? "DC_slow" : "DC_fast";
+                    StraightLineKnnFinder<Link, ChargerSpecification> knnFinder = new StraightLineKnnFinder<>(
+                            5, Link::getCoord, s -> network.getLinks().get(s.getLinkId()).getCoord());
+                    Link chargerSearchLink = stopPlan.stopLocationToSearchLink.getOrDefault(stopLocation, stopLocation);
+                    List<ChargerSpecification> nearestChargers = knnFinder.findNearest(chargerSearchLink,
+                            chargingInfrastructureSpecification.getChargerSpecifications()
+                                    .values()
+                                    .stream()
+                                    .filter(c -> c.getChargerType().equals(chargerType)
+                                                 && ev.getChargerTypes().contains(c.getChargerType())));
+                    ChargerSpecification selectedCharger = nearestChargers.stream()
+                            .min(Comparator.comparingDouble(c -> waitingTimeTracker.getAverageWaitingTime(c.getId())))
+                            .orElse(nearestChargers.get(0));
+                    Link selectedChargerLink = network.getLinks().get(selectedCharger.getLinkId());
+                    Facility nexttoFacility = new LinkWrapperFacility(selectedChargerLink);
+                    if (nexttoFacility.getLinkId().equals(lastFrom.getLinkId())) {
+                        continue;
+                    }
+                    List<? extends PlanElement> routeSegment = delegate.calcRoute(DefaultRoutingRequest.of(lastFrom, nexttoFacility,
+                            lastArrivaltime, person, request.getAttributes()));
+                    Leg lastLeg = (Leg) routeSegment.get(0);
+                    lastArrivaltime = lastLeg.getDepartureTime().seconds() + lastLeg.getTravelTime().seconds();
+                    stagedRoute.add(lastLeg);
+
+                    // Compute charging duration based on stop type
+                    double chargingDuration;
+                    if ("Energy".equals(stopReason)) {
+                        // Charge only enough to reach the next timing/rest stop (or destination)
+                        // so the agent arrives there with at least MIN_SOC.
+                        int nextTimingIdx = -1;
+                        for (int j = stopIndex + 1; j < stopPlan.stopLocations.size(); j++) {
+                            String r = stopPlan.stopReasons.get(stopPlan.stopLocations.get(j));
+                            if ("Timing".equals(r) || "Rest".equals(r)) { nextTimingIdx = j; break; }
                         }
-                        double chargeNeeded = Math.max(0.0,
-                                consumptionToNext + MIN_SOC * ev.getBatteryCapacity() - energyAtStop);
-                        double maxChargeable = Math.max(0.0, ev.getBatteryCapacity() - energyAtStop);
-                        chargingDuration = Math.max(1.0, Math.min(chargeNeeded, maxChargeable)) / CHARGER_POWER;
+                        double consumptionToNext = (nextTimingIdx >= 0)
+                                ? stopPlan.cumulativeConsumptionToStop[nextTimingIdx]
+                                  - stopPlan.cumulativeConsumptionToStop[stopIndex]
+                                : stopPlan.totalTripConsumption - stopPlan.cumulativeConsumptionToStop[stopIndex];
+                        double maxChargeable = ev.getBatteryCapacity() * (1.0 - MIN_SOC);
+                        chargingDuration = Math.max(1.0, Math.min(consumptionToNext, maxChargeable)) / CHARGER_POWER + CHARGING_OVERHEAD;
+                    } else if ("Rest".equals(stopReason)) {
+                        chargingDuration = REST_DURATION - CHARGING_OVERHEAD;
+                    } else { // "Timing"
+                        chargingDuration = BREAK_DURATION - CHARGING_OVERHEAD;
                     }
 
-                    Activity chargeAct = PopulationUtils.createStageActivityFromCoordLinkIdAndModePrefix(selectedChargerLink.getCoord(),
-                            selectedChargerLink.getId(), stageActivityModePrefix);
+                    // Encode the stop reason in the stage-activity type so MpmVehicleChargingHandler
+                    // can select the correct charger deterministically (avoids findAny() ambiguity)
+                    // and MpmChargingProceduresCSVWriter can write the stop type to chargingStats.csv.
+                    String chargeActivityPrefix = mode + " " + stopReason + VehicleChargingHandler.CHARGING_IDENTIFIER;
+                    Activity chargeAct = PopulationUtils.createStageActivityFromCoordLinkIdAndModePrefix(
+                            selectedChargerLink.getCoord(), selectedChargerLink.getId(), chargeActivityPrefix);
                     chargeAct = PopulationUtils.createActivity(chargeAct);
                     chargeAct.setMaximumDuration(chargingDuration);
                     lastArrivaltime += chargeAct.getMaximumDuration().seconds();
                     stagedRoute.add(chargeAct);
                     lastFrom = nexttoFacility;
+
+                } else {
+                    // Resting stop: use the rest area identified on the route in computeStops(),
+                    // or fall back to timingLink if no rest area was found in this segment.
+                    Link restLink = stopPlan.stopLocationToRestAreaLink.get(stopLocation);
+                    if (restLink == null) restLink = stopLocation; // fallback: timingLink
+
+                    Facility stopFacility = new LinkWrapperFacility(restLink);
+                    if (!stopFacility.getLinkId().equals(lastFrom.getLinkId())) {
+                        List<? extends PlanElement> seg = delegate.calcRoute(DefaultRoutingRequest.of(
+                                lastFrom, stopFacility, lastArrivaltime, person, request.getAttributes()));
+                        Leg leg = (Leg) seg.get(0);
+                        lastArrivaltime = leg.getDepartureTime().seconds() + leg.getTravelTime().seconds();
+                        stagedRoute.add(leg);
+                    }
+                    double restDuration = "Rest".equals(stopReason) ? REST_DURATION : BREAK_DURATION;
+                    Activity restAct = PopulationUtils.createStageActivityFromCoordLinkIdAndModePrefix(
+                            restLink.getCoord(), restLink.getId(), "resting");
+                    restAct = PopulationUtils.createActivity(restAct);
+                    restAct.setMaximumDuration(restDuration);
+                    lastArrivaltime += restDuration;
+                    stagedRoute.add(restAct);
+                    lastFrom = stopFacility;
                 }
             }
             stagedRoute.addAll(delegate.calcRoute(DefaultRoutingRequest.of(lastFrom, toFacility, lastArrivaltime, person, request.getAttributes())));
@@ -282,11 +335,19 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
     }
 
     /**
-     * Computes up to three charging/rest stop locations for the given route leg.
-     * Returns an empty {@link StopPlan} when no stop is needed (route fits within battery and time limits).
+     * Computes charging and rest stop locations for the given route leg using a timing-first loop.
      *
-     * <p>Agents starting at 100% SoC are assumed to be able to charge at their destination, so they
-     * skip energy stops if the total trip consumption stays within their initial usable capacity.
+     * <p>The outer loop processes one 4.5-h driving segment per iteration:
+     * <ol>
+     *   <li>Find the next timing/rest stop (4.5 h from the current segment start).</li>
+     *   <li>Find an energy stop within that segment if SoC would drop below MIN_SOC.</li>
+     *   <li>Append stops to the plan and advance the segment-start pointer.</li>
+     * </ol>
+     *
+     * <p>Timing stops use reason {@code "Timing"} (45-min break) and rest stops use {@code "Rest"}
+     * (11-h overnight rest), alternating after each timing stop. Energy stops use reason {@code "Energy"}.
+     * All stops carry their cumulative energy consumption from trip start in
+     * {@link StopPlan#cumulativeConsumptionToStop}.
      */
     private StopPlan computeStops(Leg basicLeg, ElectricVehicleSpecification ev) {
         Map<Link, Double> estimatedEnergyConsumption = estimateConsumption(ev, basicLeg);
@@ -295,297 +356,184 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
         double totalConsumption = estimatedEnergyConsumption.values().stream()
                 .mapToDouble(Double::doubleValue).sum();
 
-        double initialSocAtStart = ev.getInitialSoc();
-        double usableCapcityAfterFirstBreak = 0;
-        double usableCapcityAfterSecondBreak = 0;
         List<Link> stopLocations = new ArrayList<>();
         Map<Link, Link> stopLocationToSearchLink = new LinkedHashMap<>();
         Map<Link, String> stopReasons = new LinkedHashMap<>();
-        double currentConsumption = 0;
-        double consumptionFirstPart = 0;
-        double consumptionSecondPart = 0;
-        double consumptionThirdPart = 0;
-        Map<Link, Integer> stopSocOrBreakTime = new LinkedHashMap<>();
-        double initialUsableCapacity = ev.getBatteryCapacity() * (initialSocAtStart - MIN_SOC);
-        double currentTravelTime = 0;
-        double absoluteTravelTime = 0;
-        int counter = 0;
-        boolean startFound = false;
+        Map<Link, Link> stopLocationToRestAreaLink = new LinkedHashMap<>();
+        List<Double> cumulativeList = new ArrayList<>();
 
-        // Agents starting at 100% SoC can charge at their destination, so they only need an energy
-        // stop if they cannot complete the entire trip within their initial usable capacity.
-        // For these agents, timing stops (regulatory breaks) are still always inserted.
-        boolean skipEnergyStops = (initialSocAtStart >= 1.0 - 1e-9)
-                && (totalConsumption <= initialUsableCapacity);
+        // Loop state
+        Link segmentStart = null;   // null = trip origin
+        double currentEnergy = ev.getInitialCharge();
+        boolean nextIsRest = false;
+        double cumConsFromStart = 0.0;
 
-        //////////////////////////////////////////////////////////////////////////////////////////////
-        //First Stop
-        if (!skipEnergyStops) {
-            for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) { //See when energy demand is too high for initialUsableCapacity
-                currentConsumption += e.getValue();
-                counter++;
-                if (currentConsumption >= initialUsableCapacity) {
-                    stopSocOrBreakTime.put(e.getKey(), counter);
-                    stopReasons.put(e.getKey(), "Energy1");
-                    break;
-                }
-            }
-        }
-        currentConsumption = 0;
-        counter = 0;
-        Link candidateLinkFirstStop = null;
-        for (Map.Entry<Link, Double> e : estimatedTravelTime.entrySet()) { //Check when the journey duration is longer than permitted
-            currentTravelTime += e.getValue();
-            counter++;
-            if (currentTravelTime <= MAX_DRIVE_TIME_WITHOUT_BREAK - CHARGER_SEARCH_BUFFER) {
-                candidateLinkFirstStop = e.getKey();
-            }
-            if (currentTravelTime >= MAX_DRIVE_TIME_WITHOUT_BREAK) {
-                stopSocOrBreakTime.put(e.getKey(), counter);
-                stopReasons.put(e.getKey(), "Breaktime after 4.5h1");
-                break;
-            }
-        }
-        currentTravelTime = 0;
-        counter = 0;
-        //Saving the event that occurs first during the trip
-        if (stopSocOrBreakTime.isEmpty()){
-            return new StopPlan(stopLocations, stopLocationToSearchLink, stopReasons,
-                    totalConsumption, new double[0]); // no stop needed
-        } else{
-            Link linkWithFirstBreakNecessity = Collections.min(stopSocOrBreakTime.entrySet(), Map.Entry.comparingByValue()).getKey();
-            stopLocations.add(linkWithFirstBreakNecessity);
-            String firstStopReason = stopReasons.get(linkWithFirstBreakNecessity);
-            boolean firstStopIsTiming = firstStopReason != null && firstStopReason.startsWith("Breaktime");
-            stopLocationToSearchLink.put(linkWithFirstBreakNecessity,
-                    (firstStopIsTiming && candidateLinkFirstStop != null) ? candidateLinkFirstStop : linkWithFirstBreakNecessity);
-            stopSocOrBreakTime.clear();
-            for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) {
-                consumptionFirstPart += e.getValue();
-                if (e.getKey().equals(linkWithFirstBreakNecessity)) {
-                    break;
-                }
-            }
-        }
-        //Remove elements from stopReasons that are not in stopLocations
-        stopReasons.entrySet().removeIf(entry -> !stopLocations.contains(entry.getKey()));
+        while (true) {
+            // A. Find the next timing/rest stop (4.5 h from segmentStart).
+            // candidateLink           = last link with cumulative time <= 4.5h - buffer (charger search reference).
+            // timingLink              = first link where cumulative time >= 4.5h (the regulatory limit).
+            // lastRestAreaInSegment   = last route link within the timing window that has a rest area.
+            boolean segStartFoundT = (segmentStart == null);
+            double runningTime = 0.0;
+            Link candidateLink = null;
+            Link timingLink = null;
+            Link lastRestAreaBefore415 = null;  // last rest area within 4:30h − grace  (< 4:15h)
+            Link lastRestAreaBefore430 = null;  // last rest area within standard 4:30h window
+            Link lastRestAreaBefore445 = null;  // last rest area within 4:30h + grace   (< 4:45h)
 
-        // Carry-over driving-time to the next segment.
-        // Under HGV regulations only a proper ≥45-min break resets the break-time clock.
-        // An energy stop (short charging) does not reset it.
-        Link firstStopLink = stopLocations.get(0);
-        boolean firstStopIsEnergy = stopReasons.getOrDefault(firstStopLink, "").startsWith("Energy");
-        double driveTimeCarryToSecond = 0.0;
-        double driveTimeCarryToThird = 0.0;
-        if (firstStopIsEnergy) {
             for (Map.Entry<Link, Double> e : estimatedTravelTime.entrySet()) {
-                driveTimeCarryToSecond += e.getValue();
-                if (e.getKey().equals(firstStopLink)) break;
+                if (!segStartFoundT) {
+                    if (e.getKey().equals(segmentStart)) {
+                        segStartFoundT = true;
+                    }
+                    continue;   // skip segmentStart and all links before it
+                }
+                runningTime += e.getValue();
+                if (runningTime <= MAX_DRIVE_TIME_WITHOUT_BREAK - CHARGER_SEARCH_BUFFER) {
+                    candidateLink = e.getKey();
+                }
+                if (timingLink == null && runningTime >= MAX_DRIVE_TIME_WITHOUT_BREAK) {
+                    timingLink = e.getKey();
+                }
+                if (restAreaLinks.contains(e.getKey().getId())) {
+                    if (runningTime <= MAX_DRIVE_TIME_WITHOUT_BREAK - REST_AREA_GRACE) {
+                        lastRestAreaBefore415 = e.getKey();
+                    }
+                    if (runningTime <= MAX_DRIVE_TIME_WITHOUT_BREAK) {
+                        lastRestAreaBefore430 = e.getKey();
+                    }
+                    if (runningTime <= MAX_DRIVE_TIME_WITHOUT_BREAK + REST_AREA_GRACE) {
+                        lastRestAreaBefore445 = e.getKey();
+                    }
+                }
+                if (timingLink != null && runningTime > MAX_DRIVE_TIME_WITHOUT_BREAK + REST_AREA_GRACE) {
+                    break;
+                }
             }
+
+            // Grace applies only when no rest area was found in the [4:15h, 4:30h] band.
+            boolean applyGrace = (lastRestAreaBefore430 == lastRestAreaBefore415);
+            // Grace is only useful if it actually finds a better (further) rest area.
+            boolean graceFindsBetter = applyGrace && (lastRestAreaBefore445 != lastRestAreaBefore415);
+
+            Link lastRestAreaInSegment;
+            if (!applyGrace) {
+                lastRestAreaInSegment = lastRestAreaBefore430;       // rest area in [4:15h, 4:30h]
+            } else if (graceFindsBetter) {
+                lastRestAreaInSegment = lastRestAreaBefore445;       // grace improved result
+            } else {
+                lastRestAreaInSegment = null;                        // no improvement → fall back to timingLink
+            }
+
+            if (timingLink == null) {
+                break;  // remaining trip fits in one 4.5-h window — no more timing stops needed
+            }
+
+            // B. Find energy stop within this segment (segmentStart → timingLink).
+            // Also record the cumulative consumption to the rest area for correct next-segment accounting.
+            double usableCapacity = currentEnergy - MIN_SOC * ev.getBatteryCapacity();
+            double cumSegmentCons = 0.0;
+            double cumConsToEnergyStop = 0.0;
+            double cumConsToRestArea = 0.0;
+            Link energyStop = null;
+            boolean segStartFoundE = (segmentStart == null);
+            boolean restAreaConsumed = false;
+            boolean passedTimingLink = false;
+
+            for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) {
+                if (!segStartFoundE) {
+                    if (e.getKey().equals(segmentStart)) {
+                        segStartFoundE = true;
+                    }
+                    continue;   // skip segmentStart and all links before it
+                }
+                cumSegmentCons += e.getValue();
+                // Only record energy stops before the timing link — not in the grace period.
+                if (!passedTimingLink && energyStop == null && cumSegmentCons >= usableCapacity) {
+                    energyStop = e.getKey();
+                    cumConsToEnergyStop = cumSegmentCons;
+                }
+                if (!restAreaConsumed && lastRestAreaInSegment != null
+                        && e.getKey().equals(lastRestAreaInSegment)) {
+                    cumConsToRestArea = cumSegmentCons;
+                    restAreaConsumed = true;
+                }
+                if (e.getKey().equals(timingLink)) {
+                    if (lastRestAreaInSegment == null || restAreaConsumed) {
+                        break; // rest area already found (or none exists) — done
+                    }
+                    passedTimingLink = true; // rest area is in grace period — keep scanning
+                } else if (passedTimingLink && restAreaConsumed) {
+                    break; // found rest area in grace period — done
+                }
+            }
+
+            // Avoid adding energyStop at the same link as timingLink (would create a duplicate).
+            if (energyStop != null && energyStop.equals(timingLink)) {
+                energyStop = null;
+            }
+
+            // C. Append stops to the plan lists.
+            if (energyStop != null) {
+                stopLocations.add(energyStop);
+                stopLocationToSearchLink.put(energyStop, energyStop);
+                stopReasons.put(energyStop, "Energy");
+                cumulativeList.add(cumConsFromStart + cumConsToEnergyStop);
+            }
+            stopLocations.add(timingLink);
+            stopLocationToSearchLink.put(timingLink, candidateLink != null ? candidateLink : timingLink);
+            stopReasons.put(timingLink, nextIsRest ? "Rest" : "Timing");
+            stopLocationToRestAreaLink.put(timingLink, lastRestAreaInSegment); // null if none found
+            cumulativeList.add(cumConsFromStart + cumSegmentCons);
+
+            // D. Update loop state for the next segment.
+            // If a rest area was found: the agent stops there (< 4.5h, no detour).
+            // The next segment starts from the rest area so the next 4.5h window is measured correctly.
+            boolean stopsAtRestArea = (lastRestAreaInSegment != null);
+
+            // Energy arriving at the actual stop location (rest area or timing link).
+            double energyAtStop;
+            if (energyStop != null) {
+                // After an energy top-up, battery arrives at timing/rest stop at MIN_SOC.
+                energyAtStop = MIN_SOC * ev.getBatteryCapacity();
+            } else {
+                energyAtStop = currentEnergy - (stopsAtRestArea ? cumConsToRestArea : cumSegmentCons);
+            }
+
+            if (nextIsRest) {
+                // After an 11-h rest, conservatively assume full charge (upper bound for planning).
+                currentEnergy = ev.getBatteryCapacity();
+            } else {
+                // After a 45-min break: charge up from energyAtStop.
+                currentEnergy = Math.min(
+                        energyAtStop + (BREAK_DURATION - CHARGING_OVERHEAD) * CHARGER_POWER,
+                        ev.getBatteryCapacity());
+            }
+
+            // Next segment starts from the rest area (if found) to correctly enforce the 4.5h window.
+            // Falls back to candidateLink (charger search reference) if no rest area is available.
+            segmentStart = stopsAtRestArea ? lastRestAreaInSegment : candidateLink;
+            cumConsFromStart += stopsAtRestArea ? cumConsToRestArea : cumSegmentCons;
+            nextIsRest = !nextIsRest;
         }
 
-        //Calculate capacity after charging for onward journey; Check whether the battery is charging for 45 seconds or whether it may have reached 100% beforehand)
-        usableCapcityAfterFirstBreak = Math.min(ev.getInitialCharge() - consumptionFirstPart + BREAK_DURATION * CHARGER_POWER, ev.getBatteryCapacity()) - MIN_SOC * ev.getBatteryCapacity();
-
-        //////////////////////////////////////////////////////////////////////////////////////////////
-        //Second stop:
-        if(!stopReasons.get(stopLocations.get(0)).isEmpty()) {
-            Link secondLegStart = stopLocationToSearchLink.getOrDefault(stopLocations.get(0), stopLocations.get(0));
-            if (!skipEnergyStops) {
-                for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) { //See when energy demand is too high
-                    if (e.getKey().equals(secondLegStart)) {
-                        startFound = true;
-                    }
-                    if (startFound) {
-                        currentConsumption += e.getValue();
-                        counter++;
-                        if (currentConsumption >= usableCapcityAfterFirstBreak) {
-                            stopSocOrBreakTime.put(e.getKey(), counter);
-                            stopReasons.put(e.getKey(), "Energy2");
-                            break;
-                        }
-                    }
-                }
-            }
-            currentConsumption = 0;
-            counter = 0;
-            startFound = false;
-            Link candidateLinkSecondStop = null;
-            for (Map.Entry<Link, Double> e : estimatedTravelTime.entrySet()) { //Check when the journey duration is longer than permitted
-                absoluteTravelTime += e.getValue();
-                if (e.getKey().equals(secondLegStart)) {
-                    // Carry over drive time if the first stop was an energy stop (no clock reset).
-                    currentTravelTime = driveTimeCarryToSecond - e.getValue();
-                    startFound = true;
-                }
-                if (startFound) {
-                    counter++;
-                    currentTravelTime += e.getValue();
-                    if (currentTravelTime <= MAX_DRIVE_TIME_WITHOUT_BREAK - CHARGER_SEARCH_BUFFER) {
-                        candidateLinkSecondStop = e.getKey();
-                    }
-                    if (currentTravelTime >= MAX_DRIVE_TIME_WITHOUT_BREAK) {
-                        stopSocOrBreakTime.put(e.getKey(), counter);
-                        stopReasons.put(e.getKey(), "Breaktime after 4.5h2");
-                        break;
-                    }
-                    if (absoluteTravelTime >= MAX_OVERALL_DRIVE_TIME_PER_DAY) {
-                        stopSocOrBreakTime.put(e.getKey(), counter);
-                        stopReasons.put(e.getKey(), "Breaktime after 9h2");
-                        break;
-                    }
-                }
-            }
-            counter = 0;
-            startFound = false;
-            absoluteTravelTime = 0;
-            currentTravelTime = 0;
-
-            //Saving the event that occurs first during this trip
-            if (!stopSocOrBreakTime.isEmpty()) {
-                Link linkWithSecondBreakNecessity = Collections.min(stopSocOrBreakTime.entrySet(), Map.Entry.comparingByValue()).getKey();
-                stopLocations.add(linkWithSecondBreakNecessity);
-                String secondStopReason2 = stopReasons.get(linkWithSecondBreakNecessity);
-                boolean secondStopIsTiming = secondStopReason2 != null && secondStopReason2.startsWith("Breaktime");
-                stopLocationToSearchLink.put(linkWithSecondBreakNecessity,
-                        (secondStopIsTiming && candidateLinkSecondStop != null) ? candidateLinkSecondStop : linkWithSecondBreakNecessity);
-                stopSocOrBreakTime.clear();
-                for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) {
-                    if (e.getKey().equals(secondLegStart)) {
-                        startFound = true;
-                    }
-                    if (startFound){
-                        consumptionSecondPart += e.getValue();
-                        if (e.getKey().equals(linkWithSecondBreakNecessity)) {
-                            break;
-                        }
-                    }
-                }
-                startFound = false;
-
-                // Second stop is energy → carry over accumulated drive time to the third segment.
-                boolean secondSegStarted = false;
-                for (Map.Entry<Link, Double> e : estimatedTravelTime.entrySet()) {
-                    if (e.getKey().equals(secondLegStart)) secondSegStarted = true;
-                    if (secondSegStarted) {
-                        driveTimeCarryToThird += e.getValue();
-                        if (e.getKey().equals(linkWithSecondBreakNecessity)) break;
-                    }
-                }
-                driveTimeCarryToThird += driveTimeCarryToSecond;
-
-                //Remove elements from stopReasons that are not in stopLocations
-                stopReasons.entrySet().removeIf(entry -> !stopLocations.contains(entry.getKey()));
-
-                //Calculate capacity after second charging for onward journey; Check whether the battery is charging for 45 seconds or whether it may have reached 100% beforehand)
-                usableCapcityAfterSecondBreak = Math.min(usableCapcityAfterFirstBreak - consumptionSecondPart + BREAK_DURATION * CHARGER_POWER, ev.getBatteryCapacity()) - MIN_SOC * ev.getBatteryCapacity();
-            }
-        }
-        //////////////////////////////////////////////////////////////////////////////////////////////
-        // Possible third stop (only if second stop was an energy stop — timing stops are now 11h rest,
-        // so no further stops make sense in the same day's trip)
-        if (stopLocations.size() > 1) {
-            String secondStopReason = stopReasons.get(stopLocations.get(1)); //Reason for the second stop
-            if (secondStopReason.startsWith("Breaktime")) {
-                //Placeholder for further Implementations — second stop is 11h rest, no third stop today
-            }
-            else {
-                Link thirdLegStart = stopLocationToSearchLink.getOrDefault(stopLocations.get(1), stopLocations.get(1));
-                if (!skipEnergyStops) {
-                    for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) { //See when energy demand is too high
-                        if (e.getKey().equals(thirdLegStart)) {
-                            startFound = true;
-                        }
-                        if (startFound) {
-                            currentConsumption += e.getValue();
-                            counter++;
-                            if (currentConsumption >= usableCapcityAfterSecondBreak) {
-                                stopSocOrBreakTime.put(e.getKey(), counter);
-                                stopReasons.put(e.getKey(), "Energy3");
-                                break;
-                            }
-                        }
-                    }
-                }
-                counter = 0;
-                startFound = false;
-                Link candidateLinkThirdStop = null;
-                for (Map.Entry<Link, Double> e : estimatedTravelTime.entrySet()) { //Check when the journey duration is longer than permitted
-                    absoluteTravelTime += e.getValue();
-                    if (e.getKey().equals(thirdLegStart)) {
-                        // Carry over drive time if the second stop was an energy stop (no clock reset).
-                        currentTravelTime = driveTimeCarryToThird - e.getValue();
-                        startFound = true;
-                    }
-                    if (startFound) {
-                        counter++;
-                        currentTravelTime += e.getValue();
-                        if (currentTravelTime <= MAX_DRIVE_TIME_WITHOUT_BREAK - CHARGER_SEARCH_BUFFER) {
-                            candidateLinkThirdStop = e.getKey();
-                        }
-                        if (currentTravelTime >= MAX_DRIVE_TIME_WITHOUT_BREAK) {
-                            stopSocOrBreakTime.put(e.getKey(), counter);
-                            stopReasons.put(e.getKey(), "Breaktime after 4.5h3");
-                            break;
-                        }
-                        if (absoluteTravelTime >= MAX_OVERALL_DRIVE_TIME_PER_DAY) {
-                            stopSocOrBreakTime.put(e.getKey(), counter);
-                            stopReasons.put(e.getKey(), "Breaktime after 9h3");
-                            break;
-                        }
-                    }
-                }
-                //Saving the event that occurs first during this trip
-                if (!stopSocOrBreakTime.isEmpty()) {
-                    Link linkWithThirdBreakNecessity = Collections.min(stopSocOrBreakTime.entrySet(), Map.Entry.comparingByValue()).getKey();
-                    stopLocations.add(linkWithThirdBreakNecessity);
-                    String thirdStopReason = stopReasons.get(linkWithThirdBreakNecessity);
-                    boolean thirdStopIsTiming = thirdStopReason != null && thirdStopReason.startsWith("Breaktime");
-                    stopLocationToSearchLink.put(linkWithThirdBreakNecessity,
-                            (thirdStopIsTiming && candidateLinkThirdStop != null) ? candidateLinkThirdStop : linkWithThirdBreakNecessity);
-                    stopSocOrBreakTime.clear();
-
-                    // Compute consumption from stop2 to stop3 for dynamic charging time.
-                    startFound = false;
-                    for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) {
-                        if (e.getKey().equals(thirdLegStart)) { startFound = true; }
-                        if (startFound) {
-                            consumptionThirdPart += e.getValue();
-                            if (e.getKey().equals(linkWithThirdBreakNecessity)) { break; }
-                        }
-                    }
-                    startFound = false;
-
-                    //Remove elements from stopReasons that are not in stopLocations
-                    stopReasons.entrySet().removeIf(entry -> !stopLocations.contains(entry.getKey()));
-                }
-            }
-        }
-        //////////////////////////////////////////////////////////////////////////////////////////////
-        // First break after 11h break
-        // Placeholder for further Implementations
-
-        // Build cumulative consumption array for dynamic charging time calculation.
-        int numStops = stopLocations.size();
-        double[] cumulative = new double[numStops];
-        if (numStops > 0) cumulative[0] = consumptionFirstPart;
-        if (numStops > 1) cumulative[1] = consumptionFirstPart + consumptionSecondPart;
-        if (numStops > 2) cumulative[2] = consumptionFirstPart + consumptionSecondPart + consumptionThirdPart;
-
+        double[] cumulative = cumulativeList.stream().mapToDouble(Double::doubleValue).toArray();
         return new StopPlan(stopLocations, stopLocationToSearchLink, stopReasons,
-                totalConsumption, cumulative);
+                stopLocationToRestAreaLink, totalConsumption, cumulative);
     }
 
     /**
      * Selects the charger with the lowest expected waiting time from the 5 nearest chargers
-     * to {@code chargerSearchLink} that are compatible with {@code ev}.
+     * to {@code chargerSearchLink} that are compatible with {@code ev} and match {@code chargerType}.
      */
-    private ChargerSpecification selectCharger(Link chargerSearchLink, ElectricVehicleSpecification ev) {
+    private ChargerSpecification selectCharger(Link chargerSearchLink, ElectricVehicleSpecification ev,
+                                               String chargerType) {
         StraightLineKnnFinder<Link, ChargerSpecification> finder = new StraightLineKnnFinder<>(
                 5, Link::getCoord, s -> network.getLinks().get(s.getLinkId()).getCoord());
         List<ChargerSpecification> nearest = finder.findNearest(chargerSearchLink,
                 chargingInfrastructureSpecification.getChargerSpecifications().values().stream()
-                        .filter(c -> ev.getChargerTypes().contains(c.getChargerType())));
+                        .filter(c -> c.getChargerType().equals(chargerType)
+                                     && ev.getChargerTypes().contains(c.getChargerType())));
         return nearest.stream()
                 .min(Comparator.comparingDouble(c -> waitingTimeTracker.getAverageWaitingTime(c.getId())))
                 .orElse(nearest.get(0));

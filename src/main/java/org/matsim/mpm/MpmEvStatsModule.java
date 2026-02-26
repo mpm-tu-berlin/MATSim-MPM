@@ -6,11 +6,13 @@ import org.matsim.contrib.ev.EvConfigGroup;
 import org.matsim.contrib.ev.EvModule;
 import org.matsim.contrib.ev.charging.ChargingEventSequenceCollector;
 import org.matsim.contrib.ev.stats.*;
+import org.matsim.mpm.stats.MpmSocHistogramTimeProfileCollectorProvider;
 import org.matsim.core.controler.AbstractModule;
 import org.matsim.core.mobsim.qsim.AbstractQSimModule;
 import org.matsim.mpm.scoring.ChargingQueueWaitingScoringHandler;
 import org.matsim.mpm.stats.ChargerQueuingCollector;
 import org.matsim.mpm.stats.ChargerWaitingTimeTracker;
+import org.matsim.mpm.stats.MpmChargingProceduresCSVWriter;
 
 public class MpmEvStatsModule extends AbstractModule {
     @Inject
@@ -20,7 +22,9 @@ public class MpmEvStatsModule extends AbstractModule {
     public void install() {
         bind(ChargingEventSequenceCollector.class).asEagerSingleton();
         addEventHandlerBinding().to(ChargingEventSequenceCollector.class);
-        addControlerListenerBinding().to(ChargingProceduresCSVWriter.class).in(Singleton.class);
+        bind(MpmChargingProceduresCSVWriter.class).asEagerSingleton();
+        addEventHandlerBinding().to(MpmChargingProceduresCSVWriter.class);
+        addControlerListenerBinding().to(MpmChargingProceduresCSVWriter.class);
 
 
         // NOTE: ScoringFunctionFactory is set directly in RunBetScenario via setScoringFunctionFactory()
@@ -42,7 +46,7 @@ public class MpmEvStatsModule extends AbstractModule {
                 @Override
                 protected void configureQSim() {
                     addQSimComponentBinding(EvModule.EV_COMPONENT)
-                            .toProvider(SocHistogramTimeProfileCollectorProvider.class);
+                            .toProvider(MpmSocHistogramTimeProfileCollectorProvider.class);
                     addQSimComponentBinding(EvModule.EV_COMPONENT)
                             .toProvider(IndividualChargeTimeProfileCollectorProvider.class);
                     addQSimComponentBinding(EvModule.EV_COMPONENT)
