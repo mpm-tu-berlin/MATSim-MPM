@@ -25,6 +25,8 @@ import java.util.concurrent.LinkedBlockingQueue;
  */
 public class RejectIfFullChargingLogic implements ChargingLogic {
 
+    private static final double MAX_FAST_SOC = 0.9; // Schnellladen nur bis 90% SoC
+
     private final ChargerSpecification charger;
     private final ChargingStrategy chargingStrategy;
     private final EventsManager eventsManager;
@@ -54,12 +56,15 @@ public class RejectIfFullChargingLogic implements ChargingLogic {
 
             double oldCharge = ev.getBattery().getCharge();
             double energy = ev.getChargingPower().calcChargingPower(charger) * chargePeriod;
-            double newCharge = Math.min(oldCharge + energy, ev.getBattery().getCapacity());
+            boolean isFastCharger = "DC_fast".equals(charger.getChargerType());
+            double maxCharge = isFastCharger ? ev.getBattery().getCapacity() * MAX_FAST_SOC
+                    : ev.getBattery().getCapacity();
+            double newCharge = Math.min(oldCharge + energy, maxCharge);
             ev.getBattery().setCharge(newCharge);
             eventsManager.processEvent(
                     new EnergyChargedEvent(now, charger.getId(), ev.getId(), newCharge - oldCharge, newCharge));
 
-            if (chargingStrategy.isChargingCompleted(ev)) {
+            if (newCharge >= maxCharge - 1e-9 || chargingStrategy.isChargingCompleted(ev)) {
                 chargedButHolding.add(ev.getId());
             }
         }

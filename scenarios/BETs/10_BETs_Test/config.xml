@@ -42,12 +42,12 @@
 		<param name="startTime" value="00:00:00"/>
 		<param name="endTime" value="36:00:00"/>
 		<param name="simStarttimeInterpretation" value="onlyUseStarttime"/>
-		<param name= "numberOfThreads" value= "31" />
+		<param name= "numberOfThreads" value= "5" />
 		<param name="flowCapacityFactor" value="1.0" />
 		<param name="storageCapacityFactor" value="1.0" />
 	</module>
 
-	<module name="eventsManager" >
+	<module name="parallelEventHandling" >
 		<param name= "numberOfThreads" value= "1" />
 	</module>
 
