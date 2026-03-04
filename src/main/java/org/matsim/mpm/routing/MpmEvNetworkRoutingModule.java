@@ -108,6 +108,9 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
     private static final double CHARGER_MAX_SEGMENT_TIME = 5.0 * 3600; // 5h — max grace beyond 4.5h limit
     static final double MAX_VEHICLE_SPEED = 18.056; // in m/s (65 km/h)
     private static final double MAX_FAST_SOC = 0.9; // Schnellladen nur bis 90% SoC
+    /** Safety buffer added to energy-stop charging to absorb extra consumption caused by the
+     *  off-route charger detour. Max detour = 10 km × 4320 J/m ≈ 43 MJ → 50 MJ gives margin. */
+    private static final double ENERGY_STOP_BUFFER_J = 50_000_000; // J ≈ 14 kWh
 
     /**
      * Result of the stop-computation pass — the maps used by sub-leg routing plus energy data.
@@ -263,6 +266,20 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                 Link stopLocation = plan.stopLocations.get(0);
                 String stopReason = plan.stopReasons.get(stopLocation);
 
+                // Promote late energy stops: if the agent has been driving >= 4h by the time
+                // it reaches this energy stop, combine it with the mandatory timing/rest break.
+                // This avoids a separate timing stop a few minutes later.
+                if ("Energy".equals(stopReason)) {
+                    double timeToStop = 0.0;
+                    for (Map.Entry<Link, Double> ttEntry : estimateTravelTime(remainingBasicLeg).entrySet()) {
+                        timeToStop += ttEntry.getValue();
+                        if (ttEntry.getKey().equals(stopLocation)) break;
+                    }
+                    if (timeInCurrentSegment + timeToStop >= CHARGER_MIN_SEGMENT_TIME) {
+                        stopReason = nextIsRest ? "Rest" : "Timing";
+                    }
+                }
+
                 // Decide: charging stop or resting stop?
                 boolean isChargingStop;
                 if ("Energy".equals(stopReason)) {
@@ -395,10 +412,9 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
 
                     if (subLeg == null) {
                         // Charger is at current position — no sub-leg needed; update state to avoid infinite loop.
+                        double chargingDurationNull;
                         if ("Energy".equals(stopReason)) {
                             // Charge enough to reach the next timing/rest stop (same logic as normal flow).
-                            // Setting MIN_SOC * capacity here leaves usableCapacity = 0 on the next iteration,
-                            // causing computeStops() to immediately re-detect an energy stop → infinite loop.
                             int nextTimingIdxNull = -1;
                             for (int j = 1; j < plan.stopLocations.size(); j++) {
                                 String r = plan.stopReasons.get(plan.stopLocations.get(j));
@@ -408,20 +424,32 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                                     ? plan.cumulativeConsumptionToStop[nextTimingIdxNull] - plan.cumulativeConsumptionToStop[0]
                                     : plan.totalTripConsumption - plan.cumulativeConsumptionToStop[0];
                             double maxChargeableNull = Math.max(0.0, maxEnergyAtStop - currentEnergy);
-                            double energyChargedNull = Math.min(consumptionToNextNull, maxChargeableNull);
+                            double energyChargedNull = Math.min(consumptionToNextNull + ENERGY_STOP_BUFFER_J, maxChargeableNull);
                             currentEnergy = Math.min(currentEnergy + energyChargedNull, maxEnergyAtStop);
+                            chargingDurationNull = Math.max(1.0, energyChargedNull) / chargerPower + CHARGING_OVERHEAD;
                             // timeInCurrentSegment unchanged (zero travel time to charger)
                         } else if ("Rest".equals(stopReason)) {
                             currentEnergy = ev.getBatteryCapacity();
                             timeInCurrentSegment = 0.0;
                             nextIsRest = !nextIsRest;
+                            chargingDurationNull = REST_DURATION - CHARGING_OVERHEAD;
                         } else { // "Timing"
                             currentEnergy = Math.min(
                                     currentEnergy + (BREAK_DURATION - CHARGING_OVERHEAD) * chargerPower,
                                     maxEnergyAtStop);
                             timeInCurrentSegment = 0.0;
                             nextIsRest = !nextIsRest;
+                            chargingDurationNull = BREAK_DURATION - CHARGING_OVERHEAD;
                         }
+
+                        // Add charging activity to stagedRoute (same pattern as normal flow).
+                        String chargeActivityPrefixNull = mode + " " + stopReason + VehicleChargingHandler.CHARGING_IDENTIFIER;
+                        Activity chargeActNull = PopulationUtils.createStageActivityFromCoordLinkIdAndModePrefix(
+                                selectedChargerLink.getCoord(), selectedChargerLink.getId(), chargeActivityPrefixNull);
+                        chargeActNull = PopulationUtils.createActivity(chargeActNull);
+                        chargeActNull.setMaximumDuration(chargingDurationNull);
+                        stagedRoute.add(chargeActNull);
+
                         lastArrivaltime += "Rest".equals(stopReason) ? REST_DURATION : BREAK_DURATION;
                         continue;
                     }
@@ -448,7 +476,7 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                                 ? plan.cumulativeConsumptionToStop[nextTimingIdx] - plan.cumulativeConsumptionToStop[0]
                                 : plan.totalTripConsumption - plan.cumulativeConsumptionToStop[0];
                         double maxChargeable = ev.getBatteryCapacity() * (1.0 - MIN_SOC);
-                        chargingDuration = Math.max(1.0, Math.min(consumptionToNext, maxChargeable)) / chargerPower + CHARGING_OVERHEAD;
+                        chargingDuration = Math.max(1.0, Math.min(consumptionToNext + ENERGY_STOP_BUFFER_J, maxChargeable)) / chargerPower + CHARGING_OVERHEAD;
                     } else if ("Rest".equals(stopReason)) {
                         chargingDuration = REST_DURATION - CHARGING_OVERHEAD;
                     } else { // "Timing"
@@ -789,3 +817,4 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
     }
 
 }
+
