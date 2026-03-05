@@ -25,7 +25,7 @@ import org.matsim.utils.objectattributes.attributable.Attributes;
  *
  * wobei:
  *   fa          = 0.5 * rho_Luft * CdA   [kg/m]
- *   P_mech_max  = maxMotorPowerW * drivetrainEfficiency   [W]
+ *   P_mech_max  = maxMotorPowerW * tractionEfficiency   [W]
  *
  * Die kubische Gleichung   fa*v^3 + b*v - P = 0   wird mit Newton-Raphson
  * geloest (typisch 3-5 Iterationen).
@@ -34,7 +34,7 @@ import org.matsim.utils.objectattributes.attributable.Attributes;
  * Attribute wie in MpmDischargingModule):
  *   mass, payload, cdXA, rollingC, maxMotorPowerW
  *
- * Der Kalibrierungsparameter drivetrainEfficiency aus CalibrationParams
+ * Der Kalibrierungsparameter tractionEfficiency aus CalibrationParams
  * skaliert die verfuegbare mechanische Leistung und ist damit direkt in
  * die leistungsbegrenzte Geschwindigkeit eingebunden.
  */
@@ -59,12 +59,12 @@ public final class PowerLimitedLinkSpeedCalculator implements LinkSpeedCalculato
         double mass           = attrOrDefault(attrs, "mass",           12_000.0);
         double payload        = attrOrDefault(attrs, "payload",             0.0);
         double cdXA           = attrOrDefault(attrs, "cdXA",                5.5);
-        double rollingC       = attrOrDefault(attrs, "rollingC",           0.01);
+        double rollingC       = attrOrDefault(attrs, "rollingC",        0.01);
         double maxMotorPowerW = attrOrDefault(attrs, "maxMotorPowerW", 400_000.0);
 
         double mSum     = mass + payload;
         double fa       = 0.5 * RHO_AIR * cdXA;                         // aerodyn. Koeffizient [kg/m]
-        double pMechMax = maxMotorPowerW * calib.drivetrainEfficiency;   // max. mech. Leistung [W]
+        double pMechMax = maxMotorPowerW * calib.tractionEfficiency;   // max. mech. Leistung [W]
 
         // --- Steigung: sin(α) ≈ Δh / L (Kleinwinkelnaeherung, wie im Verbrauchsmodell) ---
         double grade         = computeGrade(link);

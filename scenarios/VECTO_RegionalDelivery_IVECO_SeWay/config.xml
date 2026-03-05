@@ -21,7 +21,7 @@
 
 	<module name="network">
 		<!-- Gleiches Netzwerk wie Volvo-Regional-Delivery (gleicher Fahrzyklus) -->
-		<param name="inputNetworkFile" value="../VECTO_RegionalDelivery/regional_delivery_network.xml.gz"/>
+		<param name="inputNetworkFile" value="../VECTO_RegionalDelivery/regional_delivery_network_250m.xml.gz"/>
 	</module>
 
 	<module name="plans">
@@ -36,6 +36,7 @@
 		<param name="mobsim" value="qsim"/>
 		<param name="routingAlgorithmType" value="SpeedyALT"/>
 		<param name="createGraphsInterval" value="1"/>
+
 	</module>
 
 	<module name="qsim">
@@ -46,6 +47,7 @@
 		<param name="flowCapacityFactor" value="1.0"/>
 		<param name="storageCapacityFactor" value="1.0"/>
 		<param name="vehiclesSource" value="fromVehiclesData"/>
+		<param name="timeStepSize" value="1"/>
 	</module>
 
 	<module name="eventsManager">

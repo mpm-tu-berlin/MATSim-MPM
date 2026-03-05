@@ -45,24 +45,42 @@ MATSIM_CONFIG = SCENARIOS["LongHaul"]["config"]
 REFERENCE_CONSUMPTION_FILE = DATA_DIR / "reference_consumption.csv"
 # === Optuna ===
 STUDY_NAME = "matsim-vecto-calibration"
-N_TRIALS = 150
+N_TRIALS = 100
 STORAGE = f"sqlite:///{RESULTS_DIR / 'optuna_study.db'}"
 
 # === MATSim ===
-# 5G pro JVM: LH- und RD-Szenario laufen parallel (2x5G=10G < 12G freier RAM)
-MATSIM_MEMORY = "5G"
+# 3G pro JVM: N_JOBS parallele Trials x 2 Szenarien x 3G = N_JOBS*6G RAM
+MATSIM_MEMORY = "3G"
 MATSIM_ITERATIONS = 1
+
+# === Parallelisierung ===
+# N_JOBS parallele Optuna-Trials gleichzeitig.
+# RAM-Bedarf: N_JOBS * 2 Szenarien * MATSIM_MEMORY
+# Beispiel: 2 * 2 * 3G = 12G (passt bei 13G freiem RAM)
+N_JOBS = 2
 
 # Pfad zur Kalibrierungsparameter-Datei (wird pro Trial geschrieben)
 CALIBRATION_PARAMS_FILE = RESULTS_DIR / "calibration_params.properties"
 
-# === Kalibrierungsparameter-Bereiche ===
+# === Beladungsklassen ===
+# Jede Klasse wird als separate Optuna-Studie optimiert.
+# "low"  = Leerfahrt-Szenario (geringe Zuladung)
+# "high" = Vollladungs-Szenario (hohe Zuladung)
+# Fahrzeug-IDs enden jeweils auf "_low" bzw. "_high".
+PAYLOAD_CLASSES: list[str] = ["low", "high"]
+
+# Wird zur Laufzeit von run_optimization.py gesetzt (Monkey-Patch).
+# Steuert, welche Fahrzeuge in die Fehlerberechnung einfliessen.
+ACTIVE_PAYLOAD_CLASS: str = "all"
+
+# === Kalibrierungsparameter-Bereiche
 # Wertebereiche (low, high) fuer die 4 Optuna-Parameter
 # a1/a2 entfallen: kinetische Energie wird jetzt exakt pro Link berechnet
 # RatedPower entfaellt: wird fahrzeugspezifisch in der MATSim-Vehicles-Datei definiert
 PARAM_BOUNDS = {
-    "drivetrainEfficiency":  (0.7, 0.8),  # Antriebsstrang-Effizienz [-]
-    "inertiaC":              (1.01,  1.05),   # Traegheitsbeiwert [-] (rotierende Massen: Raeder, Antrieb)
-    "recupEfficiency":       (0.75,  0.95),   # Rekuperations-Wirkungsgrad [-]
-    "maxRecupPowerFraction": (0.8,  1),   # Max. Rekuperationsleistung als Anteil der fahrzeugspezifischen RatedPower [-]
+    "tractionEfficiency":    (0.70,   0.90),       # Gesamteffizienz Batterie→Rad bei Traktion [-]
+    "inertiaC":              (1.03,  1.03),       # Traegheitsbeiwert [-] (rotierende Massen: Raeder, Antrieb)
+    "recupEfficiency":       (0.50,   0.80),        # Rekuperations-Wirkungsgrad [-]
+    "maxRecupPowerFraction": (0.70,   0.90),        # Max. Rekuperationsleistung als Anteil der fahrzeugspezifischen RatedPower [-]
+    "auxPowerW":             (2_500,   7_500.0),    # Konstante Nebenverbrauchsleistung [W]
 }

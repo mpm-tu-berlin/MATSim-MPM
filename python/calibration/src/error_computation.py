@@ -83,8 +83,8 @@ def parse_charge_profiles(output_dir: Path) -> dict[str, float]:
 
 
 def compute_scenario_error(output_dir: Path, mission: str,
-                           route_km: float) -> list[float]:
-    """Berechnet die quadratischen Fehler fuer ein einzelnes Szenario.
+                           route_km: float) -> list[tuple[float, float]]:
+    """Berechnet die relativen Fehler fuer ein einzelnes Szenario.
 
     Args:
         output_dir: MATSim-Output-Verzeichnis.
@@ -92,24 +92,29 @@ def compute_scenario_error(output_dir: Path, mission: str,
         route_km: Streckenlaenge in km.
 
     Returns:
-        Liste der quadratischen Fehler [(matsim - ref)² in (kWh/km)²].
+        Liste von (rel_squared_error, abs_rel_error) pro Fahrzeug [-].
+        Fehler relativ zum VECTO-Referenzwert.
     """
     reference = load_reference(mission)
     consumption = parse_charge_profiles(output_dir)
 
-    squared_errors = []
+    payload_class = _cfg.ACTIVE_PAYLOAD_CLASS  # "low", "high" oder "all"
+
+    errors = []
     for vid, ref_data in reference.items():
+        if payload_class != "all" and not vid.endswith(f"_{payload_class}"):
+            continue
         if vid not in consumption:
             raise KeyError(
                 f"Fahrzeug '{vid}' nicht in MATSim-Output gefunden. "
                 f"Vorhandene Fahrzeuge: {list(consumption.keys())}"
             )
-        # MATSim-Verbrauch: kWh gesamt -> kWh/km
         matsim_ee = consumption[vid] / route_km
         ref_ee = ref_data["ee_kwh_per_km"]
-        squared_errors.append((matsim_ee - ref_ee) ** 2)
+        rel = (matsim_ee - ref_ee) / ref_ee
+        errors.append((rel ** 2, abs(rel)))
 
-    return squared_errors
+    return errors
 
 
 def compute_error(output_dir: Path, route_km: float = 100.185) -> float:
@@ -139,73 +144,98 @@ def compute_error(output_dir: Path, route_km: float = 100.185) -> float:
     return math.sqrt(sum(squared_errors) / len(squared_errors))
 
 
-def format_trial_report(scenario_outputs: dict[str, Path], trial_number: int,
+def format_final_report(scenario_outputs: dict[str, Path], trial_number: int,
                         params: dict[str, float]) -> str:
-    """Gibt einen formatierten Bericht eines Trials zurueck (Terminal + Log).
+    """Detaillierter Abschlussbericht: Verbrauchsvergleich MATSim vs. VECTO.
 
     Args:
         scenario_outputs: Dict {scenario_name: output_dir}
-        trial_number: Optuna-Trial-Nummer.
-        params: Kalibrierungsparameter dieses Trials.
+        trial_number: Optuna-Trial-Nummer des besten Trials.
+        params: Kalibrierungsparameter des besten Trials.
 
     Returns:
         Formatierten Bericht als mehrzeiliger String.
     """
     lines = []
-    lines.append(f"\n{'='*65}")
-    lines.append(f"  Trial {trial_number}")
+    lines.append(f"\n{'='*75}")
+    lines.append(f"  Bestes Trial: #{trial_number}")
     for name, val in params.items():
         lines.append(f"    {name} = {val:.6f}")
 
-    all_sq_errors = []
+    sq_errors: list[float] = []
+    abs_errors: list[float] = []
+
     for scenario_name, out_dir in sorted(scenario_outputs.items()):
         route_km = SCENARIOS[scenario_name]["route_km"]
         consumption = parse_charge_profiles(out_dir)
         reference = load_reference(scenario_name)
 
         lines.append(f"\n  [{scenario_name}]  Strecke: {route_km} km")
-        lines.append(f"  {'Fahrzeug':<35} {'MATSim':>9} {'VECTO':>9} {'Diff':>9}")
-        lines.append(f"  {'-'*63}")
+        lines.append(
+            f"  {'Fahrzeug':<35} {'MATSim':>9} {'VECTO':>9} {'Diff':>9} {'Diff%':>7}"
+        )
+        lines.append(f"  {'-'*73}")
+
+        payload_class = _cfg.ACTIVE_PAYLOAD_CLASS
         for vid, ref in sorted(reference.items()):
+            if payload_class != "all" and not vid.endswith(f"_{payload_class}"):
+                continue
             matsim = consumption[vid] / route_km
             vecto = ref["ee_kwh_per_km"]
             diff = matsim - vecto
-            all_sq_errors.append(diff ** 2)
+            rel_pct = diff / vecto * 100.0
+            sq_errors.append((diff / vecto) ** 2)
+            abs_errors.append(abs(diff / vecto))
             sign = "+" if diff >= 0 else ""
+            rel_sign = "+" if rel_pct >= 0 else ""
             lines.append(
-                f"  {vid:<35} {matsim:>8.4f}  {vecto:>8.4f}  {sign}{diff:>7.4f}  kWh/km"
+                f"  {vid:<35} {matsim:>8.4f}  {vecto:>8.4f}  "
+                f"{sign}{diff:>7.4f}  {rel_sign}{rel_pct:>5.2f}%  kWh/km"
             )
 
-    rmse = math.sqrt(sum(all_sq_errors) / len(all_sq_errors))
-    lines.append(f"\n  => RMSE: {rmse:.6f} kWh/km")
-    lines.append(f"{'='*65}")
+    rmse_pct = math.sqrt(sum(sq_errors) / len(sq_errors)) * 100.0
+    mae_pct = (sum(abs_errors) / len(abs_errors)) * 100.0
+    lines.append(f"\n  => RMSE: {rmse_pct:.2f}%    MAE: {mae_pct:.2f}%")
+    lines.append(f"{'='*75}")
     return "\n".join(lines)
 
 
-def compute_combined_error(scenario_outputs: dict[str, Path]) -> float:
-    """Berechnet den kombinierten RMSE ueber alle Szenarien.
-
-    Sammelt die quadratischen Fehler aus allen Szenarien und berechnet
-    daraus einen Gesamt-RMSE. Dadurch werden alle 12 Fahrzeuge
-    (6 Long Haul + 6 Regional Delivery) gleichgewichtet.
+def compute_combined_errors(scenario_outputs: dict[str, Path]) -> tuple[float, float]:
+    """Berechnet RMSE und MAE in Prozent ueber alle Szenarien.
 
     Args:
         scenario_outputs: Dict {scenario_name: output_dir}
 
     Returns:
-        Gesamt-RMSE [kWh/km] ueber alle Szenarien und Fahrzeuge.
+        (rmse_pct, mae_pct): Relativer RMSE und MAE in % gegenueber VECTO.
     """
-    all_squared_errors = []
+    sq_errors: list[float] = []
+    abs_errors: list[float] = []
 
     for scenario_name, output_dir in scenario_outputs.items():
         if scenario_name not in SCENARIOS:
             raise ValueError(f"Unbekanntes Szenario: {scenario_name}")
-
         route_km = SCENARIOS[scenario_name]["route_km"]
-        errors = compute_scenario_error(output_dir, scenario_name, route_km)
-        all_squared_errors.extend(errors)
+        for sq, ab in compute_scenario_error(output_dir, scenario_name, route_km):
+            sq_errors.append(sq)
+            abs_errors.append(ab)
 
-    if not all_squared_errors:
+    if not sq_errors:
         raise ValueError("Keine Fahrzeuge zum Vergleichen gefunden")
 
-    return math.sqrt(sum(all_squared_errors) / len(all_squared_errors))
+    rmse_pct = math.sqrt(sum(sq_errors) / len(sq_errors)) * 100.0
+    mae_pct = (sum(abs_errors) / len(abs_errors)) * 100.0
+    return rmse_pct, mae_pct
+
+
+def compute_combined_error(scenario_outputs: dict[str, Path]) -> float:
+    """Gibt den RMSE in % zurueck (Optuna-Zielfunktion).
+
+    Args:
+        scenario_outputs: Dict {scenario_name: output_dir}
+
+    Returns:
+        Relativer RMSE in % gegenueber VECTO-Referenzwerten.
+    """
+    rmse_pct, _ = compute_combined_errors(scenario_outputs)
+    return rmse_pct

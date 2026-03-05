@@ -38,4 +38,5 @@ python/calibration/*.db
 python/calibration/*.db-journal
 python/calibration/nul
 python/calibration/resistance_debug.csv
+python/calibration/data/
 python/calibration/~$*

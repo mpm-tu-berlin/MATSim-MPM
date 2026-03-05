@@ -24,8 +24,7 @@
 				<attribute name="cdXA" class="java.lang.Double">5.515</attribute>
 				<attribute name="rollingC" class="java.lang.Double">0.00375</attribute>
 				<attribute name="maxMotorPowerW" class="java.lang.Double">467000.0</attribute>
-				<!-- Nebenverbrauch gemaess VECTO-Fahrzeugdeklaration (konstante Leistung) -->
-				<attribute name="auxPowerW" class="java.lang.Double">4500.0</attribute>
+
 			</attributes>
 		</engineInformation>
 	</vehicleType>
@@ -47,8 +46,7 @@
 				<attribute name="cdXA" class="java.lang.Double">5.515</attribute>
 				<attribute name="rollingC" class="java.lang.Double">0.00375</attribute>
 				<attribute name="maxMotorPowerW" class="java.lang.Double">467000.0</attribute>
-				<!-- Nebenverbrauch gemaess VECTO-Fahrzeugdeklaration (konstante Leistung) -->
-				<attribute name="auxPowerW" class="java.lang.Double">4500.0</attribute>
+
 			</attributes>
 		</engineInformation>
 	</vehicleType>

@@ -15,23 +15,30 @@ public final class CalibrationParams {
     private static final String DEFAULT_FILE = "calibration_params.properties";
 
     // Standardwerte
-    private static final double DEF_DRIVETRAIN_EFF = 0.935;
+    private static final double DEF_TRACTION_EFF = 0.935;
     private static final double DEF_INERTIA_C = 1.05;
     private static final double DEF_RECUP_EFF = 0.6;
     private static final double DEF_MAX_RECUP_POWER_FRACTION = 0.4;
+    private static final double DEF_AUX_POWER_W = 4_500.0;
 
-    public final double drivetrainEfficiency;
-    public final double inertiaC;
+    /** Gesamteffizienz Batterie → Rad (Umrichter + Motor + Getriebe) bei Traktion [-]. */
+    public final double tractionEfficiency;
+    /** Gesamteffizienz Rad → Batterie (Getriebe + Generator + Umrichter) bei Rekuperation [-]. */
     public final double recupEfficiency;
+    public final double inertiaC;
     /** Anteil der fahrzeugspezifischen RatedPower, der fuer Rekuperation genutzt werden darf [-]. */
     public final double maxRecupPowerFraction;
+    /** Konstante Nebenverbrauchsleistung [W] (gilt fuer alle Fahrzeuge der Gruppe). */
+    public final double auxPowerW;
 
-    public CalibrationParams(double drivetrainEfficiency, double inertiaC,
-                             double recupEfficiency, double maxRecupPowerFraction) {
-        this.drivetrainEfficiency = drivetrainEfficiency;
+    public CalibrationParams(double tractionEfficiency, double inertiaC,
+                             double recupEfficiency, double maxRecupPowerFraction,
+                             double auxPowerW) {
+        this.tractionEfficiency = tractionEfficiency;
         this.inertiaC = inertiaC;
         this.recupEfficiency = recupEfficiency;
         this.maxRecupPowerFraction = maxRecupPowerFraction;
+        this.auxPowerW = auxPowerW;
     }
 
     /**
@@ -64,16 +71,17 @@ public final class CalibrationParams {
     }
 
     public static CalibrationParams defaults() {
-        return new CalibrationParams(DEF_DRIVETRAIN_EFF, DEF_INERTIA_C,
-                DEF_RECUP_EFF, DEF_MAX_RECUP_POWER_FRACTION);
+        return new CalibrationParams(DEF_TRACTION_EFF, DEF_INERTIA_C,
+                DEF_RECUP_EFF, DEF_MAX_RECUP_POWER_FRACTION, DEF_AUX_POWER_W);
     }
 
     private static CalibrationParams fromProperties(Properties props) {
         return new CalibrationParams(
-                parseOr(props, "drivetrainEfficiency", DEF_DRIVETRAIN_EFF),
+                parseOr(props, "tractionEfficiency", DEF_TRACTION_EFF),
                 parseOr(props, "inertiaC", DEF_INERTIA_C),
                 parseOr(props, "recupEfficiency", DEF_RECUP_EFF),
-                parseOr(props, "maxRecupPowerFraction", DEF_MAX_RECUP_POWER_FRACTION)
+                parseOr(props, "maxRecupPowerFraction", DEF_MAX_RECUP_POWER_FRACTION),
+                parseOr(props, "auxPowerW", DEF_AUX_POWER_W)
         );
     }
 
@@ -86,7 +94,7 @@ public final class CalibrationParams {
     @Override
     public String toString() {
         return String.format(
-                "CalibrationParams{drivetrainEff=%.4f, inertiaC=%.4f, recupEff=%.4f, maxRecupPowerFraction=%.3f}",
-                drivetrainEfficiency, inertiaC, recupEfficiency, maxRecupPowerFraction);
+                "CalibrationParams{tractionEff=%.4f, inertiaC=%.4f, recupEff=%.4f, maxRecupPowerFraction=%.3f, auxPowerW=%.0f}",
+                tractionEfficiency, inertiaC, recupEfficiency, maxRecupPowerFraction, auxPowerW);
     }
 }

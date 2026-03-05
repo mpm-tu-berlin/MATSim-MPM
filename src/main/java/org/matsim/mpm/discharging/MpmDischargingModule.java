@@ -31,20 +31,12 @@ import org.matsim.vehicles.Vehicle;
 
 import com.google.inject.Singleton;
 
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
  * @author Michal Maciejewski (michalm)
  */
 public final class MpmDischargingModule extends AbstractModule {
-    /**
-     * Pfad zur Debug-CSV-Datei. null = Debug-Ausgabe deaktiviert.
-     * Zum Aktivieren: auf einen Pfad setzen, z.B. Path.of("resistance_debug.csv").
-     */
-    private static final Path DEBUG_CSV_PATH = Path.of("resistance_debug.csv");
 
     @Override
     public void install() {
@@ -52,8 +44,10 @@ public final class MpmDischargingModule extends AbstractModule {
         CalibrationParams calib = CalibrationParams.loadOrDefault();
         System.out.println("[MpmDischargingModule] " + calib);
 
-        // Debug-Writer oeffnen (einmalig fuer alle Fahrzeuge)
-        PrintWriter debugWriter = openDebugWriter(DEBUG_CSV_PATH);
+        // Debug-CSV-Pfad im Output-Verzeichnis (wird lazy geoeffnet, da
+        // OutputDirectoryHierarchy das Verzeichnis beim Start loescht/neu anlegt)
+        String outputDir = getConfig().controller().getOutputDirectory();
+        Path debugCsvPath = Path.of(outputDir).resolve("resistance_debug.csv");
 
         bind(DriveEnergyConsumption.Factory.class).toInstance(ev -> {
             // Fahrzeugspezifische Parameter aus Vehicle-Type-Attributen lesen
@@ -73,28 +67,29 @@ public final class MpmDischargingModule extends AbstractModule {
             // Max. Rekuperationsleistung: fahrzeugspezifische RatedPower * kalibrierter Anteil
             double maxRecupPowerW = calib.maxRecupPowerFraction * maxMotorPowerW;
 
+            // Fahrzeug-Hoechstgeschwindigkeit aus VehicleType (identisch zu QSim-Limit)
+            double vehicleMaxSpeedMs = vehicle.getType().getMaximumVelocity();
+            System.out.printf("[MpmDischargingModule] vehicleId=%s  vehicleTypeId=%s  maximumVelocity=%.4f m/s (%.2f km/h)%n",
+                    ev.getId(), vehicle.getType().getId(), vehicleMaxSpeedMs, vehicleMaxSpeedMs * 3.6);
+
             return new MpmDynamicBetDriveEnergyConsumption(
-                    mass, payload, calib.drivetrainEfficiency, rollingC, aeroFa,
+                    mass, payload, calib.tractionEfficiency, rollingC, aeroFa,
                     calib.inertiaC,
-                    80, 10, 0.01,               // Diskretisierung
                     calib.recupEfficiency, maxRecupPowerW, 0.15,
                     maxMotorPowerW,
-                    debugWriter, ev.getId().toString()
+                    vehicleMaxSpeedMs,
+                    debugCsvPath, ev.getId().toString()
             );
         });
         // Leistungsbegrenzte Hoechstgeschwindigkeit pro Link: v = min(freespeed, v_power_limited)
         bind(LinkSpeedCalculator.class).toInstance(new PowerLimitedLinkSpeedCalculator(calib));
 
         bind(TemperatureService.class).toInstance(linkId -> 15);// XXX fixed temperature 15 oC
-        // Nebenverbrauch: konstante Leistung P_aux aus Fahrzeugattribut "auxPowerW" [W].
+        // Nebenverbrauch: kalibrierte Konstantleistung P_aux [W] fuer alle Fahrzeuge der Gruppe.
         // Entspricht dem VECTO-Modell: E_aux = P_aux * t (direkt von der Batterie).
-        // Fallback: 4500 W (typischer Wert fuer BET-Fernverkehr gemaess EU-Verordnung 2017/2400).
-        bind(AuxEnergyConsumption.Factory.class).toInstance(ev -> {
-            Vehicle auxVehicle = ev.getVehicleSpecification().getMatsimVehicle();
-            var auxAttrs = auxVehicle.getType().getEngineInformation().getAttributes();
-            double auxPowerW = attrOrDefault(auxAttrs, "auxPowerW", 4500.0);
-            return (link, travelTime, linkEnterTime) -> auxPowerW * travelTime; // Joule
-        });
+        bind(AuxEnergyConsumption.Factory.class).toInstance(
+                ev -> (link, travelTime, linkEnterTime) -> calib.auxPowerW * travelTime // Joule
+        );
 
         installQSimModule(new AbstractQSimModule() {
             @Override
@@ -122,21 +117,4 @@ public final class MpmDischargingModule extends AbstractModule {
         return defaultValue;
     }
 
-    /**
-     * Oeffnet den Debug-CSV-Writer und schreibt den Header.
-     * Gibt null zurueck, wenn DEBUG_CSV_PATH null ist.
-     */
-    private static PrintWriter openDebugWriter(Path path) {
-        if (path == null) return null;
-        try {
-            PrintWriter writer = new PrintWriter(Files.newBufferedWriter(path));
-            writer.println(MpmDynamicBetDriveEnergyConsumption.DEBUG_CSV_HEADER);
-            writer.flush();
-            System.out.println("[MpmDischargingModule] Fahrwiderstands-Debug aktiv: " + path.toAbsolutePath());
-            return writer;
-        } catch (IOException e) {
-            System.err.println("[MpmDischargingModule] Konnte Debug-Datei nicht oeffnen: " + e.getMessage());
-            return null;
-        }
-    }
 }

@@ -20,7 +20,7 @@
 	</module>
 
 	<module name="network">
-		<param name="inputNetworkFile" value="longhaul_network.xml.gz"/>
+		<param name="inputNetworkFile" value="longhaul_network_250m.xml.gz"/>
 	</module>
 
 	<module name="plans">
@@ -45,6 +45,7 @@
 		<param name="flowCapacityFactor" value="1.0"/>
 		<param name="storageCapacityFactor" value="1.0"/>
 		<param name="vehiclesSource" value="fromVehiclesData"/>
+		<param name="timeStepSize" value="1"/>
 	</module>
 
 	<module name="eventsManager">

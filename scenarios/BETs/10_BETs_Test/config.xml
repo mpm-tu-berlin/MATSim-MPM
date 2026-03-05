@@ -4,7 +4,7 @@
 	<module name="ev">
 		<param name="auxDischargeTimeStep" value="10"/>
 		<param name="chargeTimeStep" value="5"/>
-		<param name="chargersFile" value="BETs_Chargers_unlimited.xml"/>
+		<param name="chargersFile" value="BETs_Chargers_test.xml"/>
 		<param name="timeProfiles" value="true"/>
 		<param name="enforceChargingInteractionDuration" value="true"/>
 	</module>
@@ -15,12 +15,12 @@
 
 	<module name="global">
 		<param name="randomSeed" value="4711"/>
-		<param name="coordinateSystem" value="Atlantis"/>
+		<param name="coordinateSystem" value="EPSG:4839"/>
 		<param name= "numberOfThreads" value= "8" />
 	</module>
 
 	<module name="network">
-		<param name="inputNetworkFile" value="../../german_etruck_network.xml.gz"/>
+		<param name="inputNetworkFile" value="märkisch-oderland_max_1000m_long_smoothened_not_merged_0_05.xml.gz"/>
 	</module>
 
 	<module name="plans">
@@ -28,13 +28,13 @@
 	</module>
 
 	<module name="controler">
-		<param name="outputDirectory" value="./output/BETs/10_BETs_Test"/>
+		<param name="outputDirectory" value="./output/BETs/10_BETs_Test_dynamic_consumption_with_z"/>
 		<param name="firstIteration" value="0"/>
 		<param name="lastIteration" value="0"/>
 		<param name="eventsFileFormat" value="xml"/>
 		<param name="mobsim" value="qsim"/>
 		<param name="routingAlgorithmType" value="SpeedyALT" />
-		<param name="createGraphs" value="false" /> <!-- Reduktion der Ausgabedateien zur schnelleren Simulation -->
+		<param name="createGraphs" value="true" /> <!-- Reduktion der Ausgabedateien zur schnelleren Simulation -->
 	</module>
 
 	<module name="qsim">

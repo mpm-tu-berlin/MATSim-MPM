@@ -2,13 +2,13 @@ import optuna
 
 from src.config import PARAM_BOUNDS
 from src.matsim_runner import run_all_scenarios
-from src.error_computation import compute_combined_error, format_trial_report
+from src.error_computation import compute_combined_errors
 
 
 def objective(trial: optuna.Trial) -> float:
     """Optuna-Zielfunktion: Schreibt Kalibrierungsparameter, fuehrt MATSim
     fuer beide Szenarien (Long Haul + Regional Delivery) aus und berechnet
-    den kombinierten RMSE gegenueber Referenzdaten."""
+    den kombinierten RMSE in % gegenueber Referenzdaten."""
 
     # Kalibrierungsparameter samplen
     params = {}
@@ -19,11 +19,14 @@ def objective(trial: optuna.Trial) -> float:
     run_id_prefix = f"trial_{trial.number}"
     scenario_outputs = run_all_scenarios(params, run_id_prefix=run_id_prefix)
 
-    # Detaillierten Bericht ausgeben (landet via Tee auch im Log)
-    report = format_trial_report(scenario_outputs, trial.number, params)
-    print(report, flush=True)
+    # Kompakte Ausgabe pro Trial (landet via Tee auch im Log)
+    rmse_pct, mae_pct = compute_combined_errors(scenario_outputs)
+    params_str = "  ".join(
+        f"{k}={v:.3f}" if k == "inertiaC" else
+        f"{k}={v:.0f}" if k == "auxPowerW" else
+        f"{k}={v:.2f}"
+        for k, v in params.items()
+    )
+    print(f"Trial {trial.number:>4d}: RMSE={rmse_pct:.2f}%  MAE={mae_pct:.2f}%  | {params_str}", flush=True)
 
-    # Kombinierten Fehler ueber alle Szenarien berechnen
-    error = compute_combined_error(scenario_outputs)
-
-    return error
+    return rmse_pct
