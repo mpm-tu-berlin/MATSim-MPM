@@ -114,7 +114,7 @@ def normalize_reversed_flags(gdf_edges_simplified, starts_by_osmid, ends_by_osmi
 
 if __name__ == "__main__":
     area = ("Germany")
-    highway_types = ('["highway"~"motorway|trunk|primary"]') #'["highway"~"motorway|trunk|primary"]'
+    highway_types = ('["highway"~"motorway"]') #'["highway"~"motorway|trunk|primary"]'
     output_file_simplified = f"data/{area.split(',')[0].lower()}_simplified_DF"
     output_file_detailed_sorted= f"data/{area.split(',')[0].lower()}_detailed_sorted_DF"
     #------------------------------------------------------
@@ -124,8 +124,8 @@ if __name__ == "__main__":
         query=area,
         network_type="drive",
         simplify=True, # Vereinfachte Kanten
-        retain_all=True,
-        truncate_by_edge=False,
+        retain_all=False,
+        truncate_by_edge=True,
         custom_filter=highway_types
     )
     print("Konvertiere vereinfachtes Straßennetzwerk zu GeoDataFrames...")

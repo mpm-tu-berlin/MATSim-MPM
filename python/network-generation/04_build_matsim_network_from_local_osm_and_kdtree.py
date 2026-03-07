@@ -944,7 +944,7 @@ def generate_network(
     kdtree_input_path = f"data/germany_3d_raster_clamped_DF_kdtree_from_roads3d_epsg4326.npz" #f"data/{area}_kdtree_from_roads3d_epsg4326.npz"
     local_osm_input_path_simplified = f"data/germany_simplified_DF.gpkg" #f"data/{area}_simplified.gpkg"
     local_osm_input_path_detailed   = f"data/germany_detailed_sorted_DF.gpkg" #f"data/{area}_detailed_sorted.gpkg"
-    output_path = f"data/Germany_max999999m_V0_DF.xml.gz" #f"data/{area}_max{int(max_allowed_link_length)}m_{version}.xml.gz"
+    output_path = f"data/{area}_max{int(max_allowed_link_length)}m_{version}.xml.gz"
 
     # --- Daten laden ---
     tree, coords, heights = load_kdtree(kdtree_input_path)
