@@ -49,7 +49,8 @@ public class RunBetScenario {
 
 		Config config;
 		if ( args==null || args.length==0 || args[0]==null ){
-			config = ConfigUtils.loadConfig( "scenarios/BETs/1pct_BETs_unlimited_operational/config.xml" );
+			config = ConfigUtils.loadConfig( "scenarios/BETs/1pct_BETs_unlimited_deutschlandnetz/config.xml" );
+			//config = ConfigUtils.loadConfig( "scenarios/BETs/10_BETs_test/config.xml" );
 		} else {
 			config = ConfigUtils.loadConfig( args );
 		}

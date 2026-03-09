@@ -13,6 +13,7 @@ import org.matsim.mpm.scoring.ChargingQueueWaitingScoringHandler;
 import org.matsim.mpm.stats.ChargerQueuingCollector;
 import org.matsim.mpm.stats.ChargerWaitingTimeTracker;
 import org.matsim.mpm.stats.MpmChargingProceduresCSVWriter;
+import org.matsim.mpm.stats.RouteDetourTracker;
 
 public class MpmEvStatsModule extends AbstractModule {
     @Inject
@@ -39,6 +40,11 @@ public class MpmEvStatsModule extends AbstractModule {
         bind(ChargerWaitingTimeTracker.class).asEagerSingleton();
         addEventHandlerBinding().to(ChargerWaitingTimeTracker.class);
         addControlerListenerBinding().to(ChargerWaitingTimeTracker.class);
+
+        // Per-person route detour tracker (basic vs staged route + waiting time)
+        bind(RouteDetourTracker.class).asEagerSingleton();
+        addEventHandlerBinding().to(RouteDetourTracker.class);
+        addControlerListenerBinding().to(RouteDetourTracker.class);
 
 
         if (evCfg.timeProfiles) {

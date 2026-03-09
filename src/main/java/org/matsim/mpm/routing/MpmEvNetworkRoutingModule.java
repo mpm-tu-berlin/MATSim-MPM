@@ -55,6 +55,7 @@ import java.util.Comparator;
 import java.util.stream.Collectors;
 
 import org.matsim.mpm.stats.ChargerWaitingTimeTracker;
+import org.matsim.mpm.stats.RouteDetourTracker;
 
 import static org.matsim.api.core.v01.TransportMode.car;
 
@@ -62,10 +63,6 @@ import static org.matsim.api.core.v01.TransportMode.car;
  * This network Routing module adds stages for re-charging into the Route.
  * This wraps a "computer science" {@link LeastCostPathCalculator}, which routes from a node to another node, into something that
  * routes from a {@link Facility} to another {@link Facility}, as we need in MATSim.
- *
- * <p>Two-pass routing: pass 1 computes the route with no charger penalty to identify which charger(s)
- * would be used; pass 2 re-routes with a penalty on those specific charger links so the LCPC can find
- * an alternative corridor if a less congested charger is reachable at comparable travel cost.
  *
  * <p>Timing-first design: mandatory regulatory stops (4.5 h → 45-min break; another 4.5 h → 11-h rest)
  * are always inserted for trips exceeding 4.5 h. Energy stops are supplemental and only inserted when
@@ -90,7 +87,7 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
     private final String vehicleSuffix;
     private final EvConfigGroup evConfigGroup;
     private final ChargerWaitingTimeTracker waitingTimeTracker;
-    private final ChargerPenaltyTravelDisutility chargerPenaltyDisutility;
+    private final RouteDetourTracker routeDetourTracker;
     private final Set<Id<Link>> restAreaLinks;
     private static final double MIN_SOC = 0.2; // Minimum State of Charge
     private static final double MAX_DRIVE_TIME_WITHOUT_BREAK = 4.5 * 60 * 60; // Maximum driving time without a break in seconds
@@ -152,8 +149,8 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                               ChargingInfrastructureSpecification chargingInfrastructureSpecification, TravelTime travelTime,
                               DriveEnergyConsumption.Factory driveConsumptionFactory, AuxEnergyConsumption.Factory auxConsumptionFactory,
                               EvConfigGroup evConfigGroup, ChargerWaitingTimeTracker waitingTimeTracker,
-                              ChargerPenaltyTravelDisutility chargerPenaltyDisutility,
-                              List<RestAreaSpecification> restAreas) {
+                              List<RestAreaSpecification> restAreas,
+                              RouteDetourTracker routeDetourTracker) {
         this.travelTime = travelTime;
         Gbl.assertNotNull(network);
         this.delegate = delegate;
@@ -166,7 +163,7 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
         stageActivityModePrefix = mode + VehicleChargingHandler.CHARGING_IDENTIFIER;
         this.evConfigGroup = evConfigGroup;
         this.waitingTimeTracker = waitingTimeTracker;
-        this.chargerPenaltyDisutility = chargerPenaltyDisutility;
+        this.routeDetourTracker = routeDetourTracker;
         this.restAreaLinks = restAreas.stream()
                 .map(RestAreaSpecification::linkId)
                 .collect(Collectors.toSet());
@@ -180,54 +177,22 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
         final double departureTime = request.getDepartureTime();
         final Person person = request.getPerson();
 
-        // Ensure clean penalty state from any previous (failed) routing call.
-        chargerPenaltyDisutility.clearPenalties();
-
         List<? extends PlanElement> basicRoute = delegate.calcRoute(request);
         Id<Vehicle> evId = Id.create(person.getId() + vehicleSuffix, Vehicle.class);
         if (!electricFleet.getVehicleSpecifications().containsKey(evId)) {
             return basicRoute;
         } else {
             Leg basicLeg = (Leg) basicRoute.get(0);
+            double basicDistance = basicLeg.getRoute().getDistance();
+            double basicTime = basicLeg.getTravelTime().seconds();
             ElectricVehicleSpecification ev = electricFleet.getVehicleSpecifications().get(evId);
 
-            // Pass 1: compute stop plan with no charger penalty.
             StopPlan stopPlan = computeStops(basicLeg, ev, ev.getInitialCharge(), false, 0.0);
             if (stopPlan.isEmpty()) {
                 return basicRoute;
             }
 
             boolean starts100 = ev.getInitialSoc() >= 1.0 - 1e-9;
-
-            // Build penalty map: only stops that will definitely result in charging.
-            // Skip timing/rest stops for 100%-SoC agents (they might not charge there).
-            Map<Id<Link>, Double> penalties = new LinkedHashMap<>();
-            for (Link stopLocation : stopPlan.stopLocations) {
-                String r = stopPlan.stopReasons.get(stopLocation);
-                if (starts100 && !"Energy".equals(r)) {
-                    continue;  // 100% agents might not charge at timing/rest stops
-                }
-                String chargerType = "Rest".equals(r) ? "DC_slow" : "DC_fast";
-                Link searchLink = stopPlan.stopLocationToSearchLink.getOrDefault(stopLocation, stopLocation);
-                ChargerSpecification charger = selectCharger(searchLink, ev, chargerType);
-                double wait = waitingTimeTracker.getAverageWaitingTime(charger.getId());
-                if (wait > 0) {
-                    penalties.put(charger.getLinkId(), wait);
-                }
-            }
-
-            // Pass 2: re-route with penalty on congested charger links only.
-            // The LCPC may find a different road corridor that avoids the congested zone.
-            if (!penalties.isEmpty()) {
-                chargerPenaltyDisutility.setPenalties(penalties);
-                basicRoute = delegate.calcRoute(request);
-                basicLeg = (Leg) basicRoute.get(0);
-                stopPlan = computeStops(basicLeg, ev, ev.getInitialCharge(), false, 0.0);
-                chargerPenaltyDisutility.clearPenalties();
-                if (stopPlan.isEmpty()) {
-                    return basicRoute;
-                }
-            }
 
             //////////////////////////////////////////////////////////////////////////////////////////////
             // Iterative sub-leg routing: after each stop, recompute the remaining route from the
@@ -432,14 +397,14 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                             currentEnergy = ev.getBatteryCapacity();
                             timeInCurrentSegment = 0.0;
                             nextIsRest = !nextIsRest;
-                            chargingDurationNull = REST_DURATION - CHARGING_OVERHEAD;
+                            chargingDurationNull = REST_DURATION;
                         } else { // "Timing"
                             currentEnergy = Math.min(
                                     currentEnergy + (BREAK_DURATION - CHARGING_OVERHEAD) * chargerPower,
                                     maxEnergyAtStop);
                             timeInCurrentSegment = 0.0;
                             nextIsRest = !nextIsRest;
-                            chargingDurationNull = BREAK_DURATION - CHARGING_OVERHEAD;
+                            chargingDurationNull = BREAK_DURATION;
                         }
 
                         // Add charging activity to stagedRoute (same pattern as normal flow).
@@ -478,9 +443,9 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                         double maxChargeable = ev.getBatteryCapacity() * (1.0 - MIN_SOC);
                         chargingDuration = Math.max(1.0, Math.min(consumptionToNext + ENERGY_STOP_BUFFER_J, maxChargeable)) / chargerPower + CHARGING_OVERHEAD;
                     } else if ("Rest".equals(stopReason)) {
-                        chargingDuration = REST_DURATION - CHARGING_OVERHEAD;
+                        chargingDuration = REST_DURATION;
                     } else { // "Timing"
-                        chargingDuration = BREAK_DURATION - CHARGING_OVERHEAD;
+                        chargingDuration = BREAK_DURATION;
                     }
 
                     // Encode the stop reason in the stage-activity type so MpmVehicleChargingHandler
@@ -543,6 +508,22 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                     timeInCurrentSegment = 0.0;
                     nextIsRest = !nextIsRest;
                 }
+            }
+            // Record route detour data for statistics.
+            if (routeDetourTracker != null) {
+                double stagedDistance = 0.0;
+                double stagedTime = 0.0;
+                int numStops = 0;
+                for (PlanElement pe : stagedRoute) {
+                    if (pe instanceof Leg leg) {
+                        stagedDistance += leg.getRoute().getDistance();
+                        stagedTime += leg.getTravelTime().seconds();
+                    } else if (pe instanceof Activity) {
+                        numStops++;
+                    }
+                }
+                routeDetourTracker.recordRoute(person.getId().toString(),
+                        basicDistance, basicTime, stagedDistance, stagedTime, numStops);
             }
             return stagedRoute;
         }
@@ -645,7 +626,49 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
             }
 
             if (timingLink == null) {
-                break;  // remaining trip fits in one 4.5-h window — no more timing stops needed
+                // Final segment energy check: insert energy stop(s) if needed.
+                Link localSegStart = segmentStart;
+                double localCumFromStart = cumConsFromStart;
+                double localEnergy = currentEnergy;
+
+                while (true) {
+                    double localUsable = localEnergy - MIN_SOC * ev.getBatteryCapacity();
+                    double localCumCons = 0.0;
+                    Link finalEnergyStop = null;
+                    double cumConsToStop = 0.0;
+                    boolean startFound = (localSegStart == null);
+
+                    for (Map.Entry<Link, Double> e : estimatedEnergyConsumption.entrySet()) {
+                        if (!startFound) {
+                            if (e.getKey().equals(localSegStart)) startFound = true;
+                            continue;
+                        }
+                        localCumCons += e.getValue();
+                        if (localCumCons >= localUsable) {
+                            finalEnergyStop = e.getKey();
+                            cumConsToStop = localCumCons;
+                            break;
+                        }
+                    }
+
+                    if (finalEnergyStop == null) break; // enough energy — done
+
+                    stopLocations.add(finalEnergyStop);
+                    stopLocationToSearchLink.put(finalEnergyStop, finalEnergyStop);
+                    stopReasons.put(finalEnergyStop, "Energy");
+                    cumulativeList.add(localCumFromStart + cumConsToStop);
+
+                    // Estimate post-charge energy (same assumptions as existing code)
+                    double energyAtStop = MIN_SOC * ev.getBatteryCapacity();
+                    double remainingCons = totalConsumption - (localCumFromStart + cumConsToStop);
+                    double maxChargeable = ev.getBatteryCapacity() * MAX_FAST_SOC - energyAtStop;
+                    double charged = Math.min(remainingCons + ENERGY_STOP_BUFFER_J, Math.max(0, maxChargeable));
+                    localEnergy = energyAtStop + charged;
+
+                    localSegStart = finalEnergyStop;
+                    localCumFromStart += cumConsToStop;
+                }
+                break;
             }
 
             // B. Find energy stop within this segment (segmentStart → timingLink).
