@@ -13,3 +13,12 @@ truck_iveco_seway_lh_low,IVECO_SeWay,LongHaul,2600,1.1890,100.185,1
 truck_iveco_seway_lh_high,IVECO_SeWay,LongHaul,19300,1.4570,100.185,1
 truck_iveco_seway_rd_low,IVECO_SeWay,RegionalDelivery,2600,1.1250,100.000,1
 truck_iveco_seway_rd_high,IVECO_SeWay,RegionalDelivery,12900,1.3020,100.000,1
+# === BET G5 (VECTO Group 5, 2 RRC-Varianten) ===
+truck_g5_rrc48_lh_low,BET_G5,LongHaul,2600,1.0380,100.185,1
+truck_g5_rrc53_lh_low,BET_G5,LongHaul,2600,1.0490,100.185,1
+truck_g5_rrc48_lh_high,BET_G5,LongHaul,19300,1.3340,100.185,1
+truck_g5_rrc53_lh_high,BET_G5,LongHaul,19300,1.3550,100.185,1
+truck_g5_rrc48_rd_low,BET_G5,RegionalDelivery,2600,0.9894,100.000,1
+truck_g5_rrc53_rd_low,BET_G5,RegionalDelivery,2600,1.0020,100.000,1
+truck_g5_rrc48_rd_high,BET_G5,RegionalDelivery,12900,1.1970,100.000,1
+truck_g5_rrc53_rd_high,BET_G5,RegionalDelivery,12900,1.2150,100.000,1

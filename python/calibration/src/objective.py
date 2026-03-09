@@ -14,6 +14,7 @@ def objective(trial: optuna.Trial) -> float:
     params = {}
     for name, (low, high) in PARAM_BOUNDS.items():
         params[name] = trial.suggest_float(name, low, high)
+    params["maxRecupPowerFraction"] = 1.0  # Fixwert, nicht optimiert
 
     # MATSim fuer alle Szenarien ausfuehren
     run_id_prefix = f"trial_{trial.number}"

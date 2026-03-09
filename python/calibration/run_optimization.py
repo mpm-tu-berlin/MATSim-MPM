@@ -1,18 +1,24 @@
 """
 Optuna-Kalibrierungslauf: optimiert Fahrzeugparameter separat fuer jede
-Beladungsklasse (low / high).
+Studie (lh_low, lh_high, rd_low, rd_high, all).
 
 Aufruf:
     .venv/Scripts/python run_optimization.py
 
 Jeder Lauf legt einen neuen Ordner an:
     results/runs/YYYYMMDD_HHMMSS/
-        optimization.log          <- gemeinsames Log beider Klassen
-        low/
+        optimization.log          <- gemeinsames Log aller Studien
+        lh_low/
             optuna_study.db
             optuna_plots/
             matsim_runs/
-        high/
+        lh_high/
+            ...
+        rd_low/
+            ...
+        rd_high/
+            ...
+        all/
             optuna_study.db
             optuna_plots/
             matsim_runs/
@@ -56,56 +62,62 @@ sys.stdout = _Tee(sys.__stdout__, _log_file)
 from src.objective import objective          # noqa: E402
 from src.error_computation import format_final_report  # noqa: E402
 from src.config import (                     # noqa: E402
-    PAYLOAD_CLASSES, N_TRIALS, N_JOBS, SCENARIOS,
-    ACTIVE_VEHICLE_GROUP,
+    STUDIES, N_TRIALS, N_JOBS,
+    ACTIVE_VEHICLE_GROUP, VEHICLE_GROUPS,
 )
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
+# Alle Szenarien der aktiven Fahrzeuggruppe sichern
+_all_scenarios = VEHICLE_GROUPS[ACTIVE_VEHICLE_GROUP]
+
 print(f"Run-Verzeichnis:     {RUN_BASE}")
 print(f"Log:                 {_log_path}")
 print(f"Fahrzeuggruppe:      {ACTIVE_VEHICLE_GROUP}")
-print(f"Beladungsklassen:    {PAYLOAD_CLASSES}")
-print(f"Trials je Klasse:    {N_TRIALS}  (n_jobs={N_JOBS})")
-print(f"RAM-Bedarf je Klasse:{N_JOBS} x 2 x {_cfg.MATSIM_MEMORY}")
+print(f"Studien:             {[s['name'] for s in STUDIES]}")
+print(f"Trials je Studie:    {N_TRIALS}  (n_jobs={N_JOBS})")
+print(f"RAM-Bedarf je Studie:{N_JOBS} x Szenarien x {_cfg.MATSIM_MEMORY}")
 
-# === 4. Schleife ueber Beladungsklassen ===
-for payload_class in PAYLOAD_CLASSES:
+# === 4. Schleife ueber Studien ===
+for study in STUDIES:
+    study_name_str = study["name"]
     print(f"\n{'=' * 65}")
-    print(f"  Beladungsklasse: {payload_class.upper()}")
+    print(f"  Studie: {study_name_str.upper()}")
+    print(f"  Szenarien: {study['scenarios']}  Payload: {study['payload_class']}")
     print(f"{'=' * 65}\n")
 
-    # Klassen-spezifisches Unterverzeichnis
-    class_dir = RUN_BASE / payload_class
+    # Studien-spezifisches Unterverzeichnis
+    class_dir = RUN_BASE / study_name_str
     class_dir.mkdir(parents=True, exist_ok=True)
 
-    # Monkey-Patch: Laufzeit-Konfiguration fuer diese Klasse setzen
+    # Monkey-Patch: nur die aktiven Szenarien und Payload-Klasse setzen
     _cfg.RESULTS_DIR = class_dir
-    _cfg.ACTIVE_PAYLOAD_CLASS = payload_class
+    _cfg.ACTIVE_PAYLOAD_CLASS = study["payload_class"]
+    _cfg.SCENARIOS = {name: _all_scenarios[name] for name in study["scenarios"]}
 
     storage = f"sqlite:///{class_dir / 'optuna_study.db'}"
-    study_name = f"matsim-vecto-{ACTIVE_VEHICLE_GROUP}-{payload_class}"
+    optuna_study_name = f"matsim-vecto-{ACTIVE_VEHICLE_GROUP}-{study_name_str}"
 
     print(f"Storage: {storage}")
     print(f"Starte {N_TRIALS} Trials ...\n")
 
-    study = optuna.create_study(
-        study_name=study_name,
+    study_obj = optuna.create_study(
+        study_name=optuna_study_name,
         storage=storage,
         direction="minimize",
         load_if_exists=False,
     )
-    study.optimize(objective, n_trials=N_TRIALS, n_jobs=N_JOBS)
+    study_obj.optimize(objective, n_trials=N_TRIALS, n_jobs=N_JOBS)
 
     # --- Abschlussbericht ---
-    best = study.best_trial
+    best = study_obj.best_trial
     best_outputs = {
         name: class_dir / "matsim_runs" / f"trial_{best.number}_{name}"
-        for name in SCENARIOS
+        for name in _cfg.SCENARIOS
     }
     print()
     print(format_final_report(best_outputs, best.number, best.params))
-    print(f"Bester RMSE ({payload_class}): {best.value:.2f}%")
+    print(f"Bester RMSE ({study_name_str}): {best.value:.2f}%")
 
     # --- Optuna-Visualisierungen ---
     print(f"\nErstelle Optuna-Grafiken ...")
@@ -123,7 +135,7 @@ for payload_class in PAYLOAD_CLASSES:
     ]
     for name, func in _plots:
         try:
-            fig = func(study)
+            fig = func(study_obj)
             fig.write_html(str(plots_dir / f"{name}.html"))
         except Exception as e:
             print(f"  Warnung: '{name}' konnte nicht erstellt werden: {e}")

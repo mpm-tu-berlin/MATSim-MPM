@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from src.config import (
-    MATSIM_JAR, MATSIM_MEMORY, MATSIM_ITERATIONS, SCENARIOS,
+    MATSIM_JAR, MATSIM_MEMORY, MATSIM_ITERATIONS,
 )
 from src import config as _cfg  # Laufzeit-Zugriff, damit Monkey-Patch aus run_optimization greift
 
@@ -86,10 +86,10 @@ def run_all_scenarios(params: dict[str, float],
     params_file = _cfg.RESULTS_DIR / "matsim_runs" / f"{prefix}_params.properties"
     write_calibration_params(params, params_file)
 
-    with ThreadPoolExecutor(max_workers=len(SCENARIOS)) as executor:
+    with ThreadPoolExecutor(max_workers=len(_cfg.SCENARIOS)) as executor:
         futures = {
             executor.submit(run_matsim, f"{prefix}_{name}", scenario["config"], params_file): name
-            for name, scenario in SCENARIOS.items()
+            for name, scenario in _cfg.SCENARIOS.items()
         }
 
         outputs = {}

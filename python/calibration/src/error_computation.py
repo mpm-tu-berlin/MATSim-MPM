@@ -8,7 +8,7 @@ import math
 from pathlib import Path
 
 from src import config as _cfg
-from src.config import REFERENCE_CONSUMPTION_FILE, SCENARIOS
+from src.config import REFERENCE_CONSUMPTION_FILE
 
 
 def load_reference(mission: str | None = None,
@@ -166,7 +166,7 @@ def format_final_report(scenario_outputs: dict[str, Path], trial_number: int,
     abs_errors: list[float] = []
 
     for scenario_name, out_dir in sorted(scenario_outputs.items()):
-        route_km = SCENARIOS[scenario_name]["route_km"]
+        route_km = _cfg.SCENARIOS[scenario_name]["route_km"]
         consumption = parse_charge_profiles(out_dir)
         reference = load_reference(scenario_name)
 
@@ -213,9 +213,9 @@ def compute_combined_errors(scenario_outputs: dict[str, Path]) -> tuple[float, f
     abs_errors: list[float] = []
 
     for scenario_name, output_dir in scenario_outputs.items():
-        if scenario_name not in SCENARIOS:
+        if scenario_name not in _cfg.SCENARIOS:
             raise ValueError(f"Unbekanntes Szenario: {scenario_name}")
-        route_km = SCENARIOS[scenario_name]["route_km"]
+        route_km = _cfg.SCENARIOS[scenario_name]["route_km"]
         for sq, ab in compute_scenario_error(output_dir, scenario_name, route_km):
             sq_errors.append(sq)
             abs_errors.append(ab)

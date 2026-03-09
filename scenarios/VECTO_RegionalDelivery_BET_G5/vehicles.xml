@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<vehicleDefinitions xmlns="http://www.matsim.org/files/dtd"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://www.matsim.org/files/dtd https://www.matsim.org/files/dtd/vehicleDefinitions_v2.0.xsd">
+
+	<!-- === BET G5 (VECTO Group 5, 2 RRC-Varianten) === -->
+	<!-- Quelle: interne Stammdaten, Blatt PEV_gekuerzt (Regional Delivery) -->
+
+	<vehicleType id="BET_G5_RRC48_RD_low">
+		<description>BET G5 (RRC=0.0048), Payload 2600 kg (VECTO Regional Delivery)</description>
+		<capacity seats="0" standingRoomInPersons="0"/>
+		<length meter="16.5"/>
+		<width meter="2.55"/>
+		<maximumVelocity meterPerSecond="23.056"/>
+		<engineInformation>
+			<attributes>
+				<attribute name="HbefaTechnology" class="java.lang.String">electricity</attribute>
+				<attribute name="chargerTypes" class="java.util.Arrays$ArrayList">["DC","default"]</attribute>
+				<attribute name="energyCapacityInKWhOrLiters" class="java.lang.Double">279.0108</attribute>
+				<attribute name="energyConsumptionKWhPerMeter" class="java.lang.Double">0.0009894</attribute>
+				<attribute name="mass" class="java.lang.Double">16161.0</attribute>
+				<attribute name="payload" class="java.lang.Double">2600.0</attribute>
+				<attribute name="cdXA" class="java.lang.Double">5.79</attribute>
+				<attribute name="rollingC" class="java.lang.Double">0.0048</attribute>
+				<attribute name="maxMotorPowerW" class="java.lang.Double">407000.0</attribute>
+
+			</attributes>
+		</engineInformation>
+	</vehicleType>
+
+	<vehicleType id="BET_G5_RRC53_RD_low">
+		<description>BET G5 (RRC=0.00525), Payload 2600 kg (VECTO Regional Delivery)</description>
+		<capacity seats="0" standingRoomInPersons="0"/>
+		<length meter="16.5"/>
+		<width meter="2.55"/>
+		<maximumVelocity meterPerSecond="23.056"/>
+		<engineInformation>
+			<attributes>
+				<attribute name="HbefaTechnology" class="java.lang.String">electricity</attribute>
+				<attribute name="chargerTypes" class="java.util.Arrays$ArrayList">["DC","default"]</attribute>
+				<attribute name="energyCapacityInKWhOrLiters" class="java.lang.Double">278.9568</attribute>
+				<attribute name="energyConsumptionKWhPerMeter" class="java.lang.Double">0.001002</attribute>
+				<attribute name="mass" class="java.lang.Double">16133.0</attribute>
+				<attribute name="payload" class="java.lang.Double">2600.0</attribute>
+				<attribute name="cdXA" class="java.lang.Double">5.79</attribute>
+				<attribute name="rollingC" class="java.lang.Double">0.00525</attribute>
+				<attribute name="maxMotorPowerW" class="java.lang.Double">407000.0</attribute>
+
+			</attributes>
+		</engineInformation>
+	</vehicleType>
+
+	<vehicleType id="BET_G5_RRC48_RD_high">
+		<description>BET G5 (RRC=0.0048), Payload 12900 kg (VECTO Regional Delivery)</description>
+		<capacity seats="0" standingRoomInPersons="0"/>
+		<length meter="16.5"/>
+		<width meter="2.55"/>
+		<maximumVelocity meterPerSecond="23.056"/>
+		<engineInformation>
+			<attributes>
+				<attribute name="HbefaTechnology" class="java.lang.String">electricity</attribute>
+				<attribute name="chargerTypes" class="java.util.Arrays$ArrayList">["DC","default"]</attribute>
+				<attribute name="energyCapacityInKWhOrLiters" class="java.lang.Double">279.1404</attribute>
+				<attribute name="energyConsumptionKWhPerMeter" class="java.lang.Double">0.001197</attribute>
+				<attribute name="mass" class="java.lang.Double">16161.0</attribute>
+				<attribute name="payload" class="java.lang.Double">12900.0</attribute>
+				<attribute name="cdXA" class="java.lang.Double">5.79</attribute>
+				<attribute name="rollingC" class="java.lang.Double">0.0048</attribute>
+				<attribute name="maxMotorPowerW" class="java.lang.Double">407000.0</attribute>
+
+			</attributes>
+		</engineInformation>
+	</vehicleType>
+
+	<vehicleType id="BET_G5_RRC53_RD_high">
+		<description>BET G5 (RRC=0.00525), Payload 12900 kg (VECTO Regional Delivery)</description>
+		<capacity seats="0" standingRoomInPersons="0"/>
+		<length meter="16.5"/>
+		<width meter="2.55"/>
+		<maximumVelocity meterPerSecond="23.056"/>
+		<engineInformation>
+			<attributes>
+				<attribute name="HbefaTechnology" class="java.lang.String">electricity</attribute>
+				<attribute name="chargerTypes" class="java.util.Arrays$ArrayList">["DC","default"]</attribute>
+				<attribute name="energyCapacityInKWhOrLiters" class="java.lang.Double">278.964</attribute>
+				<attribute name="energyConsumptionKWhPerMeter" class="java.lang.Double">0.001215</attribute>
+				<attribute name="mass" class="java.lang.Double">16133.0</attribute>
+				<attribute name="payload" class="java.lang.Double">12900.0</attribute>
+				<attribute name="cdXA" class="java.lang.Double">5.79</attribute>
+				<attribute name="rollingC" class="java.lang.Double">0.00525</attribute>
+				<attribute name="maxMotorPowerW" class="java.lang.Double">407000.0</attribute>
+
+			</attributes>
+		</engineInformation>
+	</vehicleType>
+
+	<!-- === Fahrzeuginstanzen === -->
+	<vehicle id="truck_g5_rrc48_rd_low" type="BET_G5_RRC48_RD_low">
+		<attributes>
+			<attribute name="initialSoc" class="java.lang.Double">0.9</attribute>
+		</attributes>
+	</vehicle>
+
+	<vehicle id="truck_g5_rrc53_rd_low" type="BET_G5_RRC53_RD_low">
+		<attributes>
+			<attribute name="initialSoc" class="java.lang.Double">0.9</attribute>
+		</attributes>
+	</vehicle>
+
+	<vehicle id="truck_g5_rrc48_rd_high" type="BET_G5_RRC48_RD_high">
+		<attributes>
+			<attribute name="initialSoc" class="java.lang.Double">0.9</attribute>
+		</attributes>
+	</vehicle>
+
+	<vehicle id="truck_g5_rrc53_rd_high" type="BET_G5_RRC53_RD_high">
+		<attributes>
+			<attribute name="initialSoc" class="java.lang.Double">0.9</attribute>
+		</attributes>
+	</vehicle>
+
+</vehicleDefinitions>
