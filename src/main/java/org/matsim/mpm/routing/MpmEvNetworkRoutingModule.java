@@ -41,6 +41,7 @@ import org.matsim.core.gbl.MatsimRandom;
 import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.population.PopulationUtils;
 import org.matsim.core.population.routes.NetworkRoute;
+import org.matsim.core.population.routes.RouteUtils;
 import org.matsim.core.router.DefaultRoutingRequest;
 import org.matsim.core.router.LinkWrapperFacility;
 import org.matsim.core.router.RoutingModule;
@@ -108,6 +109,9 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
     /** Safety buffer added to energy-stop charging to absorb extra consumption caused by the
      *  off-route charger detour. Max detour = 10 km × 4320 J/m ≈ 43 MJ → 50 MJ gives margin. */
     private static final double ENERGY_STOP_BUFFER_J = 50_000_000; // J ≈ 14 kWh
+    /** Attribute key used to persist activity duration across XML round-trips (workaround for
+     *  MATSim core bug: PopulationReaderMatsimV6 loses maxDuration on stage activities). */
+    static final String DURATION_ATTR = "mpm_duration";
 
     /**
      * Result of the stop-computation pass — the maps used by sub-leg routing plus energy data.
@@ -245,6 +249,16 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                     }
                 }
 
+                // TODO: Promote energy stop to timing/rest when the next timing stop would land on
+                //  the same charger link. Currently, if an energy stop fires at e.g. 3–3.5 h of
+                //  driving (below CHARGER_MIN_SEGMENT_TIME), it stays "Energy" and the driving clock
+                //  keeps running. In the next while-loop iteration, computeStops() is called with the
+                //  accumulated timeInCurrentSegment (~3.5 h) and finds a timingLink only ~1 h further.
+                //  KNN charger selection then picks the same charger again → back-to-back Energy +
+                //  Timing interactions at the same location. Fix: after selecting the charger for an
+                //  energy stop, peek ahead (recompute stops or estimate remaining segment time) and
+                //  promote to Timing/Rest if the next mandatory stop would use the same charger link.
+
                 // Decide: charging stop or resting stop?
                 boolean isChargingStop;
                 if ("Energy".equals(stopReason)) {
@@ -313,8 +327,9 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                         }
 
                         double detour = (d1 + d2) - referenceDistance;
+                        double estimatedArrivalAtCharger = lastArrivaltime + d1Time;
                         double score = (d1Time + d2Time - referenceTime)
-                                + waitingTimeTracker.getAverageWaitingTime(candidate.getId());
+                                + waitingTimeTracker.getAverageWaitingTime(candidate.getId(), estimatedArrivalAtCharger);
 
                         boolean isAtCurrentPosition = candFacility.getLinkId().equals(lastFrom.getLinkId());
                         boolean withinTimeWindow = "Energy".equals(stopReason)
@@ -369,6 +384,7 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                         subLeg = fallbackLeg;
                     }
                     double subLegTime = (subLeg != null) ? subLeg.getTravelTime().seconds() : 0.0;
+
                     double chargerPower = selectedCharger.getPlugPower();
                     Link selectedChargerLink = network.getLinks().get(selectedCharger.getLinkId());
                     Facility nextFacility = new LinkWrapperFacility(selectedChargerLink);
@@ -407,12 +423,16 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                             chargingDurationNull = BREAK_DURATION;
                         }
 
+                        // Insert zero-length leg to maintain MATSim's Leg-Activity alternation.
+                        stagedRoute.add(createZeroLengthLeg(lastFrom.getLinkId(), lastArrivaltime));
+
                         // Add charging activity to stagedRoute (same pattern as normal flow).
                         String chargeActivityPrefixNull = mode + " " + stopReason + VehicleChargingHandler.CHARGING_IDENTIFIER;
                         Activity chargeActNull = PopulationUtils.createStageActivityFromCoordLinkIdAndModePrefix(
                                 selectedChargerLink.getCoord(), selectedChargerLink.getId(), chargeActivityPrefixNull);
                         chargeActNull = PopulationUtils.createActivity(chargeActNull);
                         chargeActNull.setMaximumDuration(chargingDurationNull);
+                        chargeActNull.getAttributes().putAttribute(DURATION_ATTR, chargingDurationNull);
                         stagedRoute.add(chargeActNull);
 
                         lastArrivaltime += "Rest".equals(stopReason) ? REST_DURATION : BREAK_DURATION;
@@ -456,6 +476,7 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                             selectedChargerLink.getCoord(), selectedChargerLink.getId(), chargeActivityPrefix);
                     chargeAct = PopulationUtils.createActivity(chargeAct);
                     chargeAct.setMaximumDuration(chargingDuration);
+                    chargeAct.getAttributes().putAttribute(DURATION_ATTR, chargingDuration);
                     lastArrivaltime += chargingDuration;
                     stagedRoute.add(chargeAct);
                     lastFrom = nextFacility;
@@ -494,12 +515,16 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                         currentEnergy = Math.max(0.0, currentEnergy - legConsumption);
                         lastArrivaltime = leg.getDepartureTime().seconds() + leg.getTravelTime().seconds();
                         stagedRoute.add(leg);
+                    } else {
+                        // Rest area is co-located: insert zero-length leg for Leg-Activity alternation.
+                        stagedRoute.add(createZeroLengthLeg(lastFrom.getLinkId(), lastArrivaltime));
                     }
                     double restDuration = "Rest".equals(stopReason) ? REST_DURATION : BREAK_DURATION;
                     Activity restAct = PopulationUtils.createStageActivityFromCoordLinkIdAndModePrefix(
                             restLink.getCoord(), restLink.getId(), "resting");
                     restAct = PopulationUtils.createActivity(restAct);
                     restAct.setMaximumDuration(restDuration);
+                    restAct.getAttributes().putAttribute(DURATION_ATTR, restDuration);
                     lastArrivaltime += restDuration;
                     stagedRoute.add(restAct);
                     lastFrom = stopFacility;
@@ -771,7 +796,7 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
      * to {@code chargerSearchLink} that are compatible with {@code ev} and match {@code chargerType}.
      */
     private ChargerSpecification selectCharger(Link chargerSearchLink, ElectricVehicleSpecification ev,
-                                               String chargerType) {
+                                               String chargerType, double arrivalTimeSeconds) {
         StraightLineKnnFinder<Link, ChargerSpecification> finder = new StraightLineKnnFinder<>(
                 5, Link::getCoord, s -> network.getLinks().get(s.getLinkId()).getCoord());
         List<ChargerSpecification> nearest = finder.findNearest(chargerSearchLink,
@@ -779,7 +804,7 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
                         .filter(c -> c.getChargerType().equals(chargerType)
                                      && ev.getChargerTypes().contains(c.getChargerType())));
         return nearest.stream()
-                .min(Comparator.comparingDouble(c -> waitingTimeTracker.getAverageWaitingTime(c.getId())))
+                .min(Comparator.comparingDouble(c -> waitingTimeTracker.getAverageWaitingTime(c.getId(), arrivalTimeSeconds)))
                 .orElse(nearest.get(0));
     }
 
@@ -832,6 +857,16 @@ final class MpmEvNetworkRoutingModule implements RoutingModule {
             travelTimes.put(l, travelT);
         }
         return travelTimes;
+    }
+
+    private Leg createZeroLengthLeg(Id<Link> linkId, double departureTime) {
+        Leg leg = PopulationUtils.createLeg(mode);
+        leg.setDepartureTime(departureTime);
+        leg.setTravelTime(0.0);
+        leg.setRoute(RouteUtils.createLinkNetworkRouteImpl(linkId, List.of(), linkId));
+        leg.getRoute().setDistance(0.0);
+        leg.getRoute().setTravelTime(0.0);
+        return leg;
     }
 
     @Override

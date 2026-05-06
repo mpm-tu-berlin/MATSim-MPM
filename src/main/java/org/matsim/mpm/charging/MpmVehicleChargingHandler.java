@@ -30,10 +30,13 @@ import org.matsim.contrib.ev.infrastructure.Charger;
 import org.matsim.contrib.ev.infrastructure.ChargingInfrastructure;
 import org.matsim.core.events.MobsimScopeEventHandler;
 import org.matsim.core.mobsim.framework.MobsimAgent;
+import org.matsim.core.mobsim.framework.events.MobsimBeforeCleanupEvent;
 import org.matsim.core.mobsim.framework.events.MobsimBeforeSimStepEvent;
+import org.matsim.core.mobsim.framework.listeners.MobsimBeforeCleanupListener;
 import org.matsim.core.mobsim.framework.listeners.MobsimBeforeSimStepListener;
 import org.matsim.core.mobsim.qsim.QSim;
 import org.matsim.core.mobsim.qsim.agents.WithinDayAgentUtils;
+import org.matsim.core.utils.misc.OptionalTime;
 import org.matsim.vehicles.Vehicle;
 
 import java.util.HashMap;
@@ -62,7 +65,8 @@ public class MpmVehicleChargingHandler
         PersonLeavesVehicleEventHandler,
         QueuedAtChargerEventHandler, ChargingStartEventHandler,
         ChargingEndEventHandler, QuitQueueAtChargerEventHandler,
-        MobsimBeforeSimStepListener, MobsimScopeEventHandler {
+        MobsimBeforeSimStepListener, MobsimBeforeCleanupListener,
+        MobsimScopeEventHandler {
 
     /** Suffix that identifies charging stage activities (includes leading space). */
     private static final String CHARGING_SUFFIX = VehicleChargingHandler.CHARGING_INTERACTION;
@@ -71,6 +75,10 @@ public class MpmVehicleChargingHandler
     private final Map<Id<Person>, Id<Vehicle>> lastVehicleUsed = new HashMap<>();
     private final Map<Id<Vehicle>, Id<Charger>> vehiclesAtChargers = new HashMap<>();
     private final Set<Id<Person>> agentsInChargerQueue = ConcurrentHashMap.newKeySet();
+    private final Set<Id<Person>> frozenAgents = ConcurrentHashMap.newKeySet();
+    private final Set<Id<Person>> pendingUnfreeze = ConcurrentHashMap.newKeySet();
+    private final Map<Id<Person>, OptionalTime> savedEndTimes = new ConcurrentHashMap<>();
+    private final Map<Id<Person>, OptionalTime> savedMaxDurations = new ConcurrentHashMap<>();
 
     private final ChargingInfrastructure chargingInfrastructure;
     private final ElectricFleet electricFleet;
@@ -175,7 +183,12 @@ public class MpmVehicleChargingHandler
     @Override
     public void handleEvent(ChargingStartEvent event) {
         Id<Person> personId = lastDriver.get(event.getVehicleId());
-        if (personId != null) agentsInChargerQueue.remove(personId);
+        if (personId != null) {
+            agentsInChargerQueue.remove(personId);
+            if (frozenAgents.remove(personId)) {
+                pendingUnfreeze.add(personId);
+            }
+        }
     }
 
     @Override
@@ -190,25 +203,87 @@ public class MpmVehicleChargingHandler
                     "QuitQueueAtChargerEvent fired while enforceChargingInteractionDuration=true: " + event);
         }
         Id<Person> personId = lastDriver.get(event.getVehicleId());
-        if (personId != null) agentsInChargerQueue.remove(personId);
+        if (personId != null) {
+            agentsInChargerQueue.remove(personId);
+            if (frozenAgents.remove(personId)) {
+                pendingUnfreeze.add(personId);
+            }
+        }
     }
 
     @Override
     public void notifyMobsimBeforeSimStep(MobsimBeforeSimStepEvent e) {
         QSim qsim = (QSim) e.getQueueSimulation();
+
+        // Phase A: Unfreeze agents that left the queue (started charging or quit)
+        for (Id<Person> agentId : pendingUnfreeze) {
+            MobsimAgent mobsimAgent = qsim.getAgents().get(agentId);
+            PlanElement currentPlanElement = WithinDayAgentUtils.getCurrentPlanElement(mobsimAgent);
+            if (currentPlanElement instanceof Activity act) {
+                restoreActivityTiming(agentId, act);
+                WithinDayAgentUtils.resetCaches(mobsimAgent);
+                WithinDayAgentUtils.rescheduleActivityEnd(mobsimAgent, qsim);
+            }
+        }
+        pendingUnfreeze.clear();
+
+        // Phase B: Freeze newly queued agents (set end time far into the future)
         for (Id<Person> agentId : agentsInChargerQueue) {
+            if (frozenAgents.contains(agentId)) {
+                continue; // already frozen — no reschedule needed
+            }
             MobsimAgent mobsimAgent = qsim.getAgents().get(agentId);
             PlanElement currentPlanElement = WithinDayAgentUtils.getCurrentPlanElement(mobsimAgent);
             if (currentPlanElement instanceof Activity act) {
                 Preconditions.checkState(act.getType().endsWith(CHARGING_SUFFIX),
                         "Agent %s in charger queue but current activity is not a charging interaction: %s",
                         agentId, act.getType());
+                savedEndTimes.put(agentId, act.getEndTime());
+                savedMaxDurations.put(agentId, act.getMaximumDuration());
+                act.setEndTime(Double.MAX_VALUE);
+                act.setMaximumDurationUndefined();
                 WithinDayAgentUtils.resetCaches(mobsimAgent);
                 WithinDayAgentUtils.rescheduleActivityEnd(mobsimAgent, qsim);
+                frozenAgents.add(agentId);
             } else {
                 throw new IllegalStateException(
                         "Agent " + agentId + " in charger queue but not at an activity: " + currentPlanElement);
             }
+        }
+    }
+
+    @Override
+    public void notifyMobsimBeforeCleanup(MobsimBeforeCleanupEvent e) {
+        QSim qsim = (QSim) e.getQueueSimulation();
+        // Restore original activity timing for all frozen agents before QSim shutdown,
+        // so that scoring and output see the correct end times (not Double.MAX_VALUE).
+        for (Id<Person> agentId : frozenAgents) {
+            MobsimAgent mobsimAgent = qsim.getAgents().get(agentId);
+            PlanElement currentPlanElement = WithinDayAgentUtils.getCurrentPlanElement(mobsimAgent);
+            if (currentPlanElement instanceof Activity act) {
+                restoreActivityTiming(agentId, act);
+                WithinDayAgentUtils.resetCaches(mobsimAgent);
+                WithinDayAgentUtils.rescheduleActivityEnd(mobsimAgent, qsim);
+            }
+        }
+        frozenAgents.clear();
+        pendingUnfreeze.clear();
+        savedEndTimes.clear();
+        savedMaxDurations.clear();
+    }
+
+    private void restoreActivityTiming(Id<Person> agentId, Activity act) {
+        OptionalTime origEnd = savedEndTimes.remove(agentId);
+        OptionalTime origDur = savedMaxDurations.remove(agentId);
+        if (origEnd != null && origEnd.isDefined()) {
+            act.setEndTime(origEnd.seconds());
+        } else {
+            act.setEndTimeUndefined();
+        }
+        if (origDur != null && origDur.isDefined()) {
+            act.setMaximumDuration(origDur.seconds());
+        } else {
+            act.setMaximumDurationUndefined();
         }
     }
 }

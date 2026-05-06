@@ -117,9 +117,6 @@ public class ChargingQueueWaitingScoringHandler
                 double waitingTimeHours = waitingTime / 3600.0;
                 double waitingScore = waitingScorePerHour * waitingTimeHours;
 
-                log.info("Vehicle {} waited {} seconds before charging started at time {}. Waiting penalty tracked: {} utils (applied by ChargingWaitingScoringFunction)",
-                    event.getVehicleId(), waitingTime, event.getTime(), waitingScore);
-
                 // Store waiting event for CSV export
                 waitingEvents.add(new WaitingEvent(
                     event.getTime(),

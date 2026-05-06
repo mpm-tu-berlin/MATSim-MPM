@@ -20,7 +20,7 @@
 	</module>
 
 	<module name="network">
-		<param name="inputNetworkFile" value="../../german_etruck_network.xml.gz"/>
+		<param name="inputNetworkFile" value="../../../german_etruck_network.xml.gz"/>
 	</module>
 
 	<module name="plans">
@@ -30,7 +30,7 @@
 	<module name="controller">
 		<param name="outputDirectory" value="./output/BETs/BETs_queue_test"/>
 		<param name="firstIteration" value="0"/>
-		<param name="lastIteration" value="0"/>
+		<param name="lastIteration" value="10"/>
 		<param name="eventsFileFormat" value="xml"/>
 		<param name="mobsim" value="qsim"/>
 		<param name="routingAlgorithmType" value="SpeedyALT" />
@@ -131,18 +131,18 @@
 
 	</module>
 	<module name="replanning">
-		<param name="maxAgentPlanMemorySize" value="5"/> <!-- 0 means unlimited -->
+		<param name="maxAgentPlanMemorySize" value="3"/> <!-- 0 means unlimited -->
 		<!--<param name="ModuleProbability_1" value="0.7"/>-->
 
 		<parameterset type="strategysettings">
 			<param name="strategyName" value="SelectExpBeta" />
-			<param name="weight" value="0.7"/>
+			<param name="weight" value="0.8"/>
 		</parameterset>
 
 		<parameterset type="strategysettings">
 			<param name="strategyName" value="ReRoute"/>
-			<param name="weight" value="0.3"/>
-			<param name="disableAfterIteration" value="10"/>
+			<param name="weight" value="0.2"/>
+			<param name="disableAfterIteration" value="7"/>
 		</parameterset>
 
 		<!--<parameterset type="strategysettings">
