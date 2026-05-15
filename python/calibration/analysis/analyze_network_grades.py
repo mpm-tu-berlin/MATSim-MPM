@@ -4,28 +4,31 @@ Steigungsanalyse der MATSim-Netzwerke fuer LH und RD.
 Fragestellung: Ist maxGradeAbs=0.15 das Problem bei der Energieueberschaetzung?
 
 Aufruf:
-    .venv/Scripts/python analyze_network_grades.py
+    .venv/Scripts/python analysis/analyze_network_grades.py
 """
 
 import gzip
+import sys
 import xml.etree.ElementTree as ET
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
+
+# Sicherstellt dass src-Paket aus python/calibration/ gefunden wird
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import MATSIM_MPM_DIR, RESULTS_DIR
 
 # === Fahrzeugparameter fuer Energieabschaetzung ===
 SCENARIOS = {
     "LongHaul": {
-        "network": MATSIM_MPM_DIR /
-                   /sstop   "scenarios" / "VECTO_Longhaul" / "longhaul_network.xml.gz",
+        "network": MATSIM_MPM_DIR / "scenarios" / "VECTO_Longhaul" / "longhaul_network_1m.xml.gz",
         "mSum": 18166 + 10950,   # Mittel aus low+high Payload [kg]
         "v_avg": 22.2,           # ~80 km/h Reisegeschwindigkeit [m/s]
         "ref_kwh_per_km": 1.137, # Mittel LH low+high
     },
     "RegionalDelivery": {
-        "network": MATSIM_MPM_DIR / "scenarios" / "VECTO_RegionalDelivery" / "regional_delivery_network.xml.gz",
+        "network": MATSIM_MPM_DIR / "scenarios" / "VECTO_RegionalDelivery" / "regional_delivery_network_1m.xml.gz",
         "mSum": 18166 + 7750,    # Mittel aus low+high Payload [kg]
         "v_avg": 7.5,            # ~27 km/h Stadtverkehr [m/s]
         "ref_kwh_per_km": 1.065, # Mittel RD low+high
@@ -47,13 +50,11 @@ def parse_network(path: Path) -> tuple[dict, list]:
     root = tree.getroot()
     print("OK")
 
-    # Knoten: id -> z (None falls kein z-Attribut)
     nodes = {}
     for node in root.iter("node"):
         z = node.get("z")
         nodes[node.get("id")] = float(z) if z is not None else None
 
-    # Links: (from_id, to_id, length)
     links = []
     for link in root.iter("link"):
         try:
@@ -91,7 +92,7 @@ def grade_energy_kwh_per_km(grades: np.ndarray, lengths: np.ndarray,
     """
     Schaetzt den mittleren Netto-Steigungsenergieverbrauch [kWh/km].
 
-    Bergauf:  E = m*g*grade*dist / spr  (spr=0.92)
+    Bergauf:  E = m*g*grade*dist / eta  (eta=0.92)
     Bergab:   E = -m*g*|grade|*dist * recup_eff
     max_grade: kapped die Steigung auf +/- max_grade (simuliert maxGradeAbs)
     """
@@ -106,8 +107,8 @@ def grade_energy_kwh_per_km(grades: np.ndarray, lengths: np.ndarray,
     uphill = g > 0
     downhill = g < 0
 
-    e_up   = np.sum(mSum * G * g[uphill]  * lengths[uphill] / 0.92)   # [J]
-    e_down = np.sum(mSum * G * np.abs(g[downhill]) * lengths[downhill] * recup_eff)  # [J] rueckgewonnen
+    e_up   = np.sum(mSum * G * g[uphill]  * lengths[uphill] / 0.92)
+    e_down = np.sum(mSum * G * np.abs(g[downhill]) * lengths[downhill] * recup_eff)
 
     netto_j = e_up - e_down
     netto_kwh_per_km = netto_j * J_TO_KWH / (total_dist_m / 1000)
@@ -121,7 +122,6 @@ def analyse(name: str, cfg: dict):
 
     nodes, links = parse_network(cfg["network"])
 
-    # Laengen parallel zu grades berechnen
     lengths_all = []
     grades_raw = []
     for from_id, to_id, length in links:
@@ -136,8 +136,7 @@ def analyse(name: str, cfg: dict):
     lengths = np.array(lengths_all)
 
     if len(grades) == 0:
-        print("  KEINE z-Koordinaten im Netzwerk vorhanden! Steigungsterm = 0 fuer alle Links.")
-        print("  -> maxGradeAbs ist irrelevant, da keine Steigungen berechnet werden koennen.")
+        print("  KEINE z-Koordinaten im Netzwerk vorhanden!")
         return
 
     abs_grades = np.abs(grades)
@@ -146,7 +145,6 @@ def analyse(name: str, cfg: dict):
 
     print(f"\n  Netzwerk: {total_links} Links mit z-Koordinaten | {total_dist_km:.1f} km Gesamtlaenge")
 
-    # --- Statistische Verteilung ---
     print("\n  Steigungsverteilung (Absolutwerte):")
     for p in [50, 75, 90, 95, 99, 100]:
         val = np.percentile(abs_grades, p)
@@ -161,7 +159,6 @@ def analyse(name: str, cfg: dict):
         print(f"    > {thresh*100:4.1f}%: {n_over:5d} Links ({pct_links:5.1f}%) | "
               f"{dist_over:6.1f} km ({pct_dist:5.1f}% der Strecke)")
 
-    # --- Energieabschaetzung bei verschiedenen maxGradeAbs ---
     mSum = cfg["mSum"]
     v = cfg["v_avg"]
     ref = cfg["ref_kwh_per_km"]
@@ -176,11 +173,9 @@ def analyse(name: str, cfg: dict):
         anteil = 100 * e / ref if ref > 0 else float("nan")
         print(f"  {label:>12} | {e:>10.4f}   | {anteil:>13.1f}%")
 
-    # --- Plot ---
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
     fig.suptitle(f"Steigungsverteilung — {name}", fontsize=13)
 
-    # Histogramm (Haeufigkeit, gewichtet nach Streckenlaenge)
     ax1 = axes[0]
     bins = np.linspace(-0.30, 0.30, 61)
     weights = lengths / lengths.sum()
@@ -193,7 +188,6 @@ def analyse(name: str, cfg: dict):
     ax1.set_title("Verteilung (laengengewichtet)")
     ax1.legend(title="maxGradeAbs", fontsize=8)
 
-    # CDF der Absolutsteigung
     ax2 = axes[1]
     sorted_abs = np.sort(abs_grades)
     cdf = np.cumsum(lengths[np.argsort(abs_grades)]) / lengths.sum()
@@ -212,13 +206,13 @@ def analyse(name: str, cfg: dict):
 
     plt.tight_layout()
     out_path = RESULTS_DIR / f"grade_distribution_{name}.png"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_path, dpi=150)
     plt.close()
     print(f"\n  Plot gespeichert: {out_path}")
 
 
-# === Hauptprogramm ===
-for name, cfg in SCENARIOS.items():
-    analyse(name, cfg)
-
-print("\nFertig.")
+if __name__ == "__main__":
+    for name, cfg in SCENARIOS.items():
+        analyse(name, cfg)
+    print("\nFertig.")

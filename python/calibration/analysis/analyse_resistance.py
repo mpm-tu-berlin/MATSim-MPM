@@ -8,10 +8,10 @@ werden die Dateien manuell umbenannt und dann gemeinsam uebergeben:
 
 Aufruf:
     # Einzelne Datei (nur ein Szenario):
-    .venv/Scripts/python analyse_resistance.py resistance_debug_lh.csv
+    .venv/Scripts/python analysis/analyse_resistance.py resistance_debug_lh.csv
 
     # Beide Szenarien kombiniert:
-    .venv/Scripts/python analyse_resistance.py resistance_debug_lh.csv resistance_debug_rd.csv
+    .venv/Scripts/python analysis/analyse_resistance.py resistance_debug_lh.csv resistance_debug_rd.csv
 
 Ausgabe:
     results/resistance_analysis.html  — drei interaktive Subplots:
@@ -25,6 +25,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Sicherstellt dass src-Paket aus python/calibration/ gefunden wird
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -32,11 +35,11 @@ from plotly.subplots import make_subplots
 from src.config import VEHICLE_GROUPS
 from src.error_computation import load_reference
 
-PROJECT_ROOT   = Path(__file__).resolve().parent
-OUTPUT         = PROJECT_ROOT / "results" / "resistance_analysis.html"
-OUTPUT_SPEED   = PROJECT_ROOT / "results" / "speed_profile.html"
-VECTO_LH_VDRI  = PROJECT_ROOT / "data" / "LongHaul.vdri"
-VECTO_RD_VDRI  = PROJECT_ROOT / "data" / "RegionalDelivery.vdri"
+_CALIB_ROOT   = Path(__file__).resolve().parent.parent
+OUTPUT         = _CALIB_ROOT / "results" / "resistance_analysis.html"
+OUTPUT_SPEED   = _CALIB_ROOT / "results" / "speed_profile.html"
+VECTO_LH_VDRI  = _CALIB_ROOT / "data" / "LongHaul.vdri"
+VECTO_RD_VDRI  = _CALIB_ROOT / "data" / "RegionalDelivery.vdri"
 
 # Fahrzeugmetadaten direkt aus vehicles.xml aller Szenarien.
 # vehicle_id -> {mass_kg, payload_kg}
@@ -184,7 +187,6 @@ def enrich_with_meta_and_ref(agg: pd.DataFrame) -> pd.DataFrame:
 
 def print_table(agg: pd.DataFrame) -> None:
     """Gibt eine Zusammenfassungstabelle auf der Konsole aus."""
-    # Kopfzeile mit Einheiten in der zweiten Zeile
     col_w = 35
     header1 = (
         f"{'Fahrzeug':<{col_w}} {'Masse':>6} "
@@ -389,7 +391,7 @@ def make_figure(agg: pd.DataFrame) -> go.Figure:
 
     vehicles = list(agg.index)
 
-    # --- Subplot 1: Stacked bar (relative = neg. Balken gehen nach unten) ---
+    # --- Subplot 1: Stacked bar ---
     components = [
         ("Rollwiderstand",  "E_roll_kWh",      "#4C72B0"),
         ("Luftwiderstand",  "E_aero_kWh",      "#DD8452"),
@@ -405,7 +407,6 @@ def make_figure(agg: pd.DataFrame) -> go.Figure:
             marker_color=color, legendgroup=label,
         ), row=1, col=1)
 
-    # Gesamtbatterieenergie als Markerlinie
     fig.add_trace(go.Scatter(
         name="E_bat (netto)", x=vehicles, y=agg["E_bat_kWh"],
         mode="markers+lines",
@@ -476,7 +477,7 @@ def find_candidate_csvs() -> list[Path]:
     candidates: list[Path] = []
     skip = {".venv", "data", "__pycache__"}
 
-    for p in sorted(PROJECT_ROOT.rglob("resistance_debug*.csv")):
+    for p in sorted(_CALIB_ROOT.rglob("resistance_debug*.csv")):
         if any(part in skip for part in p.parts):
             continue
         candidates.append(p)
@@ -489,7 +490,7 @@ def pick_files_powershell(candidates: list[Path]) -> list[Path]:
     ps_objects = []
     for p in candidates:
         try:
-            rel = str(p.relative_to(PROJECT_ROOT))
+            rel = str(p.relative_to(_CALIB_ROOT))
         except ValueError:
             rel = str(p)
         kb = p.stat().st_size / 1024
@@ -517,7 +518,7 @@ def pick_files_powershell(candidates: list[Path]) -> list[Path]:
         return []
 
     selected_names = [line.strip() for line in result.stdout.strip().splitlines() if line.strip()]
-    return [PROJECT_ROOT / name for name in selected_names]
+    return [_CALIB_ROOT / name for name in selected_names]
 
 
 # ---------------------------------------------------------------------------
@@ -528,7 +529,7 @@ def main() -> None:
     candidates = find_candidate_csvs()
 
     if not candidates:
-        print(f"Keine CSV-Dateien gefunden unter: {PROJECT_ROOT}", file=sys.stderr)
+        print(f"Keine CSV-Dateien gefunden unter: {_CALIB_ROOT}", file=sys.stderr)
         sys.exit(1)
 
     csv_paths = pick_files_powershell(candidates)

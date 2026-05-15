@@ -132,10 +132,14 @@ public final class MpmDynamicBetDriveEnergyConsumption implements DriveEnergyCon
             // Beschleunigung: v_exit durch verfuegbare Motorleistung begrenzt.
             // Leistungsanteil fuer Kinetik = Maximalleistung minus Widerstandsleistung bei v0.
             // Zeitschaetzung: L/v0 (konservativ, da Fahrzeug schneller wird).
-            double pResist0 = ft * mSum * G * v0
-                            + fa * v0 * v0 * v0
-                            + mSum * G * grade * v0;
-            double pKinBudget = maxMotorPowerW * tractionEfficiency - pResist0;
+            // Widerstand bei mittlerer Beschleunigungsgeschwindigkeit auswerten:
+            // waehrend der Beschleunigung steigt der Widerstand (Aero ~ v^3); Bewertung bei v0
+            // ueberschaetzt das Kinetikbudget und damit vExit.
+            double vRef = 0.5 * (v0 + Math.min(vTarget, vehicleMaxSpeedMs));
+            double pResistRef = ft * mSum * G * vRef
+                              + fa * vRef * vRef * vRef
+                              + mSum * G * grade * vRef;
+            double pKinBudget = maxMotorPowerW * tractionEfficiency - pResistRef;
 
             if (pKinBudget > 0.0) {
                 double dKEmax = pKinBudget * (L / v0);
@@ -155,8 +159,12 @@ public final class MpmDynamicBetDriveEnergyConsumption implements DriveEnergyCon
         double tPhysical = L / vAvg;
 
         // --- 4) Leistungskomponenten bei mittlerer Geschwindigkeit ---
+        // Aero: exakte Integration ueber den Link fuer konstante Beschleunigung.
+        // (1/L) * integral v(s)^2 ds = (v0^2 + vExit^2)/2 >= vAvg^2
+        // => pAero * tPhysical = fa * (v0^2 + vExit^2)/2 * L (Jensen-korrekt)
+        double vSqMean = 0.5 * (v0 * v0 + vExit * vExit);
         double pRoll   = ft * mSum * G * vAvg;
-        double pAero   = fa * vAvg * vAvg * vAvg;
+        double pAero   = fa * vSqMean * vAvg;
         double pGrav   = mSum * G * grade * vAvg;   // positiv = bergauf, negativ = bergab
         double pKin    = 0.5 * mInertia * (vExit * vExit - v0 * v0) / tPhysical; // nur Debug
 

@@ -4,11 +4,16 @@ Unterstuetzt Dual-Cycle-Kalibrierung (Long Haul + Regional Delivery).
 """
 
 import csv
+import gzip
 import math
+import re
 from pathlib import Path
 
 from src import config as _cfg
 from src.config import REFERENCE_CONSUMPTION_FILE
+
+# Joule -> kWh
+_J_TO_KWH = 1.0 / 3_600_000.0
 
 
 def load_reference(mission: str | None = None,
@@ -46,6 +51,11 @@ def parse_charge_profiles(output_dir: Path) -> dict[str, float]:
     """Liest individual_charge_time_profiles.txt und berechnet den
     Gesamtverbrauch (kWh) pro Fahrzeug als Differenz Start- zu End-SoC.
 
+    Hinweis: Bei kleinem qsim.timeStepSize (z.B. 0.04s) enthaelt diese Datei
+    nur wenige bis eine Zeile — der SoC-Sampler scheint mit der Sample-Rate
+    nicht klarzukommen. Fuer robuste Verbrauchsmessung quer ueber alle
+    Auflösungen `parse_events_consumption` verwenden.
+
     Args:
         output_dir: MATSim-Output-Verzeichnis (enthaelt ITERS/it.0/).
 
@@ -82,6 +92,55 @@ def parse_charge_profiles(output_dir: Path) -> dict[str, float]:
     return consumption
 
 
+# Regex auf XML-Eventzeilen — schnell, ohne XML-Parser.
+_EV_VEHICLE_RE = re.compile(r'vehicle="([^"]+)"')
+_EV_ENERGY_RE  = re.compile(r'energy="([0-9.eE+\-]+)"')
+
+
+def parse_events_consumption(output_dir: Path) -> dict[str, float]:
+    """Summiert den Gesamt-Batterieverbrauch pro Fahrzeug aus
+    output_events.xml.gz.
+
+    Wichtig: Das `drivingEnergyConsumption`-Event in MATSim-EV (2024.0)
+    enthaelt bereits **Drive + Aux**. `DriveDischargingHandler.dischargeVehicle`
+    addiert intern `driveEnergyConsumption + auxEnergyConsumption` und
+    emittiert ein einziges Event mit dem Gesamtwert. Daher hier KEINE
+    Aux-Addition mehr — das waere Doppelzaehlung.
+
+    Robust gegen kleine timeStepSize-Werte (im Gegensatz zu
+    parse_charge_profiles, das auf SoC-Sampling im 5-min-Raster basiert und
+    bei spaeten Trip-Enden den Schwanz verpasst).
+
+    Args:
+        output_dir: MATSim-Output-Verzeichnis (output_events.xml.gz darin).
+
+    Returns:
+        Dict {vehicle_id: verbrauch_kwh}.
+    """
+    events_path = output_dir / "output_events.xml.gz"
+    if not events_path.exists():
+        raise FileNotFoundError(f"Events-Datei nicht gefunden: {events_path}")
+
+    consumption_j: dict[str, float] = {}
+    with gzip.open(events_path, "rt", encoding="utf-8") as f:
+        for line in f:
+            if "drivingEnergyConsumption" not in line:
+                continue
+            v = _EV_VEHICLE_RE.search(line)
+            e = _EV_ENERGY_RE.search(line)
+            if v and e:
+                consumption_j[v.group(1)] = (
+                    consumption_j.get(v.group(1), 0.0) + float(e.group(1))
+                )
+
+    if not consumption_j:
+        raise ValueError(
+            f"Keine drivingEnergyConsumption-Events in {events_path} gefunden."
+        )
+
+    return {vid: e_j * _J_TO_KWH for vid, e_j in consumption_j.items()}
+
+
 def compute_scenario_error(output_dir: Path, mission: str,
                            route_km: float) -> list[tuple[float, float]]:
     """Berechnet die relativen Fehler fuer ein einzelnes Szenario.
@@ -96,7 +155,7 @@ def compute_scenario_error(output_dir: Path, mission: str,
         Fehler relativ zum VECTO-Referenzwert.
     """
     reference = load_reference(mission)
-    consumption = parse_charge_profiles(output_dir)
+    consumption = parse_events_consumption(output_dir)
 
     payload_class = _cfg.ACTIVE_PAYLOAD_CLASS  # "low", "high" oder "all"
 
@@ -127,7 +186,7 @@ def compute_error(output_dir: Path, route_km: float = 100.185) -> float:
     Returns:
         RMSE [kWh/km] ueber alle Fahrzeuge.
     """
-    consumption = parse_charge_profiles(output_dir)
+    consumption = parse_events_consumption(output_dir)
     reference = load_reference()
 
     squared_errors = []
@@ -167,7 +226,7 @@ def format_final_report(scenario_outputs: dict[str, Path], trial_number: int,
 
     for scenario_name, out_dir in sorted(scenario_outputs.items()):
         route_km = _cfg.SCENARIOS[scenario_name]["route_km"]
-        consumption = parse_charge_profiles(out_dir)
+        consumption = parse_events_consumption(out_dir)
         reference = load_reference(scenario_name)
 
         lines.append(f"\n  [{scenario_name}]  Strecke: {route_km} km")

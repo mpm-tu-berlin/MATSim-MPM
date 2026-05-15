@@ -1,8 +1,12 @@
 """
 MATSim-Geschwindigkeit vs. VECTO-Sollprofil (Long Haul).
 
+Einfaches Vergleichsskript: plottet nur den Geschwindigkeitsverlauf
+fuer LH-Fahrzeuge gegen das VECTO-Sollprofil.
+Fuer die vollstaendige Widerstands- und Leistungsanalyse: analyse_resistance.py
+
 Aufruf:
-    .venv/Scripts/python analyse_resistance_v2.py <resistance_debug.csv>
+    .venv/Scripts/python analysis/speed_comparison.py [resistance_debug.csv]
 
 Ausgabe:
     results/speed_comparison_lh.html
@@ -11,19 +15,22 @@ Ausgabe:
 import sys
 from pathlib import Path
 
+# Sicherstellt dass src-Paket aus python/calibration/ gefunden wird
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import pandas as pd
 import plotly.graph_objects as go
 
-PROJECT_ROOT  = Path(__file__).resolve().parent
-OUTPUT        = PROJECT_ROOT / "results" / "speed_comparison_lh.html"
-VECTO_LH_VDRI = PROJECT_ROOT / "data" / "LongHaul.vdri"
+_CALIB_ROOT   = Path(__file__).resolve().parent.parent
+OUTPUT        = _CALIB_ROOT / "results" / "speed_comparison_lh.html"
+VECTO_LH_VDRI = _CALIB_ROOT / "data" / "LongHaul.vdri"
 
 
 def main() -> None:
     if len(sys.argv) >= 2:
         csv_path = Path(sys.argv[1])
     else:
-        csv_path = PROJECT_ROOT / "resistance_debug.csv"
+        csv_path = _CALIB_ROOT / "resistance_debug.csv"
 
     if not csv_path.exists():
         print(f"Datei nicht gefunden: {csv_path}")

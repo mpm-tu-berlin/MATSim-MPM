@@ -9,26 +9,32 @@ x-Achse: Entfernung vom Start [km] (zoombar)
 y-Achse: Hoehe ueber Startpunkt [m]
 
 Aufruf:
-    .venv/Scripts/python plot_network_profiles.py
+    .venv/Scripts/python analysis/plot_network_profiles.py
 """
 
 import gzip
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+# Sicherstellt dass src-Paket aus python/calibration/ gefunden wird
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-DATA_DIR    = Path(__file__).resolve().parent / "data"
-MATSIM_DIR  = Path(r"C:\Users\Tobias\IdeaProjects\MATSim-MPM\scenarios")
+from src.config import DATA_DIR, MATSIM_MPM_DIR
+
+_CALIB_ROOT  = Path(__file__).resolve().parent.parent
+MATSIM_DIR   = MATSIM_MPM_DIR / "scenarios"
 
 VDRI_LH = DATA_DIR   / "LongHaul.vdri"
 VDRI_RD = DATA_DIR   / "RegionalDelivery.vdri"
-NET_LH  = MATSIM_DIR / "VECTO_Longhaul"        / "longhaul_network.xml.gz"
-NET_RD  = MATSIM_DIR / "VECTO_RegionalDelivery" / "regional_delivery_network.xml.gz"
+NET_LH  = MATSIM_DIR / "VECTO_Longhaul"         / "longhaul_network_1m.xml.gz"
+NET_RD  = MATSIM_DIR / "VECTO_RegionalDelivery"  / "regional_delivery_network_1m.xml.gz"
 
-OUTPUT  = Path(__file__).resolve().parent / "results" / "network_profiles.html"
+OUTPUT  = _CALIB_ROOT / "results" / "network_profiles.html"
 
 
 def read_vdri(path: Path) -> tuple[list[float], list[float]]:
@@ -49,8 +55,8 @@ def read_vdri(path: Path) -> tuple[list[float], list[float]]:
     cum_z  = 0.0
 
     for i in range(len(df) - 1):
-        ds = float(df["s"].iloc[i + 1] - df["s"].iloc[i])  # Meter
-        g  = float(df["grad"].iloc[i])                       # %
+        ds = float(df["s"].iloc[i + 1] - df["s"].iloc[i])
+        g  = float(df["grad"].iloc[i])
         cum_z += ds * g / 100.0
         elev_m.append(cum_z)
 
@@ -104,7 +110,6 @@ def main() -> None:
         vd_dist, vd_elev = read_vdri(vdri_path)
         ms_dist, ms_elev = read_network(net_path)
 
-        # VECTO-Profil
         fig.add_trace(
             go.Scatter(
                 x=vd_dist, y=vd_elev,
@@ -117,7 +122,6 @@ def main() -> None:
             row=row, col=1,
         )
 
-        # MATSim-Profil
         fig.add_trace(
             go.Scatter(
                 x=ms_dist, y=ms_elev,

@@ -6,7 +6,8 @@ DATA_DIR = PROJECT_ROOT / "data"
 RESULTS_DIR = PROJECT_ROOT / "results"
 
 # === MATSim-MPM Projekt ===
-MATSIM_MPM_DIR = Path(r"C:\Users\Tobias\IdeaProjects\MATSim-MPM")
+# Relativ zur Kalibrierungsordnerstruktur: python/calibration/src/ -> ../../.. = MATSim-MPM/
+MATSIM_MPM_DIR = PROJECT_ROOT.parent.parent
 MATSIM_JAR = MATSIM_MPM_DIR / "matsim-example-project-0.0.1-SNAPSHOT.jar"
 
 # === Fahrzeuggruppen (je eine Kalibrierungsstudie pro Gruppe) ===
