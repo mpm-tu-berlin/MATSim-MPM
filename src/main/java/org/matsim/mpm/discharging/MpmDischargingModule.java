@@ -20,6 +20,8 @@
 
 package org.matsim.mpm.discharging;
 
+import org.matsim.api.core.v01.network.Link;
+import org.matsim.api.core.v01.network.Network;
 import org.matsim.contrib.ev.EvModule;
 import org.matsim.contrib.ev.discharging.*;
 import org.matsim.contrib.ev.temperature.TemperatureService;
@@ -29,6 +31,7 @@ import org.matsim.core.mobsim.qsim.qnetsimengine.linkspeedcalculator.LinkSpeedCa
 import org.matsim.mpm.PowerLimitedLinkSpeedCalculator;
 import org.matsim.vehicles.Vehicle;
 
+import com.google.inject.Provider;
 import com.google.inject.Singleton;
 
 import java.nio.file.Path;
@@ -87,9 +90,36 @@ public final class MpmDischargingModule extends AbstractModule {
         bind(TemperatureService.class).toInstance(linkId -> 15);// XXX fixed temperature 15 oC
         // Nebenverbrauch: kalibrierte Konstantleistung P_aux [W] fuer alle Fahrzeuge der Gruppe.
         // Entspricht dem VECTO-Modell: E_aux = P_aux * t (direkt von der Batterie).
-        bind(AuxEnergyConsumption.Factory.class).toInstance(
-                ev -> (link, travelTime, linkEnterTime) -> calib.auxPowerW * travelTime // Joule
-        );
+        //
+        // WICHTIG: Wir verwenden die *physikalische* Linkdurchfahrtzeit
+        //   tPhysical = L / min(freespeed, vehicleMaxSpeed)
+        // statt der von der QSim gemeldeten duration. Letztere ist auf
+        // Vielfache von qsim.timeStepSize aufgerundet (1m-Link bei 23 m/s,
+        // timestep=0.04s: 0.043s -> 0.08s, ~86 % Aux-Ueberschaetzung) und
+        // wuerde den Aux-Anteil resolutions- und timestep-abhaengig machen.
+        // Konsistent zu MpmDynamicBetDriveEnergyConsumption, das ebenfalls
+        // tPhysical aus Linklaenge und Geschwindigkeit ableitet.
+        //
+        // Lambda-Signatur ist (beginTime, duration, linkId) -> Joule.
+        // Network wird via Guice-Provider injiziert, damit der Link aus der
+        // linkId rekonstruierbar ist.
+        Provider<Network> networkProvider = binder().getProvider(Network.class);
+        bind(AuxEnergyConsumption.Factory.class).toInstance(ev -> {
+            final Network network = networkProvider.get();
+            final double vehicleMaxSpeedMs =
+                    ev.getVehicleSpecification().getMatsimVehicle().getType().getMaximumVelocity();
+            return (beginTime, duration, linkId) -> {
+                Link link = network.getLinks().get(linkId);
+                if (link == null) {
+                    // Fallback: ohne Linkinfo nehmen wir die QSim-duration.
+                    return calib.auxPowerW * duration;
+                }
+                double v = Math.min(link.getFreespeed(), vehicleMaxSpeedMs);
+                if (v <= 0.0) v = 1e-3; // numerische Absicherung
+                double tPhysical = link.getLength() / v;
+                return calib.auxPowerW * tPhysical; // Joule
+            };
+        });
 
         installQSimModule(new AbstractQSimModule() {
             @Override
