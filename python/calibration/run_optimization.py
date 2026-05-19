@@ -143,11 +143,18 @@ for study in STUDIES:
     _cfg.ACTIVE_PAYLOAD_CLASS = study["payload_class"]
     _cfg.SCENARIOS = {name: _all_scenarios[name] for name in study["scenarios"]}
 
+    # Pro Trial laufen len(SCENARIOS) MATSim-JVMs parallel; bei hoher Heap-Groesse
+    # (sub-50m) deckeln wir die Optuna-Parallelitaet so, dass total_jvms = n_jobs *
+    # n_scenarios <= ursprueglich gewuenschtes N_JOBS bleibt. Verhindert OOM
+    # speziell in der "all"-Study bei 1m (sonst 4 x 8 GB = 32 GB).
+    _n_scenarios = len(_cfg.SCENARIOS)
+    n_jobs_study = max(1, _cfg.N_JOBS // _n_scenarios)
+
     storage = f"sqlite:///{class_dir / 'optuna_study.db'}"
     optuna_study_name = f"matsim-vecto-{ACTIVE_VEHICLE_GROUP}-{study_name_str}"
 
     print(f"Storage: {storage}")
-    print(f"Starte {N_TRIALS} Trials ...\n")
+    print(f"Starte {N_TRIALS} Trials (n_jobs={n_jobs_study} fuer {_n_scenarios} Szenarien/Trial) ...\n")
 
     study_obj = optuna.create_study(
         study_name=optuna_study_name,
@@ -155,7 +162,7 @@ for study in STUDIES:
         direction="minimize",
         load_if_exists=False,
     )
-    study_obj.optimize(objective, n_trials=N_TRIALS, n_jobs=_cfg.N_JOBS)
+    study_obj.optimize(objective, n_trials=N_TRIALS, n_jobs=n_jobs_study)
 
     # --- Abschlussbericht ---
     best = study_obj.best_trial
