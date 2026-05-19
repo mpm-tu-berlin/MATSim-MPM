@@ -10,11 +10,10 @@ def objective(trial: optuna.Trial) -> float:
     fuer beide Szenarien (Long Haul + Regional Delivery) aus und berechnet
     den kombinierten RMSE in % gegenueber Referenzdaten."""
 
-    # Kalibrierungsparameter samplen
+    # Kalibrierungsparameter samplen (alle 5 in PARAM_BOUNDS, inkl. maxRecupPowerFraction)
     params = {}
     for name, (low, high) in PARAM_BOUNDS.items():
         params[name] = trial.suggest_float(name, low, high)
-    params["maxRecupPowerFraction"] = 1.0  # Fixwert, nicht optimiert
 
     # MATSim fuer alle Szenarien ausfuehren
     run_id_prefix = f"trial_{trial.number}"

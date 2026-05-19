@@ -59,16 +59,27 @@ STUDY_NAME = "matsim-vecto-calibration"
 N_TRIALS = 200
 STORAGE = f"sqlite:///{RESULTS_DIR / 'optuna_study.db'}"
 
-# === MATSim ===
-# 3G pro JVM: N_JOBS parallele Trials x 2 Szenarien x 3G = N_JOBS*6G RAM
-MATSIM_MEMORY = "1G"
-MATSIM_ITERATIONS = 1
+# === Netzauflösung (für Optuna + Sweep) ===
+# Wird zur Laufzeit von run_optimization.py / run_convergence_sweep.py per
+# Monkey-Patch ueberschrieben (zusammen mit MATSIM_MEMORY und N_JOBS).
+ACTIVE_RESOLUTION_M: int = 250
 
-# === Parallelisierung ===
-# N_JOBS parallele Optuna-Trials gleichzeitig.
-# RAM-Bedarf: N_JOBS * 2 Szenarien * MATSIM_MEMORY
-# Beispiel: 2 * 2 * 3G = 12G (passt bei 13G freiem RAM)
-N_JOBS = 4
+
+def resource_profile_for(resolution_m: int) -> tuple[str, int]:
+    """Liefert (MATSim-Heap, N_JOBS) passend zur Auflösung.
+
+    Unter 50 m wird die Linkzahl gross (1m: ~93k Links) und der RAM pro
+    Run steigt deutlich; deshalb groesserer Heap und weniger parallele Trials,
+    damit der Host nicht swappt.
+    """
+    if resolution_m < 50:
+        return "8G", 2
+    return "1G", 4
+
+
+# === MATSim ===
+MATSIM_MEMORY, N_JOBS = resource_profile_for(ACTIVE_RESOLUTION_M)
+MATSIM_ITERATIONS = 1
 
 # Pfad zur Kalibrierungsparameter-Datei (wird pro Trial geschrieben)
 CALIBRATION_PARAMS_FILE = RESULTS_DIR / "calibration_params.properties"
@@ -87,12 +98,13 @@ STUDIES = [
 ACTIVE_PAYLOAD_CLASS: str = "all"
 
 # === Kalibrierungsparameter-Bereiche
-# Wertebereiche (low, high) fuer die 4 Optuna-Parameter
-# a1/a2 entfallen: kinetische Energie wird jetzt exakt pro Link berechnet
-# RatedPower entfaellt: wird fahrzeugspezifisch in der MATSim-Vehicles-Datei definiert
+# Wertebereiche (low, high) fuer die 5 Optuna-Parameter.
+# a1/a2 entfallen: kinetische Energie wird jetzt exakt pro Link berechnet.
+# RatedPower entfaellt: wird fahrzeugspezifisch in der MATSim-Vehicles-Datei definiert.
 PARAM_BOUNDS = {
-    "tractionEfficiency":    (0.8,   0.9),       # Gesamteffizienz Batterie→Rad bei Traktion [-]
-    "inertiaC":              (1.01,   1.05),       # Traegheitsbeiwert [-] (rotierende Massen: Raeder, Antrieb)
-    "recupEfficiency":       (0.45,   0.85),       # Rekuperations-Wirkungsgrad [-]
-    "auxPowerW":             (4_000,  5_000.0),   # Konstante Nebenverbrauchsleistung [W]
+    "tractionEfficiency":     (0.75,   0.95),    # Gesamteffizienz Batterie→Rad bei Traktion [-]
+    "inertiaC":               (1.01,   1.05),    # Traegheitsbeiwert [-] (rotierende Massen: Raeder, Antrieb)
+    "recupEfficiency":        (0.45,   0.85),    # Rekuperations-Wirkungsgrad [-]
+    "auxPowerW":              (2_000,  8_000.0), # Konstante Nebenverbrauchsleistung [W]
+    "maxRecupPowerFraction":  (0.5,    1.0),     # Anteil maxMotorPowerW, der fuer Rekuperation nutzbar ist [-]
 }

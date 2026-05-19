@@ -8,26 +8,29 @@ Calibration system for heavy-duty vehicle (HDV) simulation: uses **Optuna** to o
 
 ## Setup & Commands
 
+Virtuelles Environment liegt im **Projekt-Root** (`MATSim-MPM/.venv`), nicht in `python/calibration/`.
+Aufrufe relativ zu diesem Ordner verwenden daher `../../.venv/Scripts/python`.
+
 ```bash
-# Create/activate virtual environment
+# Initiales Setup (einmalig, vom Projekt-Root)
 python -m venv .venv
 .venv/Scripts/activate        # Windows
-
-# Install dependencies
-pip install -r requirements.txt
+pip install -r python/calibration/requirements.txt
 ```
 
-## Einstiegspunkte
+## Einstiegspunkte (aufgerufen aus `python/calibration/`)
 
 ```bash
 # Vollständige Optuna-Kalibrierung (alle Studien, alle Szenarien)
-.venv/Scripts/python run_optimization.py
+../../.venv/Scripts/python run_optimization.py
+../../.venv/Scripts/python run_optimization.py --resolution 1                                    # 1m-Baseline
+../../.venv/Scripts/python run_optimization.py --resolution 1 --study-name lh_low --n-trials 10  # Smoke-Test
 
 # Einzelner Testlauf mit Standardparametern (Verifikation)
-.venv/Scripts/python run_test.py
+../../.venv/Scripts/python run_test.py --resolution 250
 
 # Sensitivitätsanalyse: Einfluss jedes Parameters
-.venv/Scripts/python run_sensitivity.py
+../../.venv/Scripts/python run_sensitivity.py
 ```
 
 ## Ordnerstruktur

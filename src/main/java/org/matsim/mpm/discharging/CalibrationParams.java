@@ -18,7 +18,7 @@ public final class CalibrationParams {
     private static final double DEF_TRACTION_EFF = 0.935;
     private static final double DEF_INERTIA_C = 1.05;
     private static final double DEF_RECUP_EFF = 0.6;
-    private static final double DEF_MAX_RECUP_POWER_FRACTION = 0.4;
+    private static final double DEF_MAX_RECUP_POWER_FRACTION = 0.9;
     private static final double DEF_AUX_POWER_W = 4_500.0;
 
     /** Gesamteffizienz Batterie → Rad (Umrichter + Motor + Getriebe) bei Traktion [-]. */

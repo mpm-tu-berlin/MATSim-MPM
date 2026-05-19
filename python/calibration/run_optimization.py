@@ -3,10 +3,13 @@ Optuna-Kalibrierungslauf: optimiert Fahrzeugparameter separat fuer jede
 Studie (lh_low, lh_high, rd_low, rd_high, all).
 
 Aufruf:
-    .venv/Scripts/python run_optimization.py
+    .venv/Scripts/python run_optimization.py                       # Default 250m, alle Studies
+    .venv/Scripts/python run_optimization.py --resolution 1        # 1m-Baseline
+    .venv/Scripts/python run_optimization.py --resolution 1 --study-name lh_low --n-trials 10
+        # Smoke-Test: nur eine Study, wenige Trials, schnelle End-to-End-Verifikation
 
 Jeder Lauf legt einen neuen Ordner an:
-    results/runs/YYYYMMDD_HHMMSS/
+    results/runs/YYYYMMDD_HHMMSS_<N>m/
         optimization.log          <- gemeinsames Log aller Studien
         lh_low/
             optuna_study.db
@@ -24,6 +27,7 @@ Jeder Lauf legt einen neuen Ordner an:
             matsim_runs/
 """
 
+import argparse
 import datetime
 import sys
 
@@ -32,10 +36,47 @@ import optuna.visualization as vis
 
 import src.config as _cfg  # Modul-Referenz fuer spaeteres Monkey-Patching
 
+# === 0. CLI: Netzauflösung waehlen, dazu passend RAM/N_JOBS monkey-patchen ===
+_parser = argparse.ArgumentParser(description=__doc__,
+                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+_parser.add_argument(
+    "--resolution",
+    type=int,
+    default=_cfg.ACTIVE_RESOLUTION_M,
+    help=(f"Netzauflösung in Metern fuer alle Studien dieses Laufs. "
+          f"Default: {_cfg.ACTIVE_RESOLUTION_M}."),
+)
+_parser.add_argument(
+    "--n-trials",
+    type=int,
+    default=None,
+    help=f"Trials pro Study (uebersteuert N_TRIALS={_cfg.N_TRIALS}).",
+)
+_parser.add_argument(
+    "--study-name",
+    type=str,
+    default=None,
+    help="Nur eine bestimmte Study laufen (z.B. 'lh_low' fuer Smoke-Test).",
+)
+_args = _parser.parse_args()
+
+_cfg.ACTIVE_RESOLUTION_M = _args.resolution
+_cfg.MATSIM_MEMORY, _cfg.N_JOBS = _cfg.resource_profile_for(_args.resolution)
+if _args.n_trials is not None:
+    _cfg.N_TRIALS = _args.n_trials
+if _args.study_name is not None:
+    _matched = [s for s in _cfg.STUDIES if s["name"] == _args.study_name]
+    if not _matched:
+        raise SystemExit(
+            f"Unbekannte Study '{_args.study_name}'. "
+            f"Verfuegbar: {[s['name'] for s in _cfg.STUDIES]}"
+        )
+    _cfg.STUDIES = _matched
+
 # === 1. Basisverzeichnis fuer diesen Lauf ===
 _timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 _BASE_RESULTS = _cfg.RESULTS_DIR        # Original-Pfad sichern
-RUN_BASE = _BASE_RESULTS / "runs" / _timestamp
+RUN_BASE = _BASE_RESULTS / "runs" / f"{_timestamp}_{_args.resolution}m"
 RUN_BASE.mkdir(parents=True, exist_ok=True)
 
 
@@ -47,11 +88,17 @@ class _Tee:
 
     def write(self, data):
         for s in self.streams:
-            s.write(data)
+            try:
+                s.write(data)
+            except ValueError:
+                pass  # Stream wurde bereits geschlossen (Interpreter-Shutdown)
 
     def flush(self):
         for s in self.streams:
-            s.flush()
+            try:
+                s.flush()
+            except ValueError:
+                pass
 
 
 _log_path = RUN_BASE / "optimization.log"
@@ -62,7 +109,7 @@ sys.stdout = _Tee(sys.__stdout__, _log_file)
 from src.objective import objective          # noqa: E402
 from src.error_computation import format_final_report  # noqa: E402
 from src.config import (                     # noqa: E402
-    STUDIES, N_TRIALS, N_JOBS,
+    STUDIES, N_TRIALS,
     ACTIVE_VEHICLE_GROUP, VEHICLE_GROUPS,
 )
 
@@ -74,9 +121,10 @@ _all_scenarios = VEHICLE_GROUPS[ACTIVE_VEHICLE_GROUP]
 print(f"Run-Verzeichnis:     {RUN_BASE}")
 print(f"Log:                 {_log_path}")
 print(f"Fahrzeuggruppe:      {ACTIVE_VEHICLE_GROUP}")
+print(f"Netzauflösung:       {_cfg.ACTIVE_RESOLUTION_M} m")
 print(f"Studien:             {[s['name'] for s in STUDIES]}")
-print(f"Trials je Studie:    {N_TRIALS}  (n_jobs={N_JOBS})")
-print(f"RAM-Bedarf je Studie:{N_JOBS} x Szenarien x {_cfg.MATSIM_MEMORY}")
+print(f"Trials je Studie:    {N_TRIALS}  (n_jobs={_cfg.N_JOBS})")
+print(f"RAM-Bedarf je Studie:{_cfg.N_JOBS} x Szenarien x {_cfg.MATSIM_MEMORY}")
 
 # === 4. Schleife ueber Studien ===
 for study in STUDIES:
@@ -107,7 +155,7 @@ for study in STUDIES:
         direction="minimize",
         load_if_exists=False,
     )
-    study_obj.optimize(objective, n_trials=N_TRIALS, n_jobs=N_JOBS)
+    study_obj.optimize(objective, n_trials=N_TRIALS, n_jobs=_cfg.N_JOBS)
 
     # --- Abschlussbericht ---
     best = study_obj.best_trial

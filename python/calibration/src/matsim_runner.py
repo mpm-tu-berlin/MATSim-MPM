@@ -3,9 +3,40 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from src.config import (
-    MATSIM_JAR, MATSIM_MEMORY, MATSIM_ITERATIONS,
+    MATSIM_JAR, MATSIM_ITERATIONS,
 )
 from src import config as _cfg  # Laufzeit-Zugriff, damit Monkey-Patch aus run_optimization greift
+
+
+# Mission -> (Subdir-Name unter scenarios/, Netz-Stem ohne Suffix).
+# Wird benutzt, um aus _cfg.ACTIVE_RESOLUTION_M den passenden Netzpfad
+# fuer das jeweilige Szenario zu konstruieren.
+_NETWORK_LOCATION: dict[str, tuple[str, str]] = {
+    "LongHaul":         ("VECTO_Longhaul",         "longhaul_network"),
+    "RegionalDelivery": ("VECTO_RegionalDelivery", "regional_delivery_network"),
+}
+
+
+def _resolution_overrides(scenario_name: str, config_path: Path,
+                          resolution_m: int) -> list[str]:
+    """Baut die --config-Overrides fuer Netz, Plans und qsim.timeStepSize.
+
+    Netzwerk liegt unter `scenarios/VECTO_<Mission>/<stem>_<N>m.xml.gz`,
+    Plans neben dem Szenario-Config als `plans_<N>m.xml`.
+    Bei N < 100 wird timeStepSize auf 0.04 gesetzt (sonst rundet die QSim
+    Linkdurchfahrtszeiten so stark, dass 100km-Trips in 24h nicht durchkommen).
+    """
+    if scenario_name not in _NETWORK_LOCATION:
+        return []
+    subdir, stem = _NETWORK_LOCATION[scenario_name]
+    network_path = _cfg.MATSIM_MPM_DIR / "scenarios" / subdir / f"{stem}_{resolution_m}m.xml.gz"
+    plans_path = config_path.parent / f"plans_{resolution_m}m.xml"
+    timestep = "0.04" if resolution_m < 100 else "1.0"
+    return [
+        "--config:network.inputNetworkFile", str(network_path),
+        "--config:plans.inputPlansFile",     str(plans_path),
+        "--config:qsim.timeStepSize",        timestep,
+    ]
 
 
 def write_calibration_params(params: dict[str, float], path: Path) -> None:
@@ -21,7 +52,8 @@ def write_calibration_params(params: dict[str, float], path: Path) -> None:
             f.write(f"{key}={value}\n")
 
 
-def run_matsim(run_id: str, config_path: Path, params_file: Path) -> Path:
+def run_matsim(run_id: str, config_path: Path, params_file: Path,
+               scenario_name: str | None = None) -> Path:
     """Startet einen einzelnen MATSim-Lauf.
 
     Wird typischerweise nicht direkt aufgerufen, sondern ueber run_all_scenarios.
@@ -30,6 +62,9 @@ def run_matsim(run_id: str, config_path: Path, params_file: Path) -> Path:
         run_id: Bezeichner fuer das Output-Verzeichnis (z.B. "trial_3_LongHaul").
         config_path: Pfad zur MATSim-Konfigurationsdatei des Szenarios.
         params_file: Trial-spezifische Kalibrierungsparameter-Datei.
+        scenario_name: Optionaler Szenario-Name (z.B. "LongHaul"); wenn gesetzt,
+            werden Netzwerk/Plans/timeStepSize entsprechend `_cfg.ACTIVE_RESOLUTION_M`
+            via CLI ueberschrieben.
 
     Returns:
         Pfad zum MATSim-Output-Verzeichnis.
@@ -39,13 +74,16 @@ def run_matsim(run_id: str, config_path: Path, params_file: Path) -> Path:
 
     cmd = [
         "java",
-        f"-Xmx{MATSIM_MEMORY}",
+        f"-Xmx{_cfg.MATSIM_MEMORY}",
         f"-Dcalibration.params.file={params_file}",
         "-jar", str(MATSIM_JAR),
         str(config_path),
         "--config:controler.outputDirectory", str(output_dir),
         f"--config:controler.lastIteration={MATSIM_ITERATIONS - 1}",
     ]
+    if scenario_name is not None:
+        cmd.extend(_resolution_overrides(scenario_name, config_path,
+                                         _cfg.ACTIVE_RESOLUTION_M))
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -88,7 +126,8 @@ def run_all_scenarios(params: dict[str, float],
 
     with ThreadPoolExecutor(max_workers=len(_cfg.SCENARIOS)) as executor:
         futures = {
-            executor.submit(run_matsim, f"{prefix}_{name}", scenario["config"], params_file): name
+            executor.submit(run_matsim, f"{prefix}_{name}", scenario["config"],
+                            params_file, scenario_name=name): name
             for name, scenario in _cfg.SCENARIOS.items()
         }
 
