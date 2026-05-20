@@ -58,7 +58,7 @@ public class RunMatsimTest {
 				  "--config:controler.outputDirectory", utils.getOutputDirectory(),
 				  "--config:controler.lastIteration", "1"
 			} ;
-			RunBetScenario.main( args ) ;
+			RunBetScenario.run( args ) ;
 			{
 				Population expected = PopulationUtils.createPopulation( ConfigUtils.createConfig() ) ;
 				PopulationUtils.readPopulation( expected, utils.getInputDirectory() + "/output_plans.xml.gz" );

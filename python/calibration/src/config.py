@@ -68,13 +68,20 @@ ACTIVE_RESOLUTION_M: int = 250
 def resource_profile_for(resolution_m: int) -> tuple[str, int]:
     """Liefert (MATSim-Heap, N_JOBS) passend zur Auflösung.
 
-    Unter 50 m wird die Linkzahl gross (1m: ~93k Links) und der RAM pro
-    Run steigt deutlich; deshalb groesserer Heap und weniger parallele Trials,
-    damit der Host nicht swappt.
+    N_JOBS = maximale Zahl gleichzeitiger MATSim-JVMs des gesamten Laufs.
+    run_optimization.py teilt dieses Budget pro Studie auf
+    (n_jobs_study = N_JOBS // n_scenarios), sodass total_jvms <= N_JOBS bleibt.
+
+    Auslegung fuer den Kalibrierungs-Host (64 Kerne / 96 GB RAM):
+    Ein 1m-Run belegt real ~3 GB (beobachtet), daher Heap 4G und 16 parallele
+    JVMs (~48 GB real, max. 64 GB committed -> sicher unter 96 GB). Nicht hoeher,
+    da Optunas TPE-Sampler bei zu vielen gleichzeitig "blind" gesampelten Trials
+    Richtung Zufallssuche degeneriert (Faustregel n_jobs <= ~8-10% von N_TRIALS).
+    Grobe Netze brauchen kaum Heap, daher gleiche Parallelitaet bei kleinem Heap.
     """
     if resolution_m < 50:
-        return "8G", 2
-    return "1G", 4
+        return "4G", 16
+    return "2G", 16
 
 
 # === MATSim ===

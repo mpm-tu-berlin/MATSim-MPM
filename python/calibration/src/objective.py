@@ -1,3 +1,6 @@
+import time
+from datetime import datetime
+
 import optuna
 
 from src.config import PARAM_BOUNDS
@@ -15,6 +18,11 @@ def objective(trial: optuna.Trial) -> float:
     for name, (low, high) in PARAM_BOUNDS.items():
         params[name] = trial.suggest_float(name, low, high)
 
+    # Start-Heartbeat: bei parallelen Trials sieht man so live, dass gerade
+    # gerechnet wird (sonst erscheint erst nach ~2 min die Ergebniszeile).
+    t0 = time.time()
+    print(f"[{datetime.now():%H:%M:%S}] Trial {trial.number:>4d} gestartet ...", flush=True)
+
     # MATSim fuer alle Szenarien ausfuehren
     run_id_prefix = f"trial_{trial.number}"
     scenario_outputs = run_all_scenarios(params, run_id_prefix=run_id_prefix)
@@ -27,6 +35,8 @@ def objective(trial: optuna.Trial) -> float:
         f"{k}={v:.2f}"
         for k, v in params.items()
     )
-    print(f"Trial {trial.number:>4d}: RMSE={rmse_pct:.2f}%  MAE={mae_pct:.2f}%  | {params_str}", flush=True)
+    dt = time.time() - t0
+    print(f"[{datetime.now():%H:%M:%S}] Trial {trial.number:>4d}: RMSE={rmse_pct:.2f}%  "
+          f"MAE={mae_pct:.2f}%  ({dt:.0f}s)  | {params_str}", flush=True)
 
     return rmse_pct

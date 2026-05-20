@@ -36,6 +36,18 @@ import org.matsim.mpm.routing.MpmEvNetworkRoutingProvider;
 public class RunBetScenario {
 
 	public static void main(String[] args) {
+		run(args);
+
+		// MATSim's parallele QSim-Engine-Threads (qsim.numberOfThreads > 1) sind
+		// Non-Daemon und werden beim Teardown nicht zuverlaessig beendet -> die JVM
+		// haengt nach controler.run() unbegrenzt (DestroyJavaVM wartet auf sie).
+		// Fuer den Batch-Betrieb (Optuna ruft hunderte JVMs auf) erzwingen wir die
+		// Beendigung. Alle Outputs sind zu diesem Zeitpunkt bereits geschrieben.
+		// (Nicht in run() selbst, damit der In-Process-Test danach Assertions macht.)
+		System.exit(0);
+	}
+
+	public static void run(String[] args) {
 
 		Config config;
 		if ( args==null || args.length==0 || args[0]==null ){
@@ -68,5 +80,5 @@ public class RunBetScenario {
 		
 		controler.run();
 	}
-	
+
 }

@@ -102,7 +102,9 @@ class _Tee:
 
 
 _log_path = RUN_BASE / "optimization.log"
-_log_file = open(_log_path, "w", encoding="utf-8")
+# buffering=1 -> zeilengepuffert: jede Zeile landet sofort auf der Platte,
+# auch wenn der Lauf spaeter haengt/abgebrochen wird (vorher: leeres Log).
+_log_file = open(_log_path, "w", encoding="utf-8", buffering=1)
 sys.stdout = _Tee(sys.__stdout__, _log_file)
 
 # === 3. Imports nach Tee-Setup (damit erste Prints ins Log gehen) ===
@@ -162,7 +164,25 @@ for study in STUDIES:
         direction="minimize",
         load_if_exists=False,
     )
-    study_obj.optimize(objective, n_trials=N_TRIALS, n_jobs=n_jobs_study)
+
+    _study_t0 = datetime.datetime.now()
+
+    def _progress(study, _trial, _name=study_name_str, _t0=_study_t0):
+        """Fortschrittsuebersicht nach jedem fertigen Trial (laeuft im Main-Thread)."""
+        done = sum(1 for t in study.trials
+                   if t.state == optuna.trial.TrialState.COMPLETE)
+        try:
+            best = study.best_value
+        except ValueError:
+            best = float("nan")
+        elapsed = (datetime.datetime.now() - _t0).total_seconds()
+        rate = done / elapsed * 60 if elapsed > 0 else 0.0
+        eta_min = (N_TRIALS - done) / rate if rate > 0 else float("nan")
+        print(f"  >>> [{_name}] {done}/{N_TRIALS} fertig | bester RMSE={best:.2f}% | "
+              f"{rate:.1f} Trials/min | ETA ~{eta_min:.0f} min", flush=True)
+
+    study_obj.optimize(objective, n_trials=N_TRIALS, n_jobs=n_jobs_study,
+                       callbacks=[_progress])
 
     # --- Abschlussbericht ---
     best = study_obj.best_trial
