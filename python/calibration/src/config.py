@@ -88,6 +88,14 @@ def resource_profile_for(resolution_m: int) -> tuple[str, int]:
 MATSIM_MEMORY, N_JOBS = resource_profile_for(ACTIVE_RESOLUTION_M)
 MATSIM_ITERATIONS = 1
 
+# Obergrenze paralleler Trials pro Studie. Die Studien laufen sequenziell, daher
+# wuerde sonst das ganze JVM-Budget in eine Studie fliessen (N_JOBS // n_scenarios
+# = 16 bei Einzel-Szenarien). Dann sampelt Optunas TPE-Sampler zu viele Trials
+# "blind" aus demselben Prior, bevor Feedback aus fertigen Trials eintrifft, und
+# degeneriert Richtung Zufallssuche. 8 haelt die Parallelitaet bei ~4 % von
+# N_TRIALS (Faustregel <= 8-10 %) -> deutlich gesuendere Konvergenz.
+MAX_PARALLEL_TRIALS_PER_STUDY = 8
+
 # Pfad zur Kalibrierungsparameter-Datei (wird pro Trial geschrieben)
 CALIBRATION_PARAMS_FILE = RESULTS_DIR / "calibration_params.properties"
 

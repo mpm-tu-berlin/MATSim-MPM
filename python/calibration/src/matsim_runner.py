@@ -1,4 +1,7 @@
+import os
 import subprocess
+import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -37,6 +40,24 @@ def _resolution_overrides(scenario_name: str, config_path: Path,
         "--config:plans.inputPlansFile",     str(plans_path),
         "--config:qsim.timeStepSize",        timestep,
     ]
+
+
+def _kill_process_tree(proc: subprocess.Popen) -> None:
+    """Beendet den Subprozess inklusive aller Kindprozesse.
+
+    Auf Windows ist das `java`, das wir via PATH starten, nur ein Stub, der die
+    eigentliche JVM als Kindprozess re-exect. proc.kill() wuerde nur den Stub
+    treffen und die JVM verwaisen lassen -> daher taskkill /T (ganzer Baum).
+    """
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        proc.kill()
+    try:
+        proc.wait(timeout=30)
+    except Exception:
+        pass
 
 
 def write_calibration_params(params: dict[str, float], path: Path) -> None:
@@ -80,25 +101,88 @@ def run_matsim(run_id: str, config_path: Path, params_file: Path,
         str(config_path),
         "--config:controler.outputDirectory", str(output_dir),
         f"--config:controler.lastIteration={MATSIM_ITERATIONS - 1}",
+        # Einzel-Fahrzeug-Szenario -> paralleles QSim bringt keinen Speedup, aber sein
+        # Thread-Pool (QNetsimEngine_PooledThread_*) wird bei Shutdown nicht immer
+        # sauber beendet. Diese Nicht-Daemon-Threads verhindern dann das JVM-Exit, die
+        # JVM haengt nach return von main() als Zombie, und subprocess.run() blockiert
+        # ewig. Mit 1 Thread gibt es keinen Pool -> JVM beendet zuverlaessig.
+        "--config:qsim.numberOfThreads", "1",
     ]
     if scenario_name is not None:
         cmd.extend(_resolution_overrides(scenario_name, config_path,
                                          _cfg.ACTIVE_RESOLUTION_M))
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    # MATSims QSim-/Events-Threadpools (QNetsimEngine_PooledThread_*) werden beim
+    # Shutdown nicht zuverlaessig beendet. Diese Nicht-Daemon-Threads halten die
+    # JVM nach return von main() am Leben -> der Prozess haengt als Zombie und ein
+    # blockierendes wait() wuerde ewig warten (beobachtet: >75 min). Daher NICHT
+    # auf das JVM-Exit verlassen, sondern auf den fachlichen Erfolgs-Marker:
+    # sobald output_events.xml.gz fertig geschrieben ist (Groesse stabil), ist
+    # alles da, was die Auswertung braucht (parse_events_consumption) -> JVM killen.
+    events_file = output_dir / "output_events.xml.gz"
+    POLL_S = 2.0
+    STABLE_S = 15.0       # output_events so lange unveraendert -> fertig geschrieben
+    BACKSTOP_S = 1200.0   # absolute Obergrenze (echter Haenger ganz ohne Output)
 
-    # Log-Output nach Prozessende in Datei schreiben (nicht vorher oeffnen,
-    # da MATSim's OutputDirectoryHierarchy das Verzeichnis beim Start loescht)
-    log_path = output_dir / "logfile.log"
-    log_path.write_text(result.stdout or "", encoding="utf-8")
+    # stdout/stderr in TEMP-Datei (nicht PIPE: ungeleerter Puffer wuerde den
+    # Subprozess blockieren; nicht in output_dir: MATSim loescht den Ordner beim Start).
+    log_fd, log_tmp = tempfile.mkstemp(prefix=f"{run_id}_", suffix=".log")
+    rc: int | None = None
+    killed_zombie = False
+    t0 = time.monotonic()
+    try:
+        with os.fdopen(log_fd, "w", encoding="utf-8", errors="replace") as logf:
+            proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT,
+                                    text=True)
+            last_size = -1
+            stable_since: float | None = None
+            while True:
+                rc = proc.poll()
+                if rc is not None:
+                    break  # JVM hat sich regulaer beendet (Normalfall)
 
-    if result.returncode != 0:
-        lines = (result.stderr or result.stdout or "").splitlines()
-        tail = "\n".join(lines[-50:])
-        raise RuntimeError(
-            f"MATSim-Lauf fehlgeschlagen [{run_id}] (exit code {result.returncode}):\n"
-            f"{tail}"
-        )
+                if events_file.exists():
+                    size = events_file.stat().st_size
+                    if size > 0 and size == last_size:
+                        if stable_since is None:
+                            stable_since = time.monotonic()
+                        elif time.monotonic() - stable_since >= STABLE_S:
+                            _kill_process_tree(proc)  # MATSim fertig, nur Zombie uebrig
+                            rc = 0
+                            killed_zombie = True
+                            break
+                    else:
+                        last_size = size
+                        stable_since = None
+
+                if time.monotonic() - t0 > BACKSTOP_S:
+                    _kill_process_tree(proc)
+                    rc = proc.returncode if proc.returncode not in (None, 0) else -1
+                    break
+
+                time.sleep(POLL_S)
+
+        # Log in output_dir uebernehmen (existiert jetzt; MATSim hat es angelegt)
+        try:
+            (output_dir / "logfile.log").write_text(
+                Path(log_tmp).read_text(encoding="utf-8", errors="replace"),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+        # Erfolg = Events-Datei vorhanden (egal ob regulaeres Exit oder Zombie-Kill).
+        if not events_file.exists() or rc != 0:
+            tail = "\n".join(
+                Path(log_tmp).read_text(encoding="utf-8", errors="replace")
+                .splitlines()[-50:]
+            )
+            raise RuntimeError(
+                f"MATSim-Lauf fehlgeschlagen [{run_id}] "
+                f"(exit code {rc}, zombie_kill={killed_zombie}):\n{tail}"
+            )
+    finally:
+        Path(log_tmp).unlink(missing_ok=True)
 
     return output_dir
 

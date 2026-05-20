@@ -150,7 +150,8 @@ for study in STUDIES:
     # n_scenarios <= ursprueglich gewuenschtes N_JOBS bleibt. Verhindert OOM
     # speziell in der "all"-Study bei 1m (sonst 4 x 8 GB = 32 GB).
     _n_scenarios = len(_cfg.SCENARIOS)
-    n_jobs_study = max(1, _cfg.N_JOBS // _n_scenarios)
+    n_jobs_study = min(_cfg.MAX_PARALLEL_TRIALS_PER_STUDY,
+                       max(1, _cfg.N_JOBS // _n_scenarios))
 
     storage = f"sqlite:///{class_dir / 'optuna_study.db'}"
     optuna_study_name = f"matsim-vecto-{ACTIVE_VEHICLE_GROUP}-{study_name_str}"
