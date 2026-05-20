@@ -29,6 +29,7 @@ Jeder Lauf legt einen neuen Ordner an:
 
 import argparse
 import datetime
+import shutil
 import sys
 
 import optuna
@@ -197,6 +198,26 @@ for study in STUDIES:
     print()
     print(format_final_report(best_outputs, best.number, best.params))
     print(f"Bester RMSE ({study_name_str}): {best.value:.2f}%")
+
+    # --- Speicheroptimierung: nur die MATSim-Outputs des besten Trials behalten ---
+    # Pro Study fallen sonst N_TRIALS x ~40 MB (resistance_debug.csv etc.) an.
+    # Der Abschlussbericht oben hat best_outputs bereits gelesen, daher koennen wir
+    # jetzt alle uebrigen Trial-Verzeichnisse und Parameterdateien loeschen.
+    runs_dir = class_dir / "matsim_runs"
+    keep = {f"trial_{best.number}_{name}" for name in _cfg.SCENARIOS}
+    keep.add(f"trial_{best.number}_params.properties")
+    removed = 0
+    if runs_dir.is_dir():
+        for entry in runs_dir.iterdir():
+            if entry.name in keep or not entry.name.startswith("trial_"):
+                continue
+            if entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
+            removed += 1
+    print(f"Speicheroptimierung: {removed} Trial-Outputs geloescht, "
+          f"nur bestes Trial #{best.number} behalten.")
 
     # --- Optuna-Visualisierungen ---
     print(f"\nErstelle Optuna-Grafiken ...")
