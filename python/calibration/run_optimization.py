@@ -182,8 +182,11 @@ for study in STUDIES:
         print(f"  >>> [{_name}] {done}/{N_TRIALS} fertig | bester RMSE={best:.2f}% | "
               f"{rate:.1f} Trials/min | ETA ~{eta_min:.0f} min", flush=True)
 
+    # catch: ein einzelner fehlgeschlagener Trial (z.B. MATSim-Crash bei
+    # ungluecklichen Parametern, transienter IO-Fehler) wird als FAILED markiert
+    # und uebersprungen, statt den ganzen mehrstuendigen Lauf abzubrechen.
     study_obj.optimize(objective, n_trials=N_TRIALS, n_jobs=n_jobs_study,
-                       callbacks=[_progress])
+                       callbacks=[_progress], catch=(Exception,))
 
     # --- Abschlussbericht ---
     best = study_obj.best_trial

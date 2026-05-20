@@ -60,6 +60,22 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
         pass
 
 
+def _best_effort_unlink(path: Path, attempts: int = 6, delay: float = 0.5) -> None:
+    """Loescht eine Datei mit Wiederholungen.
+
+    Auf Windows gibt ein gerade gekillter Prozess sein stdout-Handle auf die
+    Temp-Logdatei nicht sofort frei (WinError 32). Ein paar kurze Retries
+    reichen; klappt es danach nicht, bleibt die Temp-Datei liegen (harmlos,
+    %TEMP% wird vom OS aufgeraeumt) statt den Trial faelschlich scheitern zu lassen.
+    """
+    for _ in range(attempts):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except OSError:
+            time.sleep(delay)
+
+
 def write_calibration_params(params: dict[str, float], path: Path) -> None:
     """Schreibt die Kalibrierungsparameter als .properties-Datei.
 
@@ -182,7 +198,7 @@ def run_matsim(run_id: str, config_path: Path, params_file: Path,
                 f"(exit code {rc}, zombie_kill={killed_zombie}):\n{tail}"
             )
     finally:
-        Path(log_tmp).unlink(missing_ok=True)
+        _best_effort_unlink(Path(log_tmp))
 
     return output_dir
 
