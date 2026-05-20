@@ -19,7 +19,12 @@ public final class CalibrationParams {
     private static final double DEF_INERTIA_C = 1.05;
     private static final double DEF_RECUP_EFF = 0.6;
     private static final double DEF_MAX_RECUP_POWER_FRACTION = 0.9;
-    private static final double DEF_AUX_POWER_W = 4_500.0;
+    private static final double DEF_AUX_POWER_W = 4_000.0;
+    // cdXA/rollingC: Sentinel NaN = "nicht kalibriert" -> Verbraucher fallen auf den
+    // fahrzeugspezifischen Wert aus vehicles.xml zurueck. Erst wenn Optuna sie in die
+    // Params-Datei schreibt, ueberschreiben sie den Fahrzeugwert (gruppenweit).
+    private static final double DEF_CDXA = Double.NaN;
+    private static final double DEF_ROLLING_C = Double.NaN;
 
     /** Gesamteffizienz Batterie → Rad (Umrichter + Motor + Getriebe) bei Traktion [-]. */
     public final double tractionEfficiency;
@@ -30,15 +35,21 @@ public final class CalibrationParams {
     public final double maxRecupPowerFraction;
     /** Konstante Nebenverbrauchsleistung [W] (gilt fuer alle Fahrzeuge der Gruppe). */
     public final double auxPowerW;
+    /** Luftwiderstand CdxA [m²]; NaN = nicht kalibriert (Wert aus vehicles.xml verwenden). */
+    public final double cdXA;
+    /** Rollwiderstandsbeiwert [-]; NaN = nicht kalibriert (Wert aus vehicles.xml verwenden). */
+    public final double rollingC;
 
     public CalibrationParams(double tractionEfficiency, double inertiaC,
                              double recupEfficiency, double maxRecupPowerFraction,
-                             double auxPowerW) {
+                             double auxPowerW, double cdXA, double rollingC) {
         this.tractionEfficiency = tractionEfficiency;
         this.inertiaC = inertiaC;
         this.recupEfficiency = recupEfficiency;
         this.maxRecupPowerFraction = maxRecupPowerFraction;
         this.auxPowerW = auxPowerW;
+        this.cdXA = cdXA;
+        this.rollingC = rollingC;
     }
 
     /**
@@ -72,7 +83,8 @@ public final class CalibrationParams {
 
     public static CalibrationParams defaults() {
         return new CalibrationParams(DEF_TRACTION_EFF, DEF_INERTIA_C,
-                DEF_RECUP_EFF, DEF_MAX_RECUP_POWER_FRACTION, DEF_AUX_POWER_W);
+                DEF_RECUP_EFF, DEF_MAX_RECUP_POWER_FRACTION, DEF_AUX_POWER_W,
+                DEF_CDXA, DEF_ROLLING_C);
     }
 
     private static CalibrationParams fromProperties(Properties props) {
@@ -81,7 +93,9 @@ public final class CalibrationParams {
                 parseOr(props, "inertiaC", DEF_INERTIA_C),
                 parseOr(props, "recupEfficiency", DEF_RECUP_EFF),
                 parseOr(props, "maxRecupPowerFraction", DEF_MAX_RECUP_POWER_FRACTION),
-                parseOr(props, "auxPowerW", DEF_AUX_POWER_W)
+                parseOr(props, "auxPowerW", DEF_AUX_POWER_W),
+                parseOr(props, "cdXA", DEF_CDXA),
+                parseOr(props, "rollingC", DEF_ROLLING_C)
         );
     }
 
@@ -94,7 +108,7 @@ public final class CalibrationParams {
     @Override
     public String toString() {
         return String.format(
-                "CalibrationParams{tractionEff=%.4f, inertiaC=%.4f, recupEff=%.4f, maxRecupPowerFraction=%.3f, auxPowerW=%.0f}",
-                tractionEfficiency, inertiaC, recupEfficiency, maxRecupPowerFraction, auxPowerW);
+                "CalibrationParams{tractionEff=%.4f, inertiaC=%.4f, recupEff=%.4f, maxRecupPowerFraction=%.3f, auxPowerW=%.0f, cdXA=%.4f, rollingC=%.5f}",
+                tractionEfficiency, inertiaC, recupEfficiency, maxRecupPowerFraction, auxPowerW, cdXA, rollingC);
     }
 }

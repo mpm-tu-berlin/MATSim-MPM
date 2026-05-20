@@ -58,8 +58,11 @@ public final class PowerLimitedLinkSpeedCalculator implements LinkSpeedCalculato
         Attributes attrs = vehicle.getVehicle().getType().getEngineInformation().getAttributes();
         double mass           = attrOrDefault(attrs, "mass",           12_000.0);
         double payload        = attrOrDefault(attrs, "payload",             0.0);
-        double cdXA           = attrOrDefault(attrs, "cdXA",                5.5);
-        double rollingC       = attrOrDefault(attrs, "rollingC",        0.01);
+        // cdXA/rollingC: kalibrierter Wert hat Vorrang, sonst Fahrzeugwert aus vehicles.xml.
+        double cdXA           = Double.isFinite(calib.cdXA)
+                ? calib.cdXA : attrOrDefault(attrs, "cdXA", 5.5);
+        double rollingC       = Double.isFinite(calib.rollingC)
+                ? calib.rollingC : attrOrDefault(attrs, "rollingC", 0.01);
         double maxMotorPowerW = attrOrDefault(attrs, "maxMotorPowerW", 400_000.0);
 
         double mSum     = mass + payload;

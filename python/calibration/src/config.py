@@ -113,13 +113,18 @@ STUDIES = [
 ACTIVE_PAYLOAD_CLASS: str = "all"
 
 # === Kalibrierungsparameter-Bereiche
-# Wertebereiche (low, high) fuer die 5 Optuna-Parameter.
+# Wertebereiche (low, high) fuer die 6 Optuna-Parameter.
 # a1/a2 entfallen: kinetische Energie wird jetzt exakt pro Link berechnet.
 # RatedPower entfaellt: wird fahrzeugspezifisch in der MATSim-Vehicles-Datei definiert.
+# auxPowerW entfaellt: fix bei 4000 W (Java-Default DEF_AUX_POWER_W), da nur sehr
+# geringe Auswirkung auf den Gesamtverbrauch.
+# cdXA/rollingC ueberschreiben zur Laufzeit die Werte aus vehicles.xml (Override in
+# MpmDischargingModule + PowerLimitedLinkSpeedCalculator, sobald in der Params-Datei gesetzt).
 PARAM_BOUNDS = {
-    "tractionEfficiency":     (0.75,   0.95),    # Gesamteffizienz Batterie→Rad bei Traktion [-]
-    "inertiaC":               (1.01,   1.05),    # Traegheitsbeiwert [-] (rotierende Massen: Raeder, Antrieb)
-    "recupEfficiency":        (0.45,   0.85),    # Rekuperations-Wirkungsgrad [-]
-    "auxPowerW":              (2_000,  8_000.0), # Konstante Nebenverbrauchsleistung [W]
-    "maxRecupPowerFraction":  (0.5,    1.0),     # Anteil maxMotorPowerW, der fuer Rekuperation nutzbar ist [-]
+    "tractionEfficiency":     (0.75,   0.95),     # Gesamteffizienz Batterie→Rad bei Traktion [-]
+    "inertiaC":               (1.01,   1.05),     # Traegheitsbeiwert [-] (rotierende Massen: Raeder, Antrieb)
+    "recupEfficiency":        (0.45,   0.85),     # Rekuperations-Wirkungsgrad [-]
+    "maxRecupPowerFraction":  (0.5,    1.0),      # Anteil maxMotorPowerW, der fuer Rekuperation nutzbar ist [-]
+    "cdXA":                   (5.65,      5.93),       # Luftwiderstand CdxA [m²] – Grenzen EU-Klasse A15
+    "rollingC":               (0.0045225, 0.0055275),  # Rollwiderstand [-] – Mittel(RRC48,RRC53)=0.005025 ±10%
 }

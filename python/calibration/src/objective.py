@@ -32,6 +32,7 @@ def objective(trial: optuna.Trial) -> float:
     params_str = "  ".join(
         f"{k}={v:.3f}" if k == "inertiaC" else
         f"{k}={v:.0f}" if k == "auxPowerW" else
+        f"{k}={v:.5f}" if k == "rollingC" else
         f"{k}={v:.2f}"
         for k, v in params.items()
     )

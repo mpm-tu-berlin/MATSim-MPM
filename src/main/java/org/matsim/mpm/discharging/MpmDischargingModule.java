@@ -59,8 +59,11 @@ public final class MpmDischargingModule extends AbstractModule {
 
             double mass = attrOrDefault(attrs, "mass", 12_000.0);
             double payload = attrOrDefault(attrs, "payload", 0.0);
-            double cdXA = attrOrDefault(attrs, "cdXA", 5.5);  // Cd*A [m^2] aus VECTO
-            double rollingC = attrOrDefault(attrs, "rollingC", 0.01);
+            // cdXA/rollingC: kalibrierter Wert hat Vorrang, sonst Fahrzeugwert aus vehicles.xml.
+            double cdXA = Double.isFinite(calib.cdXA)
+                    ? calib.cdXA : attrOrDefault(attrs, "cdXA", 5.5);  // Cd*A [m^2]
+            double rollingC = Double.isFinite(calib.rollingC)
+                    ? calib.rollingC : attrOrDefault(attrs, "rollingC", 0.01);
             double maxMotorPowerW = attrOrDefault(attrs, "maxMotorPowerW", 400_000.0);
 
             // CdxA (m^2) -> aerodynamischer Kraftbeiwert: F_aero = fa * v^2
