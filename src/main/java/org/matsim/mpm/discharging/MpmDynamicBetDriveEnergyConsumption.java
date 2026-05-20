@@ -130,11 +130,10 @@ public final class MpmDynamicBetDriveEnergyConsumption implements DriveEnergyCon
         double vExit;
         if (vTarget >= v0) {
             // Beschleunigung: v_exit durch verfuegbare Motorleistung begrenzt.
-            // Leistungsanteil fuer Kinetik = Maximalleistung minus Widerstandsleistung bei v0.
-            // Zeitschaetzung: L/v0 (konservativ, da Fahrzeug schneller wird).
+            // Leistungsanteil fuer Kinetik = Maximalleistung minus Widerstandsleistung.
             // Widerstand bei mittlerer Beschleunigungsgeschwindigkeit auswerten:
-            // waehrend der Beschleunigung steigt der Widerstand (Aero ~ v^3); Bewertung bei v0
-            // ueberschaetzt das Kinetikbudget und damit vExit.
+            // waehrend der Beschleunigung steigt der Widerstand (Aero ~ v^3); Bewertung bei
+            // vRef ueberschaetzt den Widerstand leicht und damit konservativ vExit.
             double vRef = 0.5 * (v0 + Math.min(vTarget, vehicleMaxSpeedMs));
             double pResistRef = ft * mSum * G * vRef
                               + fa * vRef * vRef * vRef
@@ -142,8 +141,13 @@ public final class MpmDynamicBetDriveEnergyConsumption implements DriveEnergyCon
             double pKinBudget = maxMotorPowerW * tractionEfficiency - pResistRef;
 
             if (pKinBudget > 0.0) {
-                double dKEmax = pKinBudget * (L / v0);
-                vExit = Math.min(vTarget, Math.sqrt(v0 * v0 + 2.0 * dKEmax / mInertia));
+                // Konstante-Leistungs-Beschleunigung ueber die Strecke korrekt integriert:
+                //   m*v² dv = P_kin ds  =>  vExit³ = v0³ + 3*P_kin*L/m
+                // Die fruehere Zeitschaetzung t≈L/v0 ueberschaetzte das Budget bei kleinem v0
+                // massiv (1 m bei 1 m/s = 1 s Vollgas) -> unphysikalischer Sprung aus dem
+                // Stillstand auf ~20-30 km/h in einem einzigen 1m-Link.
+                double vExitCubed = v0 * v0 * v0 + 3.0 * pKinBudget * L / mInertia;
+                vExit = Math.min(vTarget, Math.cbrt(vExitCubed));
             } else {
                 // Motor ueberwindet kaum die Widerstaende -> keine Beschleunigung moeglich
                 vExit = v0;

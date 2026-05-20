@@ -11,7 +11,7 @@
 		<capacity seats="0" standingRoomInPersons="0"/>
 		<length meter="16.5"/>
 		<width meter="2.55"/>
-		<maximumVelocity meterPerSecond="23.056"/>
+		<maximumVelocity meterPerSecond="23.6111"/>
 		<engineInformation>
 			<attributes>
 				<attribute name="HbefaTechnology" class="java.lang.String">electricity</attribute>
@@ -33,7 +33,7 @@
 		<capacity seats="0" standingRoomInPersons="0"/>
 		<length meter="16.5"/>
 		<width meter="2.55"/>
-		<maximumVelocity meterPerSecond="23.056"/>
+		<maximumVelocity meterPerSecond="23.6111"/>
 		<engineInformation>
 			<attributes>
 				<attribute name="HbefaTechnology" class="java.lang.String">electricity</attribute>
@@ -55,7 +55,7 @@
 		<capacity seats="0" standingRoomInPersons="0"/>
 		<length meter="16.5"/>
 		<width meter="2.55"/>
-		<maximumVelocity meterPerSecond="23.056"/>
+		<maximumVelocity meterPerSecond="23.6111"/>
 		<engineInformation>
 			<attributes>
 				<attribute name="HbefaTechnology" class="java.lang.String">electricity</attribute>
@@ -77,7 +77,7 @@
 		<capacity seats="0" standingRoomInPersons="0"/>
 		<length meter="16.5"/>
 		<width meter="2.55"/>
-		<maximumVelocity meterPerSecond="23.056"/>
+		<maximumVelocity meterPerSecond="23.6111"/>
 		<engineInformation>
 			<attributes>
 				<attribute name="HbefaTechnology" class="java.lang.String">electricity</attribute>
