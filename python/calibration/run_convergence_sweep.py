@@ -30,7 +30,7 @@ import src.config as _cfg
 from src.matsim_runner import run_matsim, write_calibration_params
 from src.error_computation import parse_events_consumption, load_reference
 
-DEFAULT_RESOLUTIONS = [1, 5, 10, 25, 50, 100, 200, 500]
+DEFAULT_RESOLUTIONS = [1, 5, 10, 25, 50, 100, 200, 250, 300, 400, 500, 750]
 
 # Szenario -> (Mission, Payload-Klasse). Die Studie heisst genauso wie das Szenario.
 SCENARIOS = {

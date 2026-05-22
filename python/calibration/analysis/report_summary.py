@@ -255,6 +255,23 @@ def main():
     elev_rd = elevation_stats(df_rd)
     cons_tbl = consistency_table(run)
 
+    # --- Diskretisierungs-Konvergenz (neuester Sweep, falls vorhanden) ---
+    disc_tbl_html = ""
+    conv_dir = _CALIB_ROOT / "results" / "convergence"
+    conv_csvs = (sorted(conv_dir.glob("*/error_breakdown.csv"), key=lambda p: p.stat().st_mtime)
+                 if conv_dir.exists() else [])
+    if conv_csvs:
+        bd_conv = pd.read_csv(conv_csvs[-1])
+        if "rrc" in bd_conv.columns:
+            avail = set(bd_conv["resolution_m"])
+            keyres = [r for r in [100, 250, 400, 500, 750] if r in avail]
+            sub = bd_conv[bd_conv["resolution_m"].isin(keyres)].copy()
+            sub["Fahrzeug"] = sub["scenario"] + " " + sub["rrc"]
+            piv = sub.pivot_table(index="Fahrzeug", columns="resolution_m", values="diff_pct")
+            piv = piv[keyres]
+            piv.columns = [f"{c} m" for c in piv.columns]
+            disc_tbl_html = df_to_html(piv, "{:+.2f}")
+
     # --- Speed-Kennwerte fuer alle vier Profile (rrc48 stellv.) ---
     v_lh = pd.read_csv(VECTO_LH); v_lh.columns = ["s_m", "v_kmh", "grad", "stop", "hw"]
     v_rd = pd.read_csv(VECTO_RD); v_rd.columns = ["s_m", "v_kmh", "grad", "stop", "hw"]
@@ -368,6 +385,24 @@ schon von Roll+Aero aufgezehrt. Echtes Bremsen (Mech-Brems) ist deutlich kleiner
 Antriebseffizienz. <b>&eta;_recup / maxRecupFrac</b> haben die gr&ouml;&szlig;te Streuung bei kleinster Wirkung &rarr;
 praktisch <b>unidentifiziert</b> (mit Vorsicht zu interpretieren). <b>cdXA</b> ist der einzige robust bestimmte
 Widerstand (konsistent nahe der oberen A15-Grenze).</div>
+
+<h2>7. Diskretisierungs-Konvergenz &amp; Limitation</h2>
+<p>Abweichung gegen VECTO [%] an Schl&uuml;ssel-Auflösungen (Einzelszenarien, je eigener
+Parametersatz, joint ausgeschlossen). Voller Verlauf 1&ndash;750&nbsp;m im Sweep-Plot
+(results/convergence/&hellip;/convergence.html).</p>
+{disc_tbl_html}
+<div class="note"><b>Limitation &ndash; reale Netze sind unterhalb ~300&ndash;400&nbsp;m rauschdominiert.</b>
+Die 1-m-VECTO-Referenz ist idealisiert; auf realen Netzen ist feiner als ~400&nbsp;m keine echte
+Mehrinformation, sondern &uuml;bertr&auml;gt nur H&ouml;hen-/Geometrierauschen ins Modell. 400&nbsp;m ist
+damit die feinste <i>sinnvoll</i> aufl&ouml;sbare Skala.</div>
+<div class="key"><b>Long Haul</b> bei 400&nbsp;m: ~1,6&ndash;3&nbsp;% Diskretisierungsfehler (&Delta; vs 1&nbsp;m)
+&rarr; praktisch verlustfrei. <b>Regional Delivery</b> bei 400&nbsp;m: ~6&nbsp;%. RD br&auml;uchte f&uuml;r
+&lt;1&nbsp;% eigentlich &le;25&ndash;50&nbsp;m &ndash; mit realen (rauschbehafteten) Netzen nicht erreichbar,
+daher sind die ~6&nbsp;% eine <b>prinzipielle Untergrenze</b> der Methode (hohe v-Varianz im
+Stop-and-Go), keine behebbare Schw&auml;che.</div>
+<div class="note">rrc53 liegt durchg&auml;ngig ~1,1&nbsp;pp unter rrc48 &ndash; Kalibrierungs-Offset des
+globalen rollingC (gleiche MATSim-Verbr&auml;uche, h&ouml;here VECTO-Referenz), <b>nicht</b>
+Diskretisierung. Der diskretisierungsbedingte Anteil (&Delta; vs 1&nbsp;m) ist f&uuml;r beide RRC nahezu gleich.</div>
 
 <p style="margin-top:40px;color:#888;font-size:12px">Erzeugt mit analysis/report_summary.py</p>
 </body></html>"""

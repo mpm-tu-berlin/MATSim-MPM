@@ -40,13 +40,15 @@ G = 9.81
 RHO = 1.225
 J2KWH = 1.0 / 3.6e6
 
-# Szenario -> (Mission, VDRI, vehicles.xml-Typ-ID rrc48, Payload-Klasse)
+# Szenario -> (Mission, VDRI, Tag LH/RD, Payload-Klasse)
 SCEN = {
-    "lh_low":  ("LongHaul",         "LongHaul.vdri",         "BET_G5_RRC48_LH_low",  "low"),
-    "lh_high": ("LongHaul",         "LongHaul.vdri",         "BET_G5_RRC48_LH_high", "high"),
-    "rd_low":  ("RegionalDelivery", "RegionalDelivery.vdri", "BET_G5_RRC48_RD_low",  "low"),
-    "rd_high": ("RegionalDelivery", "RegionalDelivery.vdri", "BET_G5_RRC48_RD_high", "high"),
+    "lh_low":  ("LongHaul",         "LongHaul.vdri",         "LH", "low"),
+    "lh_high": ("LongHaul",         "LongHaul.vdri",         "LH", "high"),
+    "rd_low":  ("RegionalDelivery", "RegionalDelivery.vdri", "RD", "low"),
+    "rd_high": ("RegionalDelivery", "RegionalDelivery.vdri", "RD", "high"),
 }
+RRC_VARIANTS = ["rrc48", "rrc53"]
+PAPER_RESOLUTION_M = 400  # Ziel-Linklänge fuer das Paper (Markierung im Plot)
 VEHICLES_XML = {
     "LongHaul":         MATSIM_MPM_DIR / "scenarios" / "VECTO_Longhaul_BET_G5" / "vehicles.xml",
     "RegionalDelivery": MATSIM_MPM_DIR / "scenarios" / "VECTO_RegionalDelivery_BET_G5" / "vehicles.xml",
@@ -122,23 +124,25 @@ def main() -> None:
     resolutions = sorted(cons["resolution_m"].unique())
 
     rows = []
-    for scen, (mission, vdri_name, type_id, payload) in SCEN.items():
+    for scen, (mission, vdri_name, tag, payload) in SCEN.items():
         s_m, v_kmh, grad_pct = read_vdri(DATA_DIR / vdri_name)
         params = read_params(run / "params" / f"{scen}.properties")
-        cdXA = params["cdXA"]
-        fa = 0.5 * RHO * cdXA
-        mass, pay = vehicle_mass_payload(VEHICLES_XML[mission], type_id)
-        mg = (mass + pay) * G
-        for res in resolutions:
-            aero, grade, srmse = component_errors(s_m, v_kmh, grad_pct, res, fa, mg)
-            sub = cons[(cons["scenario"] == scen) & (cons["resolution_m"] == res)
-                       & cons["vehicle_id"].str.contains("rrc48")]
-            diff_pct = float(sub["diff_pct"].iloc[0]) if len(sub) else float("nan")
-            ekm = float(sub["ee_kwh_per_km"].iloc[0]) if len(sub) else float("nan")
-            rows.append(dict(scenario=scen, mission=mission, resolution_m=res,
-                             aero_err_kwh=round(aero, 4), grade_err_kwh=round(grade, 4),
-                             speed_rmse_ms=round(srmse, 4),
-                             matsim_kwh_per_km=ekm, diff_pct=diff_pct))
+        fa = 0.5 * RHO * params["cdXA"]
+        for rrc in RRC_VARIANTS:
+            type_id = f"BET_G5_{rrc.upper()}_{tag}_{payload}"
+            vehicle_id = f"truck_g5_{rrc}_{tag.lower()}_{payload}"
+            mass, pay = vehicle_mass_payload(VEHICLES_XML[mission], type_id)
+            mg = (mass + pay) * G
+            for res in resolutions:
+                aero, grade, srmse = component_errors(s_m, v_kmh, grad_pct, res, fa, mg)
+                sub = cons[(cons["scenario"] == scen) & (cons["resolution_m"] == res)
+                           & (cons["vehicle_id"] == vehicle_id)]
+                diff_pct = float(sub["diff_pct"].iloc[0]) if len(sub) else float("nan")
+                ekm = float(sub["ee_kwh_per_km"].iloc[0]) if len(sub) else float("nan")
+                rows.append(dict(scenario=scen, rrc=rrc, mission=mission, resolution_m=res,
+                                 aero_err_kwh=round(aero, 4), grade_err_kwh=round(grade, 4),
+                                 speed_rmse_ms=round(srmse, 4),
+                                 matsim_kwh_per_km=ekm, diff_pct=diff_pct))
 
     bd = pd.DataFrame(rows)
     csv_path = run / "error_breakdown.csv"
@@ -151,15 +155,24 @@ def main() -> None:
                                         "Analytischer Aero-v³-Diskretisierungsfehler [kWh]"])
     colors = {"lh_low": "#1f77b4", "lh_high": "#17386b",
               "rd_low": "#ff7f0e", "rd_high": "#a85405"}
+    dash = {"rrc48": "solid", "rrc53": "dot"}
     for scen in SCEN:
-        d = bd[bd["scenario"] == scen].sort_values("resolution_m")
-        fig.add_trace(go.Scatter(x=d["resolution_m"], y=d["diff_pct"], name=scen,
+        for rrc in RRC_VARIANTS:
+            d = bd[(bd["scenario"] == scen) & (bd["rrc"] == rrc)].sort_values("resolution_m")
+            fig.add_trace(go.Scatter(x=d["resolution_m"], y=d["diff_pct"],
+                                     name=f"{scen} {rrc}", mode="lines+markers",
+                                     line=dict(color=colors[scen], dash=dash[rrc])),
+                          row=1, col=1)
+        # Aero-Fehler ist rrc-unabhaengig (gleiches cdXA, ~gleiche Masse) -> rrc48 stellv.
+        d48 = bd[(bd["scenario"] == scen) & (bd["rrc"] == "rrc48")].sort_values("resolution_m")
+        fig.add_trace(go.Scatter(x=d48["resolution_m"], y=d48["aero_err_kwh"], name=scen,
                                  mode="lines+markers", line=dict(color=colors[scen]),
-                                 legendgroup=scen), row=1, col=1)
-        fig.add_trace(go.Scatter(x=d["resolution_m"], y=d["aero_err_kwh"], name=scen,
-                                 mode="lines+markers", line=dict(color=colors[scen]),
-                                 legendgroup=scen, showlegend=False), row=2, col=1)
+                                 showlegend=False), row=2, col=1)
     fig.add_hline(y=0, line_dash="dash", line_color="gray", row=1, col=1)
+    fig.add_vline(x=PAPER_RESOLUTION_M, line_dash="dot", line_color="red",
+                  annotation_text=f"{PAPER_RESOLUTION_M} m (Paper)", annotation_position="top",
+                  row=1, col=1)
+    fig.add_vline(x=PAPER_RESOLUTION_M, line_dash="dot", line_color="red", row=2, col=1)
     fig.update_xaxes(type="log", title_text="Linklänge [m] (log)", row=2, col=1)
     fig.update_yaxes(title_text="Diff [%]", row=1, col=1)
     fig.update_yaxes(title_text="Aero-Fehler [kWh]", row=2, col=1)
