@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+
+<!-- Testlauf: BET G5, 2 RRC-Varianten x 2 Payload-Stufen, Regional-Delivery-Strecke (Node 0 -> 343, ~100 km) -->
+<population>
+
+	<person id="driver_g5_rrc48_rd_low">
+		<attributes>
+			<attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"truck_g5_rrc48_rd_low"}</attribute>
+		</attributes>
+		<plan selected="yes">
+			<activity type="start" link="0" x="0.0" y="0.0" end_time="06:00:00"/>
+			<leg mode="car"/>
+			<activity type="end" link="3594" x="100000.0" y="0.0"/>
+		</plan>
+	</person>
+
+	<person id="driver_g5_rrc53_rd_low">
+		<attributes>
+			<attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"truck_g5_rrc53_rd_low"}</attribute>
+		</attributes>
+		<plan selected="yes">
+			<activity type="start" link="0" x="0.0" y="0.0" end_time="06:01:00"/>
+			<leg mode="car"/>
+			<activity type="end" link="3594" x="100000.0" y="0.0"/>
+		</plan>
+	</person>
+
+	<person id="driver_g5_rrc48_rd_high">
+		<attributes>
+			<attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"truck_g5_rrc48_rd_high"}</attribute>
+		</attributes>
+		<plan selected="yes">
+			<activity type="start" link="0" x="0.0" y="0.0" end_time="06:02:00"/>
+			<leg mode="car"/>
+			<activity type="end" link="3594" x="100000.0" y="0.0"/>
+		</plan>
+	</person>
+
+	<person id="driver_g5_rrc53_rd_high">
+		<attributes>
+			<attribute name="vehicles" class="org.matsim.vehicles.PersonVehicles">{"car":"truck_g5_rrc53_rd_high"}</attribute>
+		</attributes>
+		<plan selected="yes">
+			<activity type="start" link="0" x="0.0" y="0.0" end_time="06:03:00"/>
+			<leg mode="car"/>
+			<activity type="end" link="3594" x="100000.0" y="0.0"/>
+		</plan>
+	</person>
+
+</population>
