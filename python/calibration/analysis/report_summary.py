@@ -398,6 +398,14 @@ Widerstand (konsistent nahe der oberen A15-Grenze).</div>
 Parametersatz, joint ausgeschlossen). Voller Verlauf 1&ndash;750&nbsp;m im Sweep-Plot
 (results/convergence/&hellip;/convergence.html).</p>
 {disc_tbl_html}
+<div class="note">Die beiden unteren Panels zerlegen den Fehler analytisch, jeweils in <b>% des
+Gesamtverbrauchs</b>: Der <b>Aero-v³-Fehler</b> entsteht durch die Jensen-Ungleichung
+(<i>(mittl.&nbsp;v)³ &lt; mittl.&nbsp;v³</i>) beim Kollabieren des Profils auf den Link-Freispeed. Der
+<b>Grade-Fehler</b> ist die Netto-Verbrauchs&auml;nderung durch das <b>gegl&auml;ttete H&ouml;henprofil</b>:
+die Steigungsenergie <i>m&middot;g&middot;&Delta;z</i> selbst ist diskretisierungsinvariant, aber bergauf
+(&divide;&eta;_traction) und bergab (&times;&eta;_recup, gecappt, Rest gebremst) sind asymmetrisch &ndash;
+gegl&auml;ttetes Gel&auml;nde verliert die welligen Anstiege/Gef&auml;lle und <b>untersch&auml;tzt</b> daher
+den Verbrauch.</div>
 {conv_fig_html}
 <div class="note"><b>Limitation &ndash; reale Netze sind unterhalb ~300&ndash;400&nbsp;m rauschdominiert.</b>
 Die 1-m-VECTO-Referenz ist idealisiert; auf realen Netzen ist feiner als ~400&nbsp;m keine echte
