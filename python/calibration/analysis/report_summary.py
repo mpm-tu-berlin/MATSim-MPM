@@ -420,6 +420,36 @@ Stop-and-Go), keine behebbare Schw&auml;che.</div>
 globalen rollingC (gleiche MATSim-Verbr&auml;uche, h&ouml;here VECTO-Referenz), <b>nicht</b>
 Diskretisierung. Der diskretisierungsbedingte Anteil (&Delta; vs 1&nbsp;m) ist f&uuml;r beide RRC nahezu gleich.</div>
 
+<h2>8. Paper-Befund (Konvergenzaussage)</h2>
+<div class="key"><ul>
+<li><b>Kernaussage:</b> Der Gesamt-Diskretisierungsfehler (&Delta; Verbrauch vs. 1-m-Referenz)
+f&auml;llt <b>monoton</b> mit k&uuml;rzerer Linkl&auml;nge &ndash; kein Sweet-Spot, sondern Konvergenz.
+Die Frage lautet daher „ab welcher Aufl&ouml;sung ist der Restfehler vernachl&auml;ssigbar".</li>
+<li><b>Empfehlung @ 400&nbsp;m (Paper-Zielaufl&ouml;sung):</b>
+  <ul>
+  <li><b>Long Haul:</b> &Delta;&nbsp;&asymp;&nbsp;1,6&ndash;3,0&nbsp;% &rarr; praktisch verlustfrei.</li>
+  <li><b>Regional Delivery:</b> &Delta;&nbsp;&asymp;&nbsp;6,0&ndash;6,5&nbsp;% &rarr; prinzipielle Untergrenze
+  bei realen (rauschdominierten) Netzen, keine behebbare Schw&auml;che.</li>
+  </ul></li>
+<li><b>Fehlerursachen (analytisch isoliert, @ 400&nbsp;m, in % des Gesamtverbrauchs):</b>
+  <ul>
+  <li><b>Aero-v³ (Jensen):</b> LH &minus;5&hellip;&minus;6&nbsp;%, RD &minus;8,5&hellip;&minus;10&nbsp;%
+  &ndash; dominanter, monoton wachsender Anteil.</li>
+  <li><b>Grade (gegl&auml;ttetes H&ouml;henprofil):</b> LH &minus;0,2&hellip;&minus;0,35&nbsp;%, RD &minus;1,2&nbsp;%
+  &ndash; eine Gr&ouml;&szlig;enordnung kleiner, bei RD aber nicht vernachl&auml;ssigbar.</li>
+  <li>Beide <b>untersch&auml;tzen</b> (negatives Vorzeichen); im Gesamtverbrauch teils durch
+  Leistungsbegrenzung an groben Links kompensiert &rarr; Komponenten-Betr&auml;ge sind <b>nicht additiv</b>
+  zum Gesamt-&Delta;.</li>
+  </ul></li>
+<li><b>Schwellen f&uuml;r &lt;1&nbsp;% Gesamtfehler:</b> LH bereits ~100&ndash;200&nbsp;m; RD theoretisch
+&le;25&ndash;50&nbsp;m &ndash; mit realen Netzen nicht erreichbar.</li>
+<li><b>Faustformel / &Uuml;bertrag:</b> Der Fehler skaliert mit der v-/Steigungs-<b>Varianz pro Link</b>.
+LH (gleichf&ouml;rmige Autobahnfahrt) verzeiht grobe Netze, RD (Stop-and-Go) nicht &rarr; Aufl&ouml;sung
+an die Geschwindigkeitsdynamik des Profils koppeln, nicht pauschal w&auml;hlen.</li>
+<li><b>RRC-Hinweis:</b> rrc48 vs. rrc53 unterscheiden sich nur im konstanten Kalibrierungs-Offset
+(~1,1&nbsp;pp), <b>nicht</b> im diskretisierungsbedingten Anteil.</li>
+</ul></div>
+
 <p style="margin-top:40px;color:#888;font-size:12px">Erzeugt mit analysis/report_summary.py</p>
 </body></html>"""
 
