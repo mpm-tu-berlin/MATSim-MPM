@@ -26,6 +26,7 @@ import optuna
 
 from src.error_computation import load_reference
 from src.config import ACTIVE_VEHICLE_GROUP, STUDIES
+from analysis.convergence_errors import convergence_fig
 
 _CALIB_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = _CALIB_ROOT / "results" / "auswertung_energiemodell.html"
@@ -257,6 +258,7 @@ def main():
 
     # --- Diskretisierungs-Konvergenz (neuester Sweep, falls vorhanden) ---
     disc_tbl_html = ""
+    conv_fig_html = ""
     conv_dir = _CALIB_ROOT / "results" / "convergence"
     conv_csvs = (sorted(conv_dir.glob("*/error_breakdown.csv"), key=lambda p: p.stat().st_mtime)
                  if conv_dir.exists() else [])
@@ -271,6 +273,11 @@ def main():
             piv = piv[keyres]
             piv.columns = [f"{c} m" for c in piv.columns]
             disc_tbl_html = df_to_html(piv, "{:+.2f}")
+            conv_fig_html = (
+                "<h3>Konvergenz &ndash; logarithmische x-Achse</h3>"
+                + convergence_fig(bd_conv, "log").to_html(full_html=False, include_plotlyjs=False)
+                + "<h3>Konvergenz &ndash; lineare x-Achse</h3>"
+                + convergence_fig(bd_conv, "linear").to_html(full_html=False, include_plotlyjs=False))
 
     # --- Speed-Kennwerte fuer alle vier Profile (rrc48 stellv.) ---
     v_lh = pd.read_csv(VECTO_LH); v_lh.columns = ["s_m", "v_kmh", "grad", "stop", "hw"]
@@ -391,6 +398,7 @@ Widerstand (konsistent nahe der oberen A15-Grenze).</div>
 Parametersatz, joint ausgeschlossen). Voller Verlauf 1&ndash;750&nbsp;m im Sweep-Plot
 (results/convergence/&hellip;/convergence.html).</p>
 {disc_tbl_html}
+{conv_fig_html}
 <div class="note"><b>Limitation &ndash; reale Netze sind unterhalb ~300&ndash;400&nbsp;m rauschdominiert.</b>
 Die 1-m-VECTO-Referenz ist idealisiert; auf realen Netzen ist feiner als ~400&nbsp;m keine echte
 Mehrinformation, sondern &uuml;bertr&auml;gt nur H&ouml;hen-/Geometrierauschen ins Modell. 400&nbsp;m ist

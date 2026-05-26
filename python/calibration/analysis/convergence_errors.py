@@ -109,6 +109,42 @@ def component_errors(s_m, v_kmh, grad_pct, resolution_m, fa, mg):
     return aero_err * J2KWH, grade_err * J2KWH, speed_rmse
 
 
+COLORS = {"lh_low": "#1f77b4", "lh_high": "#17386b",
+          "rd_low": "#ff7f0e", "rd_high": "#a85405"}
+DASH = {"rrc48": "solid", "rrc53": "dot"}
+
+
+def convergence_fig(bd: pd.DataFrame, xaxis_type: str = "log"):
+    """2-zeiliger Konvergenzplot (diff% + analytischer Aero-Fehler) mit waehlbarer x-Achse."""
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
+                        subplot_titles=["Abweichung gegen VECTO [%]",
+                                        "Analytischer Aero-v³-Diskretisierungsfehler [kWh]"])
+    for scen in SCEN:
+        for rrc in RRC_VARIANTS:
+            d = bd[(bd["scenario"] == scen) & (bd["rrc"] == rrc)].sort_values("resolution_m")
+            fig.add_trace(go.Scatter(x=d["resolution_m"], y=d["diff_pct"],
+                                     name=f"{scen} {rrc}", mode="lines+markers",
+                                     line=dict(color=COLORS[scen], dash=DASH[rrc]),
+                                     legendgroup=f"{scen}_{rrc}"), row=1, col=1)
+        # Aero-Fehler ist rrc-unabhaengig (gleiches cdXA, ~gleiche Masse) -> rrc48 stellv.
+        d48 = bd[(bd["scenario"] == scen) & (bd["rrc"] == "rrc48")].sort_values("resolution_m")
+        fig.add_trace(go.Scatter(x=d48["resolution_m"], y=d48["aero_err_kwh"], name=scen,
+                                 mode="lines+markers", line=dict(color=COLORS[scen]),
+                                 showlegend=False), row=2, col=1)
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", row=1, col=1)
+    fig.add_vline(x=PAPER_RESOLUTION_M, line_dash="dot", line_color="red",
+                  annotation_text=f"{PAPER_RESOLUTION_M} m", annotation_position="top",
+                  row=1, col=1)
+    fig.add_vline(x=PAPER_RESOLUTION_M, line_dash="dot", line_color="red", row=2, col=1)
+    suffix = "log" if xaxis_type == "log" else "linear"
+    fig.update_xaxes(type=xaxis_type, title_text=f"Linklänge [m] ({suffix})", row=2, col=1)
+    fig.update_yaxes(title_text="Diff [%]", row=1, col=1)
+    fig.update_yaxes(title_text="Aero-Fehler [kWh]", row=2, col=1)
+    fig.update_layout(title=f"Diskretisierungs-Konvergenz BET_G5 — x-Achse {suffix}",
+                      template="plotly_white", height=720, hovermode="x unified")
+    return fig
+
+
 def main() -> None:
     if len(sys.argv) >= 2:
         run = Path(sys.argv[1])
@@ -149,37 +185,23 @@ def main() -> None:
     bd.to_csv(csv_path, index=False)
     print(f"Gespeichert: {csv_path}")
 
-    # --- Plot: diff% (oben) und analytischer Aero-Fehler (unten) je Auflösung ---
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
-                        subplot_titles=["Abweichung gegen VECTO [%]",
-                                        "Analytischer Aero-v³-Diskretisierungsfehler [kWh]"])
-    colors = {"lh_low": "#1f77b4", "lh_high": "#17386b",
-              "rd_low": "#ff7f0e", "rd_high": "#a85405"}
-    dash = {"rrc48": "solid", "rrc53": "dot"}
-    for scen in SCEN:
-        for rrc in RRC_VARIANTS:
-            d = bd[(bd["scenario"] == scen) & (bd["rrc"] == rrc)].sort_values("resolution_m")
-            fig.add_trace(go.Scatter(x=d["resolution_m"], y=d["diff_pct"],
-                                     name=f"{scen} {rrc}", mode="lines+markers",
-                                     line=dict(color=colors[scen], dash=dash[rrc])),
-                          row=1, col=1)
-        # Aero-Fehler ist rrc-unabhaengig (gleiches cdXA, ~gleiche Masse) -> rrc48 stellv.
-        d48 = bd[(bd["scenario"] == scen) & (bd["rrc"] == "rrc48")].sort_values("resolution_m")
-        fig.add_trace(go.Scatter(x=d48["resolution_m"], y=d48["aero_err_kwh"], name=scen,
-                                 mode="lines+markers", line=dict(color=colors[scen]),
-                                 showlegend=False), row=2, col=1)
-    fig.add_hline(y=0, line_dash="dash", line_color="gray", row=1, col=1)
-    fig.add_vline(x=PAPER_RESOLUTION_M, line_dash="dot", line_color="red",
-                  annotation_text=f"{PAPER_RESOLUTION_M} m (Paper)", annotation_position="top",
-                  row=1, col=1)
-    fig.add_vline(x=PAPER_RESOLUTION_M, line_dash="dot", line_color="red", row=2, col=1)
-    fig.update_xaxes(type="log", title_text="Linklänge [m] (log)", row=2, col=1)
-    fig.update_yaxes(title_text="Diff [%]", row=1, col=1)
-    fig.update_yaxes(title_text="Aero-Fehler [kWh]", row=2, col=1)
-    fig.update_layout(title="Diskretisierungs-Konvergenz BET_G5 (Einzelszenarien)",
-                      template="plotly_white", height=720, hovermode="x unified")
+    # --- Plot: log- und lineare x-Achse in derselben Datei ---
+    fig_log = convergence_fig(bd, "log")
+    fig_lin = convergence_fig(bd, "linear")
     html = run / "convergence.html"
-    fig.write_html(str(html), include_plotlyjs="cdn")
+    body = (
+        "<!DOCTYPE html><html lang='de'><head><meta charset='utf-8'>"
+        "<title>Diskretisierungs-Konvergenz BET_G5</title>"
+        "<style>body{font-family:Segoe UI,Arial,sans-serif;margin:24px;color:#222}"
+        "h1{border-bottom:3px solid #1f77b4;padding-bottom:6px}h2{color:#1f77b4}</style>"
+        "</head><body><h1>Diskretisierungs-Konvergenz BET_G5 (Einzelszenarien)</h1>"
+        "<h2>Logarithmische x-Achse</h2>"
+        + fig_log.to_html(full_html=False, include_plotlyjs="cdn")
+        + "<h2>Lineare x-Achse</h2>"
+        + fig_lin.to_html(full_html=False, include_plotlyjs=False)
+        + "</body></html>"
+    )
+    html.write_text(body, encoding="utf-8")
     print(f"Gespeichert: {html}")
 
 
