@@ -1,7 +1,7 @@
 """
 Erzeugt einen eigenstaendigen HTML-Report mit den Auswertungs-Erkenntnissen zum
-Energiemodell (Geschwindigkeitsprofil, Widerstandsanteile, Hoehenprofil,
-Rekuperation und Verluste).
+Energiemodell (Geschwindigkeitsprofil, Widerstandsanteile, Rekuperation und
+Verluste, Parameter-Konsistenz, Diskretisierungs-Konvergenz).
 
 Datenquelle: bester Trial der gemeinsamen 'all'-Studie eines 1m-Laufs
 (ein Parametersatz fuer beide Missionen).
@@ -25,11 +25,12 @@ import plotly.graph_objects as go
 import optuna
 
 from src.error_computation import load_reference
-from src.config import ACTIVE_VEHICLE_GROUP, STUDIES
+from src.config import ACTIVE_VEHICLE_GROUP, STUDIES, PARAM_BOUNDS
 from analysis.convergence_errors import convergence_fig
 
 _CALIB_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = _CALIB_ROOT / "results" / "auswertung_energiemodell.html"
+MD_OUTPUT = _CALIB_ROOT / "results" / "paper_findings.md"
 VECTO_LH = _CALIB_ROOT / "data" / "LongHaul.vdri"
 VECTO_RD = _CALIB_ROOT / "data" / "RegionalDelivery.vdri"
 
@@ -119,15 +120,21 @@ def energy_breakdown(df: pd.DataFrame, params: dict) -> pd.DataFrame:
 
 
 def consistency_table(run: Path) -> pd.DataFrame:
-    """Best-Parameter + RMSE aller fuenf Studien aus den Optuna-DBs."""
+    """Best-Parameter + RMSE aller fuenf Studien aus den Optuna-DBs.
+
+    Je Parameterzelle zusaetzlich die Optuna-Parameterwichtigkeit fuer diesen Run
+    in Klammern [%] (fANOVA, summiert pro Studie = 100 %) – zeigt, welcher Parameter
+    das RMSE-Ziel der jeweiligen Studie getrieben hat.
+    """
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     order = ["tractionEfficiency", "inertiaC", "recupEfficiency",
              "maxRecupPowerFraction", "cdXA", "rollingC"]
     labels = ["RMSE [%]", "η_traction", "inertiaC", "η_recup",
               "maxRecupFrac", "cdXA", "rollingC"]
 
-    def fmt(k, v):
-        return f"{v:.5f}" if k == "rollingC" else f"{v:.3f}"
+    def fmt(k, v, imp):
+        base = f"{v:.5f}" if k == "rollingC" else f"{v:.3f}"
+        return f"{base} ({imp * 100:.0f}%)"
 
     rows = {}
     for s in STUDIES:
@@ -139,18 +146,15 @@ def consistency_table(run: Path) -> pd.DataFrame:
             study_name=f"matsim-vecto-{ACTIVE_VEHICLE_GROUP}-{name}",
             storage=f"sqlite:///{db}")
         bt = st.best_trial
-        rows[name] = [f"{bt.value:.2f}"] + [fmt(k, bt.params[k]) for k in order]
+        try:
+            imp = optuna.importance.get_param_importances(st)
+        except Exception:
+            imp = {}
+        rows[name] = [f"{bt.value:.2f}"] + [fmt(k, bt.params[k], imp.get(k, 0.0)) for k in order]
 
     df = pd.DataFrame(rows, index=labels).T
     df.index.name = "Studie"
     return df
-
-
-def elevation_stats(df: pd.DataFrame) -> dict:
-    g = df[df["vehicleId"] == df["vehicleId"].iloc[0]].copy()
-    dz = g["grade_pct"] / 100.0 * g["length_m"]
-    return dict(asc=dz.clip(lower=0).sum(), desc=dz.clip(upper=0).sum(),
-                net=dz.sum(), maxgrade=g["grade_pct"].abs().max())
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +233,177 @@ def df_to_html(df: pd.DataFrame, fmt: str = "{:.2f}") -> str:
                       classes="tbl", justify="center")
 
 
+def df_to_md(df: pd.DataFrame, fmt: str = "{:.2f}") -> str:
+    """GitHub-Markdown-Tabelle inkl. Index (ohne tabulate-Abhaengigkeit)."""
+    cols = [str(c) for c in df.columns]
+    head = "| " + " | ".join([df.index.name or ""] + cols) + " |"
+    sep = "| " + " | ".join(["---"] * (len(cols) + 1)) + " |"
+    lines = [head, sep]
+    for idx, row in df.iterrows():
+        cells = []
+        for c in df.columns:
+            v = row[c]
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                cells.append("" if pd.isna(v) else fmt.format(v))
+            else:
+                cells.append(str(v))
+        lines.append("| " + " | ".join([str(idx)] + cells) + " |")
+    return "\n".join(lines)
+
+
+def write_paper_markdown(run, trial, cons_tbl, res_tbl, loss_tbl, spd_tbl, bd_conv) -> None:
+    """Schreibt eine kompakte, an Claude uebergebbare Markdown-Faktenbasis fuers Paper."""
+    bounds_md = "\n".join(
+        f"- `{k}`: [{lo}, {hi}]" for k, (lo, hi) in PARAM_BOUNDS.items())
+
+    # Konvergenz-Tabellen je Szenario (rrc48), Schluessel-Aufloesungen
+    conv_md = "_Kein Sweep gefunden._"
+    if bd_conv is not None and "rrc" in bd_conv.columns:
+        d = bd_conv[bd_conv["rrc"] == "rrc48"].copy()
+        keyres = [r for r in [1, 25, 50, 100, 200, 400, 500, 750]
+                  if r in set(d["resolution_m"])]
+        blocks = []
+        for scen in ["lh_low", "lh_high", "rd_low", "rd_high"]:
+            s = d[d["scenario"] == scen].set_index("resolution_m")
+            t = pd.DataFrame({
+                "diff% vs VECTO": [s.loc[r, "diff_pct"] for r in keyres],
+                "Aero-Fehler %":  [s.loc[r, "aero_err_pct"] for r in keyres],
+                "Grade-Fehler %": [s.loc[r, "grade_err_pct"] for r in keyres],
+            }, index=keyres).rename_axis("Linklänge [m]")
+            blocks.append(f"**{scen} (rrc48):**\n\n" + df_to_md(t, "{:+.2f}"))
+        conv_md = "\n\n".join(blocks)
+
+    md = f"""# Energiemodell BET_G5 — Faktenbasis fuer das Paper
+
+> Maschinen-/Claude-lesbare Zusammenfassung der Kalibrierungs- und Diskretisierungs-
+> studie. Quelle: Kalibrierungslauf `{run.name}`, gemeinsamer Trial #{trial} (1 m).
+> Generiert aus `analysis/report_summary.py` (Single Source of Truth, Zahlen live).
+
+## 1. Kontext & Ziel
+
+- **System:** MATSim-MPM — physikbasiertes Verbrauchsmodell fuer batterie-elektrische
+  Schwerlast-LKW (BET), kalibriert gegen **VECTO**-Referenzzyklen.
+- **Fahrzeuggruppe:** VECTO Group 5 (Sattelzug), `BET_G5`.
+- **Missionen:** Long Haul (LH) und Regional Delivery (RD), je ~100 km Route.
+- **Beladung:** je Mission `low` und `high`.
+- **Reifenvarianten:** `rrc48` und `rrc53` (Rollwiderstandsklassen).
+- **Koordinatensystem:** EPSG:4839; **kein Stau** simuliert.
+- **Paper-Beitrag:** Herleitung einer **sinnvollen Netzauflösung** (Linklänge) fuer
+  VECTO-aequivalente MATSim-Simulationen, getrennt nach Mission.
+
+## 2. Energiemodell (pro Link)
+
+Gesamtenergie je Link: `E = E_widerstand + ΔE_kinetisch`.
+
+Leistungskomponenten bei mittlerer Linkgeschwindigkeit `v`:
+
+- Rollwiderstand: `pRoll = ft · m · g · v`   (`ft` = Rollwiderstandsbeiwert RRC)
+- Luftwiderstand: `pAero = fa · v³`,  mit `fa = 0.5 · ρ · cdXA`, `ρ = 1.225 kg/m³`
+  (Jensen-korrekt ueber den Link via `vSqMean = (v0²+vExit²)/2`)
+- Steigung: `pGrav = m · g · grade · v`   (positiv bergauf, negativ bergab; `|grade| ≤ 0.15`)
+
+**Batterie-Verschaltung (entscheidend):** `pResist = pRoll + pAero + pGrav`.
+- `pResist ≥ 0` → Traktion: `pBatt = pResist / η_traction`, gecappt bei `maxMotorPower` (407 kW).
+- `pResist < 0` → Rekuperation: `pBatt = pResist · η_recup`, gecappt bei `maxRecupPower`
+  (`= maxRecupPowerFraction · 407 kW`); nicht rekuperierbarer Rest → Reibbremse.
+
+Kinetik (Gesamtaenderung, nicht zeitbasiert): `ΔKE = 0.5·m_inertia·(vExit²−v0²)`,
+bei `ΔKE ≥ 0` ÷ `η_traction`, sonst × `η_recup`.
+
+Beschleunigung physikalisch ueber die Strecke integriert (konstante Leistung):
+`vExit³ = v0³ + 3·pKin·L / m_inertia` (cbrt) → kein unphysikalischer Sprung aus dem Stand.
+
+**Wichtig fuer die Diskretisierung:** Die QSim-Zeitschrittweite ist fuer die Energie
+**irrelevant** — das Modell rechnet rein aus `L`, `v0`, `vExit`.
+
+## 3. Kalibrierung (Optuna)
+
+- **Anker:** 1-m-Netz (feinste Auflösung, Diskretisierungsfehler minimal).
+- **6 freie Parameter** (Bounds):
+{bounds_md}
+- `auxPowerW` fix bei **4000 W** (sehr kleiner Effekt).
+- **5 Studien:** 4 Einzelszenarien (lh_low/high, rd_low/high) + 1 gemeinsame (`all`).
+- Ziel: RMSE des Verbrauchs (kWh/km) gegen VECTO minimieren.
+
+### Best-Parameter, RMSE und Optuna-Wichtigkeit je Studie
+
+In Klammern: fANOVA-Parameterwichtigkeit dieser Studie (summiert = 100 %).
+
+{df_to_md(cons_tbl)}
+
+**Lesart:** η_traction dominiert die Wichtigkeit (~90 %+) und streut 0,84–0,94 *ohne*
+beladungskonsistente Richtung → er saugt den Rest-Modellfehler auf, nicht nur die echte
+Antriebseffizienz. η_recup/maxRecupFrac: groesste Streuung, kleinste Wirkung → praktisch
+**unidentifiziert**. cdXA ist der einzige robust bestimmte Widerstand (nahe oberer A15-Grenze).
+Einzelstudien treffen 0,55–0,80 %, joint nur 1,42 % (ein globaler Satz kann die unterschiedlich
+beladenen Szenarien nicht gleichzeitig erfuellen).
+
+## 4. Geschwindigkeitsprofile (rrc48 stellvertretend)
+
+{df_to_md(spd_tbl, "{:.2f}")}
+
+## 5. Energiebilanz / Widerstandsanteile (rrc48, kWh je ~100 km)
+
+{df_to_md(res_tbl, "{:.2f}")}
+
+Luftwiderstand dominiert (bei geringer Beladung bis ~68 % Aero); bei voller Beladung naehert
+sich Roll:Aero 50:50 (Rollwiderstand waechst mit der Masse).
+
+## 6. Rekuperation & Verluste (rrc48, kWh)
+
+{df_to_md(loss_tbl, "{:.1f}")}
+
+Groesster Verlust ist der Antriebsstrang (konstant 1−η_traction ≈ 14 % der Traktionsenergie).
+Bergab wird der Grossteil schon von Roll+Aero aufgezehrt; echtes Bremsen ist klein, davon ~84 %
+(= η_recup) rekuperiert, Reibbremse nahezu null.
+
+## 7. Diskretisierungs-Konvergenz
+
+**Methodik:** Sweep ueber Linklängen [1…750 m] × 4 Einzelszenarien (joint ausgeschlossen),
+je eigener Parametersatz. Zwei analytisch isolierte Fehlerquellen, jeweils **in % des
+Gesamtverbrauchs** (VECTO-Referenzenergie):
+
+- **Aero-v³ (Jensen):** `(mittl. v)³ < mittl. v³` — das auf den Link-Freispeed kollabierte
+  Profil unterschaetzt den konvexen v³-Term.
+- **Grade (geglättetes Höhenprofil):** Die Höhenenergie `m·g·Δz` selbst ist
+  diskretisierungsinvariant; der Verbrauch aendert sich nur durch die **Effizienz-Asymmetrie**
+  bergauf (÷η_traction) vs. bergab (×η_recup, gecappt, Rest gebremst). Modelltreu per
+  Kontrafaktum `E_batt(mit pGrav) − E_batt(ohne pGrav)` isoliert; "Wahrheit" = rohes 1s-VECTO-Profil.
+
+Beide Fehler sind negativ (Unterschätzung), monoton in der Linklänge, und im Gesamtverbrauch
+teils durch Leistungsbegrenzung an groben Links kompensiert → **nicht additiv** zum Gesamt-Δ.
+
+### Konvergenztabellen (rrc48)
+
+{conv_md}
+
+## 8. Paper-Befund (Konvergenzaussage)
+
+- **Kernaussage:** Der Gesamt-Diskretisierungsfehler (Δ vs. 1-m-Referenz) faellt **monoton**
+  mit kuerzerer Linklänge — kein Sweet-Spot, sondern Konvergenz.
+- **Empfehlung @ 400 m (Paper-Zielauflösung):**
+  - Long Haul: Δ ≈ **1,6–3,0 %** → praktisch verlustfrei.
+  - Regional Delivery: Δ ≈ **6,0–6,5 %** → prinzipielle Untergrenze bei realen Netzen.
+- **Fehlerursachen @ 400 m:** Aero-v³ LH −5…−6 %, RD −8,5…−10 %; Grade LH −0,2…−0,35 %, RD −1,2 %.
+- **Schwellen fuer <1 % Gesamtfehler:** LH bereits ~100–200 m; RD theoretisch ≤25–50 m
+  (mit realen Netzen nicht erreichbar).
+- **Faustformel:** Fehler skaliert mit der **v-/Steigungs-Varianz pro Link** — LH (gleichfoermige
+  Autobahnfahrt) verzeiht grobe Netze, RD (Stop-and-Go) nicht.
+- **Limitation:** Reale Netze sind unterhalb ~300–400 m rauschdominiert (Höhen-/Geometrierauschen);
+  feiner als 400 m ist keine echte Mehrinformation. 400 m ist die feinste *sinnvoll* auflösbare Skala.
+- **RRC-Hinweis:** rrc48 vs. rrc53 unterscheiden sich nur im konstanten Kalibrierungs-Offset
+  (~1,1 pp), **nicht** im diskretisierungsbedingten Anteil.
+
+## 9. Visualisierungen (Verweise)
+
+- Konvergenzplots (diff% / Aero% / Grade%, log + linear): `results/convergence/<ts>/convergence.html`
+- Vollständiger HTML-Report: `results/auswertung_energiemodell.html`
+"""
+    MD_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    MD_OUTPUT.write_text(md, encoding="utf-8")
+    print(f"Gespeichert: {MD_OUTPUT}")
+
+
 def main():
     if len(sys.argv) >= 3:
         run, trial = Path(sys.argv[1]), int(sys.argv[2])
@@ -245,6 +420,8 @@ def main():
     bd_lh = energy_breakdown(df_lh, params)
     bd_rd = energy_breakdown(df_rd, params)
     bd_all = pd.concat([bd_lh, bd_rd])
+    # Widerstands-/Verlustuebersicht (Abschnitt 3 + 4): nur rrc48 stellvertretend
+    bd_all = bd_all[bd_all.index.str.contains("_rrc48_")]
 
     ref = {}
     for m in ("LongHaul", "RegionalDelivery"):
@@ -252,13 +429,12 @@ def main():
     bd_all["VECTO"] = [ref.get(v, {}).get("ee_kwh_per_km", float("nan")) for v in bd_all.index]
     bd_all["Diff_%"] = (bd_all["ekm"] - bd_all["VECTO"]) / bd_all["VECTO"] * 100
 
-    elev_lh = elevation_stats(df_lh)
-    elev_rd = elevation_stats(df_rd)
     cons_tbl = consistency_table(run)
 
     # --- Diskretisierungs-Konvergenz (neuester Sweep, falls vorhanden) ---
     disc_tbl_html = ""
     conv_fig_html = ""
+    bd_conv = None
     conv_dir = _CALIB_ROOT / "results" / "convergence"
     conv_csvs = (sorted(conv_dir.glob("*/error_breakdown.csv"), key=lambda p: p.stat().st_mtime)
                  if conv_dir.exists() else [])
@@ -291,13 +467,8 @@ def main():
     spd_tbl = pd.DataFrame(metrics).T
     spd_tbl.columns = ["Vmax [km/h]", "v_mittel [km/h]", "Speed-RMSE vs VECTO [km/h]"]
     spd_tbl = spd_tbl.rename_axis("Profil")
-    vmax = metrics["LH low"]["vmax"]
-    vmean = metrics["LH low"]["vmean"]
-    rmse_v = metrics["LH low"]["rmse"]
 
     # --- Tabellen ---
-    par_tbl = pd.DataFrame({"Wert": params}).rename_axis("Parameter")
-
     res_tbl = bd_all[["E_roll", "E_aero", "E_gup", "E_gdn", "E_aup", "E_adn", "ekm", "VECTO", "Diff_%"]].copy()
     res_tbl["Roll%"] = bd_all["E_roll"] / (bd_all["E_roll"] + bd_all["E_aero"]) * 100
     res_tbl["Aero%"] = 100 - res_tbl["Roll%"]
@@ -308,13 +479,6 @@ def main():
                        "recup_loss", "fric", "net"]].copy()
     loss_tbl.columns = ["Mech-Trakt", "Batt-Trakt", "Antriebsverl.", "Mech-Brems",
                         "Rekup→Batt", "Rekup-Verl.", "Reibbremse", "Netto"]
-
-    elev_tbl = pd.DataFrame({
-        "Σ aufwärts [m]": [elev_lh["asc"], elev_rd["asc"]],
-        "Σ abwärts [m]": [elev_lh["desc"], elev_rd["desc"]],
-        "Netto [m]": [elev_lh["net"], elev_rd["net"]],
-        "max |Steig.| [%]": [elev_lh["maxgrade"], elev_rd["maxgrade"]],
-    }, index=["LongHaul", "RegionalDelivery"]).rename_axis("Mission")
 
     # --- Figuren ---
     figs = [fig_speed(df_lh, "Long Haul", VECTO_LH, "lh"),
@@ -343,38 +507,19 @@ def main():
 <p><b>Lauf:</b> {run.name} &nbsp;|&nbsp; <b>gemeinsame Kalibrierung (all), Trial #{trial}</b>
 &nbsp;|&nbsp; 1&nbsp;m-Aufl&ouml;sung &nbsp;|&nbsp; Strecke je ~100&nbsp;km.</p>
 
-<h2>1. Kalibrierte Parameter</h2>
-{df_to_html(par_tbl, "{:.5f}")}
-<div class="key">Optuna zieht <b>cdXA an die obere A15-Klassengrenze</b> (mehr Luftwiderstand n&ouml;tig),
-w&auml;hrend <b>rollingC praktisch am Standard</b> (Mittel 0,005025) bleibt. auxPowerW ist fix bei 4000&nbsp;W.</div>
-
-<h2>2. Geschwindigkeitsprofile (Wirkung der Ma&szlig;nahmen)</h2>
+<h2>1. Geschwindigkeitsprofile</h2>
 {fig_html[0]}
 {fig_html[1]}
 <p>Kennwerte aller vier Profile (rrc48 stellvertretend, rrc53 nahezu identisch):</p>
 {df_to_html(spd_tbl, "{:.2f}")}
-<table class="tbl"><tr><th>Metrik (LH low)</th><th>vorher (83-Cap, alte Beschl.)</th><th>nachher</th></tr>
-<tr><td style="text-align:left">Vmax</td><td>82,6 (Cap 83)</td><td>{vmax:.1f} km/h</td></tr>
-<tr><td style="text-align:left">Mittelgeschwindigkeit</td><td>82,6</td><td>{vmean:.1f} km/h</td></tr>
-<tr><td style="text-align:left">Speed-RMSE vs VECTO</td><td>2,29</td><td>{rmse_v:.2f} km/h</td></tr>
-<tr><td style="text-align:left">Anlauf 1. Link</td><td>~1 &rarr; 23 km/h Sprung</td><td>0,4 &rarr; ~14 km/h, dann graduell</td></tr></table>
-<div class="key">85-km/h-Cap behoben (Fahrzeug-maximumVelocity 83&rarr;85). Anlauf aus dem Stillstand
-durch korrekte Konstante-Leistungs-Integration (cbrt) jetzt physikalisch &uuml;ber mehrere Links verteilt.
-RD liegt durch h&auml;ufige Stopps deutlich unter dem LH-Marschniveau.</div>
 
-<h2>3. Widerstandsanteile</h2>
+<h2>2. Widerstandsanteile</h2>
 {fig_html[2]}
 {df_to_html(res_tbl, "{:.2f}")}
 <div class="key"><b>Luftwiderstand dominiert</b> &ndash; bei geringer Beladung bis ~68&nbsp;% (Aero),
 bei voller Beladung n&auml;hert sich Roll:Aero 50:50, da der Rollwiderstand mit der Masse w&auml;chst.</div>
 
-<h2>4. H&ouml;henprofil (kumuliert)</h2>
-{df_to_html(elev_tbl, "{:.1f}")}
-<div class="note">Steigungs- und Gef&auml;lleenergie (&plusmn;~50&nbsp;kWh) heben sich nahezu auf,
-weil die Route <b>h&ouml;henneutral</b> beginnt/endet (Netto ~&plusmn;wenige Meter) &ndash; trotz ~520&ndash;610&nbsp;m
-kumulierter Hubarbeit. Die Werte sind &uuml;ber alle Links summiert, nicht Start/Ende.</div>
-
-<h2>5. Rekuperation &amp; Verluste</h2>
+<h2>3. Rekuperation &amp; Verluste</h2>
 {fig_html[3]}
 {df_to_html(loss_tbl, "{:.1f}")}
 <div class="note">Die ~50&nbsp;kWh Gravitations-Energie sind <b>nicht</b> der Rekup-Pool: bergab wird der Gro&szlig;teil
@@ -383,8 +528,10 @@ schon von Roll+Aero aufgezehrt. Echtes Bremsen (Mech-Brems) ist deutlich kleiner
 <div class="key">Gr&ouml;&szlig;ter Verlust ist der <b>Antriebsstrang</b> (Batterie&rarr;Rad, konstant 1&minus;&eta;_traction
 &asymp; 14&nbsp;% der Traktionsenergie). Rekup-Verluste sind klein bei LH, h&ouml;her bei RD (mehr Stop-and-Go).</div>
 
-<h2>6. Parameter-Konsistenz (Einzelstudien vs. joint)</h2>
+<h2>4. Parameter-Konsistenz (Einzelstudien vs. joint)</h2>
 {df_to_html(cons_tbl)}
+<p style="font-size:13px;color:#555">In Klammern je Zelle: <b>Optuna-Parameterwichtigkeit</b> dieser Studie
+(fANOVA, summiert = 100&nbsp;%) &ndash; wie stark der Parameter das RMSE-Ziel des jeweiligen Runs getrieben hat.</p>
 <div class="key">Die <b>Einzelstudien treffen mit 0,55&ndash;0,80&nbsp;% nahezu perfekt</b>, die joint-Studie nur 1,42&nbsp;%
 &ndash; ein globaler Parametersatz kann die unterschiedlich beladenen Szenarien nicht gleichzeitig erf&uuml;llen.</div>
 <div class="note"><b>&eta;_traction</b> ist dominant, streut aber 0,84&ndash;0,94 <i>ohne</i> konsistente Beladungsrichtung
@@ -393,7 +540,7 @@ Antriebseffizienz. <b>&eta;_recup / maxRecupFrac</b> haben die gr&ouml;&szlig;te
 praktisch <b>unidentifiziert</b> (mit Vorsicht zu interpretieren). <b>cdXA</b> ist der einzige robust bestimmte
 Widerstand (konsistent nahe der oberen A15-Grenze).</div>
 
-<h2>7. Diskretisierungs-Konvergenz &amp; Limitation</h2>
+<h2>5. Diskretisierungs-Konvergenz &amp; Limitation</h2>
 <p>Abweichung gegen VECTO [%] an Schl&uuml;ssel-Auflösungen (Einzelszenarien, je eigener
 Parametersatz, joint ausgeschlossen). Voller Verlauf 1&ndash;750&nbsp;m im Sweep-Plot
 (results/convergence/&hellip;/convergence.html).</p>
@@ -420,7 +567,7 @@ Stop-and-Go), keine behebbare Schw&auml;che.</div>
 globalen rollingC (gleiche MATSim-Verbr&auml;uche, h&ouml;here VECTO-Referenz), <b>nicht</b>
 Diskretisierung. Der diskretisierungsbedingte Anteil (&Delta; vs 1&nbsp;m) ist f&uuml;r beide RRC nahezu gleich.</div>
 
-<h2>8. Paper-Befund (Konvergenzaussage)</h2>
+<h2>6. Paper-Befund (Konvergenzaussage)</h2>
 <div class="key"><ul>
 <li><b>Kernaussage:</b> Der Gesamt-Diskretisierungsfehler (&Delta; Verbrauch vs. 1-m-Referenz)
 f&auml;llt <b>monoton</b> mit k&uuml;rzerer Linkl&auml;nge &ndash; kein Sweet-Spot, sondern Konvergenz.
@@ -456,6 +603,8 @@ an die Geschwindigkeitsdynamik des Profils koppeln, nicht pauschal w&auml;hlen.<
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(html, encoding="utf-8")
     print(f"Gespeichert: {OUTPUT}")
+
+    write_paper_markdown(run, trial, cons_tbl, res_tbl, loss_tbl, spd_tbl, bd_conv)
 
 
 if __name__ == "__main__":
