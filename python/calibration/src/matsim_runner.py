@@ -111,6 +111,11 @@ def run_matsim(run_id: str, config_path: Path, params_file: Path,
 
     cmd = [
         "java",
+        # Headless erzwingen: der EV-contrib TimeProfileCollector rendert beim
+        # Mobsim-Cleanup SOC-/Ladeprofil-PNGs via JFreeChart. Als Hintergrund-
+        # prozess ohne Desktop-Session wirft AWT sonst spradisch "AWTError: no
+        # screen devices" -> Lauf scheitert (Trial FAILED / Sweep-Datenpunkt fehlt).
+        "-Djava.awt.headless=true",
         f"-Xmx{_cfg.MATSIM_MEMORY}",
         f"-Dcalibration.params.file={params_file}",
         "-jar", str(MATSIM_JAR),
