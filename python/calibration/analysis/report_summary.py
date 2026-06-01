@@ -65,7 +65,13 @@ def load_params(run: Path, trial: int) -> dict:
 
 
 def energy_breakdown(df: pd.DataFrame, params: dict) -> pd.DataFrame:
-    """Pro Fahrzeug: Widerstandsenergien + Traktions-/Rekuperations-Bilanz [kWh]."""
+    """Pro Fahrzeug: Widerstandsenergien + Traktions-/Rekuperations-Bilanz [kWh].
+
+    Traktions-/Rekuperations-Zerlegung mit gekoppelter Effizienz je Link (ein eta
+    ueber das Vorzeichen der Netto-Mechanikenergie), modelltreu zur neuen
+    MpmDynamicBetDriveEnergyConsumption. Die pRoll_W/pAero_W/pGrav_W-Spalten der
+    Debug-CSV enthalten bereits die cos(theta)-Rollwiderstandskorrektur der JAR.
+    """
     eta_t = params["tractionEfficiency"]
     eta_r = params["recupEfficiency"]
     p_recup = params["maxRecupPowerFraction"] * P_MOTOR_W
@@ -86,24 +92,36 @@ def energy_breakdown(df: pd.DataFrame, params: dict) -> pd.DataFrame:
         e_aup = e_kin.clip(lower=0).sum() * j2k
         e_adn = e_kin.clip(upper=0).sum() * j2k
 
-        # Traktion (positiv) -> Batterie liefert
-        mech_tr = (np.where(pres > 0, pres * t, 0).sum()
-                   + np.where(dKE > 0, dKE, 0).sum())
-        batt_tr = (np.where(pres > 0, np.minimum(pres / eta_t, P_MOTOR_W) * t, 0).sum()
-                   + np.where(dKE > 0, dKE / eta_t, 0).sum())
+        # --- Gekoppelte Effizienz je Link (wie MpmDynamicBetDriveEnergyConsumption) ---
+        # Ein eta pro Link ueber das Vorzeichen der Netto-Mechanikenergie
+        # eMech = pResist*t + dKE: >=0 -> Traktion (1/eta_t), <0 -> Rekuperation (eta_r).
+        # Dasselbe eta gilt fuer Widerstands- UND Kinetik-Anteil und verhindert die
+        # Doppelbesteuerung des alten, anteilsweise entkoppelten Ansatzes.
+        e_res = pres * t                                  # Widerstandsenergie je Link [J]
+        eMech = e_res + dKE
+        traction = eMech >= 0.0
+        eta = np.where(traction, 1.0 / eta_t, eta_r)
+
+        # Resist-Pfad mit Leistungs-Cap [-p_recup, P_MOTOR_W]; Kinetik-Pfad ohne Cap.
+        e_batt_res = np.clip(pres * eta, -p_recup, P_MOTOR_W) * t
+        e_batt_kin = dKE * eta
+        e_batt = e_batt_res + e_batt_kin                  # Batterieenergie je Link [J]
+
+        # Traktion (eMech>=0) -> Batterie liefert
+        mech_tr = eMech[traction].sum()                  # mechanisch gefordert [J]
+        batt_tr = e_batt[traction].sum()                 # Batterie geliefert (>0) [J]
         loss_tr = batt_tr - mech_tr
 
-        # Bremsen (negativ) -> Rekuperation, Cap nur auf Resist-Pfad
-        pbatt_res = np.where(pres < 0, np.maximum(pres * eta_r, -p_recup), 0)
-        batt_rec_res = (-pbatt_res * t).sum()
-        mech_in_res = (-pbatt_res * t / eta_r).sum()
-        fric = np.where(pres < 0, -pres * t, 0).sum() - mech_in_res
-        batt_rec_kin = np.where(dKE < 0, -dKE * eta_r, 0).sum()
-        mech_in_kin = np.where(dKE < 0, -dKE, 0).sum()
-        batt_rec = batt_rec_res + batt_rec_kin
-        recup_loss = (mech_in_res + mech_in_kin) - batt_rec
-        mech_br = (np.where(pres < 0, -pres * t, 0).sum()
-                   + np.where(dKE < 0, -dKE, 0).sum())
+        # Bremsen (eMech<0) -> Rekuperation
+        brake = ~traction
+        mech_br = (-eMech[brake]).sum()                  # mechanisch verfuegbar (>0) [J]
+        batt_rec = (-e_batt[brake]).sum()                # Batterie zurueckgewonnen (>0) [J]
+        # Friktion = durch den Resist-Cap nicht aufgenommene Bremsmechanik (nur Resist-Pfad).
+        recov = brake & (pres < 0.0)
+        mech_res_recov = np.where(recov, -e_res, 0.0).sum()       # rueckgewinnbar [J]
+        batt_res_recov = np.where(recov, -e_batt_res, 0.0).sum()  # tatsaechlich [J]
+        fric = mech_res_recov - batt_res_recov / eta_r
+        recup_loss = (mech_br - batt_rec) - fric
 
         dist = g["length_m"].sum() / 1000.0
         net = g["energy_Wh"].sum() / 1000.0
@@ -249,6 +267,24 @@ def df_to_md(df: pd.DataFrame, fmt: str = "{:.2f}") -> str:
                 cells.append(str(v))
         lines.append("| " + " | ".join([str(idx)] + cells) + " |")
     return "\n".join(lines)
+
+
+def _real_validation_section() -> str:
+    """Optionaler Realfahrten-Validierungsabschnitt (Abschnitt 10).
+
+    Robust/defensiv: Logik + private Daten liegen in scripts/analyze_real_validation.py
+    (gitignored). Ohne diese Dateien (z.B. frischer Clone) wird der Abschnitt einfach
+    ausgelassen, damit dieser getrackte Report lauffaehig bleibt.
+    """
+    try:
+        scripts_dir = str(_CALIB_ROOT / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        from analyze_real_validation import real_validation_markdown
+        return real_validation_markdown()
+    except Exception as e:
+        print(f"[report_summary] Realfahrten-Validierung (Abschnitt 10) uebersprungen: {e}")
+        return ""
 
 
 def write_paper_markdown(run, trial, cons_tbl, res_tbl, loss_tbl, spd_tbl, bd_conv) -> None:
@@ -399,6 +435,7 @@ teils durch Leistungsbegrenzung an groben Links kompensiert → **nicht additiv*
 - Konvergenzplots (diff% / Aero% / Grade%, log + linear): `results/convergence/<ts>/convergence.html`
 - Vollständiger HTML-Report: `results/auswertung_energiemodell.html`
 """
+    md += _real_validation_section()   # Abschnitt 10 (privat, optional)
     MD_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     MD_OUTPUT.write_text(md, encoding="utf-8")
     print(f"Gespeichert: {MD_OUTPUT}")

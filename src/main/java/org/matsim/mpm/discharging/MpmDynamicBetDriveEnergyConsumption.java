@@ -107,12 +107,18 @@ public final class MpmDynamicBetDriveEnergyConsumption implements DriveEnergyCon
         double L = link.getLength();
         double grade = computeGrade(link);
 
+        // Rollwiderstand wirkt mit der Normalkraft m*g*cos(theta). grade = sin(theta)
+        // (Hoehendifferenz/Linklaenge), daher cos(theta) = sqrt(1 - grade^2). Auf
+        // Steigungen reduziert das den Rollwiderstand leicht (flach: ~1).
+        double cosGrade = Math.sqrt(1.0 - grade * grade);
+        double ftEff = ft * cosGrade;
+
         // --- 0) Zielgeschwindigkeit: Freispeed des Links, begrenzt durch Dauerleistung bergauf ---
         // fa*v³ + mSum*G*totalResistC*v = maxMotorPowerW*η  (identisch zu PowerLimitedLinkSpeedCalculator)
         // Hinweis: travelTime (QSim-Vorgabe) wird NICHT verwendet – QSim diskretisiert Fahrzeiten
         // auf Vielfache von timeStepSize, was vQSim = L/travelTime verfaelscht (z.B. 49 km/h → 45 km/h).
         double vFreespeed = link.getFreespeed();
-        double totalResistC = ft + grade;
+        double totalResistC = ftEff + grade;
         double vTarget;
         if (totalResistC > 0.0) {
             double pMechMax = maxMotorPowerW * tractionEfficiency;
@@ -135,7 +141,7 @@ public final class MpmDynamicBetDriveEnergyConsumption implements DriveEnergyCon
             // waehrend der Beschleunigung steigt der Widerstand (Aero ~ v^3); Bewertung bei
             // vRef ueberschaetzt den Widerstand leicht und damit konservativ vExit.
             double vRef = 0.5 * (v0 + Math.min(vTarget, vehicleMaxSpeedMs));
-            double pResistRef = ft * mSum * G * vRef
+            double pResistRef = ftEff * mSum * G * vRef
                               + fa * vRef * vRef * vRef
                               + mSum * G * grade * vRef;
             double pKinBudget = maxMotorPowerW * tractionEfficiency - pResistRef;
@@ -167,39 +173,40 @@ public final class MpmDynamicBetDriveEnergyConsumption implements DriveEnergyCon
         // (1/L) * integral v(s)^2 ds = (v0^2 + vExit^2)/2 >= vAvg^2
         // => pAero * tPhysical = fa * (v0^2 + vExit^2)/2 * L (Jensen-korrekt)
         double vSqMean = 0.5 * (v0 * v0 + vExit * vExit);
-        double pRoll   = ft * mSum * G * vAvg;
+        double pRoll   = ftEff * mSum * G * vAvg;
         double pAero   = fa * vSqMean * vAvg;
         double pGrav   = mSum * G * grade * vAvg;   // positiv = bergauf, negativ = bergab
         double pKin    = 0.5 * mInertia * (vExit * vExit - v0 * v0) / tPhysical; // nur Debug
 
         double pMechTotal = pRoll + pAero + pGrav + pKin;                          // nur Debug
 
-        // --- 5) Batterieenergie: Widerstands- und kinetischer Anteil getrennt ---
+        // --- 5) Batterieenergie: gekoppelte Effizienz-Entscheidung ---
         //
-        // Widerstandsenergie (zeitbasiert, mit Leistungsgrenzen):
+        // Die mechanische Energie pendelt pro Link zwischen Widerstand, Hub (Grav) und
+        // Tempo (Kinetik). Wuerde die Lade-/Rekup-Effizienz GETRENNT auf den Widerstands-
+        // und den kinetischen Anteil angewendet, wird derselbe physikalische Fluss (z.B.
+        // Schwerkraft -> Beschleunigung bergab) doppelt besteuert: einmal als Rekuperation
+        // (eta_recup) und gleichzeitig als Antrieb (1/eta_traction). Dieser kuenstliche
+        // Rundlauf-Verlust skaliert mit der Masse und ueberzeichnet den Steigungseinfluss
+        // auf welligem Terrain. Korrekt: EINE Effizienz fuer die NETTO-Mechanikenergie des
+        // Links, entschieden ueber deren Vorzeichen (>=0 Antrieb, <0 Rekuperation).
         double pResist = pRoll + pAero + pGrav;
-        double energyResist;
-        if (pResist >= 0.0) {
-            double pBattResist = pResist / tractionEfficiency;
-            if (pBattResist > maxMotorPowerW) pBattResist = maxMotorPowerW;
-            energyResist = pBattResist * tPhysical;
-        } else {
-            double pBattResist = pResist * recupEfficiency;
-            if (pBattResist < -maxRecupPowerW) pBattResist = -maxRecupPowerW;
-            energyResist = pBattResist * tPhysical;
-        }
-
-        // Kinetische Energie (Gesamtaenderung, NICHT zeitbasiert):
-        // Bei 1m-Links ist tPhysical (~0.04 s) viel kuerzer als die physikalische
-        // Bremszeit (~5-10 s). Ein zeitbasierter maxRecupPowerW-Cap wuerde fast die
-        // gesamte Bremsenergie als Reibungswaerme werten, obwohl sie in der Realitaet
-        // per Rekuperation zurueckgewonnen wird.
-        // Korrekt: E_regen = |DeltaKE| * eta_recup (unabhaengig von der Bremszeit,
-        // da bei maxRecupPower-begrenztem Bremsen stets die volle Effizienz gilt).
         double deltaKE = 0.5 * mInertia * (vExit * vExit - v0 * v0);
-        double energyKin = (deltaKE >= 0.0)
-                ? deltaKE / tractionEfficiency
-                : deltaKE * recupEfficiency;
+
+        double eMech = pResist * tPhysical + deltaKE;   // Netto-Mechanikenergie [J]
+        double eta = (eMech >= 0.0) ? (1.0 / tractionEfficiency) : recupEfficiency;
+
+        // Widerstandsanteil: zeitbasiert, MIT Leistungsgrenzen (Motor- bzw. Rekup-Cap).
+        double pBattResist = pResist * eta;
+        if (pBattResist > maxMotorPowerW) pBattResist = maxMotorPowerW;
+        else if (pBattResist < -maxRecupPowerW) pBattResist = -maxRecupPowerW;
+        double energyResist = pBattResist * tPhysical;
+
+        // Kinetischer Anteil: energiebasiert, OHNE Power-Cap. Bei kurzen Links ist
+        // tPhysical (~0.04 s) viel kuerzer als die physikalische Bremszeit (~5-10 s);
+        // ein zeitbasierter Cap wuerde Bremsenergie faelschlich als Reibungswaerme werten.
+        // Gleiche Effizienz (eta) wie der Widerstandsanteil -> Kopplung ueber eMech.
+        double energyKin = deltaKE * eta;
 
         double energyJ = energyResist + energyKin;
         double pBattery = energyJ / tPhysical;  // nur Debug

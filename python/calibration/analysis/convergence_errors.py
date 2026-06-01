@@ -124,6 +124,12 @@ def grade_battery_energy(s_m, v_kmh, grad_pct, resolution_m,
     bestimmt. Der grade-EIGENE Anteil wird per Kontrafaktum isoliert:
     E_batt(mit pGrav) - E_batt(ohne pGrav). resolution_m=0 -> Roh-Intervalle
     (1s-Profil = "Wahrheit").
+
+    Rollwiderstand mit cos(theta)-Korrektur (ftEff = ft*sqrt(1-grade^2)), wie im
+    Java-Modell. Die gekoppelte Effizienz-Entscheidung des Modells (ein eta je
+    Vorzeichen der Netto-Mechanikenergie eMech = pResist*t + dKE) reduziert sich
+    hier auf sign(pResist): dieses per-Link-stationaere Modell kennt kein
+    v0/vExit-Chaining, also dKE=0 und sign(eMech)=sign(pResist).
     """
     s = np.asarray(s_m)
     v = np.asarray(v_kmh) / 3.6
@@ -143,7 +149,8 @@ def grade_battery_energy(s_m, v_kmh, grad_pct, resolution_m,
         v_link = segment_freespeed(s_m, v_kmh, a, b)        # harm. Mittel [m/s]
         grad_link = (grad[a:b] * ds[a:b]).sum() / L          # = (z[b]-z[a])/L
         t = L / v_link
-        p_roll = ft * m_sum * G * v_link
+        cos_grade = np.sqrt(1.0 - grad_link * grad_link)     # Normalkraft-Korrektur
+        p_roll = ft * cos_grade * m_sum * G * v_link
         p_aero = fa * v_link ** 3
         p_grav = m_sum * G * grad_link * v_link
         e_grade += batt(p_roll + p_aero + p_grav, t) - batt(p_roll + p_aero, t)
