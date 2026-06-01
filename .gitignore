@@ -29,6 +29,16 @@ hs_err_pid*
 resistance_debug.csv
 dependency-reduced-pom.xml
 
+# Reale Truck-Fahrten — DATENSCHUTZ: niemals committen/pushen
+scenarios/19t_BET_G5/
+scenarios/24t_BET_G5_100km/
+scenarios/43t_BET_G5/
+# Realfahrten-Kalibrierung (Skript + Ergebnisse enthalten sensible Sollwerte aus Realdaten)
+python/calibration/scripts/optimize_multi_bet_g5.py
+python/calibration/scripts/analyze_real_validation.py
+python/calibration/scripts/results/
+python/calibration/REAL_VALIDATION_PLAN.md
+
 # Python-Kalibrierung
 python/calibration/.venv/
 python/calibration/results/
