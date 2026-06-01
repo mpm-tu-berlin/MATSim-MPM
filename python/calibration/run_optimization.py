@@ -57,7 +57,9 @@ _parser.add_argument(
     "--study-name",
     type=str,
     default=None,
-    help="Nur eine bestimmte Study laufen (z.B. 'lh_low' fuer Smoke-Test).",
+    help=("Nur bestimmte Studien laufen, komma-separiert. Beispiele: 'lh_low' "
+          "(Smoke-Test) oder 'lh_low,lh_high,rd_low,rd_high' (alle 4 Einzel-"
+          "szenarien in EINEM Run-Ordner -> direkt vom Sweep nutzbar)."),
 )
 _args = _parser.parse_args()
 
@@ -66,13 +68,15 @@ _cfg.MATSIM_MEMORY, _cfg.N_JOBS = _cfg.resource_profile_for(_args.resolution)
 if _args.n_trials is not None:
     _cfg.N_TRIALS = _args.n_trials
 if _args.study_name is not None:
-    _matched = [s for s in _cfg.STUDIES if s["name"] == _args.study_name]
-    if not _matched:
+    _requested = [n.strip() for n in _args.study_name.split(",") if n.strip()]
+    _by_name = {s["name"]: s for s in _cfg.STUDIES}
+    _unknown = [n for n in _requested if n not in _by_name]
+    if _unknown:
         raise SystemExit(
-            f"Unbekannte Study '{_args.study_name}'. "
-            f"Verfuegbar: {[s['name'] for s in _cfg.STUDIES]}"
+            f"Unbekannte Study/Studien {_unknown}. "
+            f"Verfuegbar: {list(_by_name)}"
         )
-    _cfg.STUDIES = _matched
+    _cfg.STUDIES = [_by_name[n] for n in _requested]  # Reihenfolge wie angefragt
 
 # === 1. Basisverzeichnis fuer diesen Lauf ===
 _timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
