@@ -518,7 +518,7 @@ public class RunSectionScenario {
                 w.println();
                 w.printf("\t<vehicle id=\"%s\" type=\"%s\">%n", vehicleId, typeId);
                 w.println("\t\t<attributes>");
-                w.println("\t\t\t<attribute name=\"initialSoc\" class=\"java.lang.Double\">1.0</attribute>");
+                w.println("\t\t\t<attribute name=\"initialSoc\" class=\"java.lang.Double\">0.99</attribute>");
                 w.println("\t\t</attributes>");
                 w.printf("\t</vehicle>%n");
             }
@@ -622,7 +622,7 @@ public class RunSectionScenario {
             w.println();
             w.println("\t<vehicle id=\"truck_1\" type=\"section_bet\">");
             w.println("\t\t<attributes>");
-            w.println("\t\t\t<attribute name=\"initialSoc\" class=\"java.lang.Double\">1.0</attribute>");
+            w.println("\t\t\t<attribute name=\"initialSoc\" class=\"java.lang.Double\">0.99</attribute>");
             w.println("\t\t</attributes>");
             w.println("\t</vehicle>");
             w.println();

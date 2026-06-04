@@ -24,16 +24,55 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import xml.etree.ElementTree as ET
 
-from generate_section_link_length_variants import (
-    load_matsim_network,
-    generate_variants_for_section,
-    SECTION_FILES,
-    _import_script04,
-    KDTREE_PATH,
-    SIMPLIFIED_GPKG,
-    DETAILED_GPKG,
-)
+
+def load_matsim_network(path):
+    """Load nodes and links from a MATSim XML network (gzipped or plain)."""
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rb") as f:
+        tree = ET.parse(f)
+    root = tree.getroot()
+
+    nodes = {}
+    for node in root.find("nodes").findall("node"):
+        nid = node.get("id")
+        x = float(node.get("x"))
+        y = float(node.get("y"))
+        z_attr = node.get("z")
+        z = float(z_attr) if z_attr is not None else None
+        nodes[nid] = {"x": x, "y": y, "z": z}
+
+    links = {}
+    for link in root.find("links").findall("link"):
+        lid = link.get("id")
+        links[lid] = {
+            "id": lid,
+            "from": link.get("from"),
+            "to": link.get("to"),
+            "length": float(link.get("length", "0")),
+        }
+    return nodes, links
+
+
+def _import_variants_module():
+    """Lazy import — pulls in geopandas/shapely only when network generation is requested."""
+    from generate_section_link_length_variants import (
+        generate_variants_for_section,
+        SECTION_FILES,
+        _import_script04,
+        KDTREE_PATH,
+        SIMPLIFIED_GPKG,
+        DETAILED_GPKG,
+    )
+    return {
+        "generate_variants_for_section": generate_variants_for_section,
+        "SECTION_FILES": SECTION_FILES,
+        "_import_script04": _import_script04,
+        "KDTREE_PATH": KDTREE_PATH,
+        "SIMPLIFIED_GPKG": SIMPLIFIED_GPKG,
+        "DETAILED_GPKG": DETAILED_GPKG,
+    }
 
 # ==============================
 # Configuration
@@ -84,6 +123,16 @@ SECTION_ENDPOINT_COORDS = {
     "q97": ((91784.105, -73786.243), (159121.952, -30462.392)),
 }
 
+# Per-section cumulative-distance trim along the forward driving path [km].
+# Crops sections that start/end on asymmetric net-descent stretches (e.g. Q97 dropping
+# from 597 m at km 0 to 466 m at km 101, which artificially lowers kWh/km via net
+# potential-energy recuperation). Trimmed link distance is what divides energy.
+SECTION_TRIM_KM = {
+    # Endpoints chosen so both ends land near z = 560 m (km 5.5: z=554, km 95.91: z=558),
+    # symmetric framing around the hilly mid-stretch.
+    "q97": (5.5, 95.91),
+}
+
 # Plot styling
 SECTION_COLORS = {"flat": "#757575", "q75": "#FF9800", "q97": "#E53935"}
 SECTION_LABELS = {"flat": "Flat (no grade)", "q75": "Q75 (medium)", "q97": "Q97 (hilly)"}
@@ -99,14 +148,34 @@ FLAT_LANES = 2.0
 # QSim timestep [seconds] — passed to RunSectionScenario via --qsim-timestep
 QSIM_TIMESTEP = 0.5
 
-# Calibration parameters (mirrored from CalibrationParams.java defaults)
-CALIBRATION_DEFAULTS = {
-    "tractionEfficiency": 0.9,
-    "inertiaC": 1.03,
-    "recupEfficiency": 0.6,
-    "maxRecupPowerFraction": 0.95,
-    "auxPowerW": 4500.0,
+# Calibration parameters per loading.
+# tractionEfficiency, inertiaC, recupEfficiency, maxRecupPowerFraction: user-set values
+# (2026-06-03) replacing the 1m Optuna best trials, to align with literature/round defaults.
+# cdXA, rollingC: still from 1m Optuna LH run 20260529_094545_1m best trials
+# (lh_low Trial 120, lh_high Trial 75) since those were not part of the override.
+# auxPowerW was fixed at 4000 W during that calibration.
+CALIBRATION_PER_LOADING = {
+    "empty": {
+        "tractionEfficiency": 0.86,
+        "inertiaC": 1.03,
+        "recupEfficiency": 0.6,
+        "maxRecupPowerFraction": 0.95,
+        "auxPowerW": 4000.0,
+        "cdXA": 5.6613,
+        "rollingC": 0.0046,
+    },
+    "loaded": {
+        "tractionEfficiency": 0.92,
+        "inertiaC": 1.03,
+        "recupEfficiency": 0.6,
+        "maxRecupPowerFraction": 0.95,
+        "auxPowerW": 4000.0,
+        "cdXA": 5.7629,
+        "rollingC": 0.0049,
+    },
 }
+# Backwards-compatible default (used only if a caller still wants a single set).
+CALIBRATION_DEFAULTS = CALIBRATION_PER_LOADING["loaded"]
 
 
 def _params_cache_path(run_dir):
@@ -244,7 +313,8 @@ def get_forward_links_per_vehicle(network_path, debug_csv_path):
         debug_csv_path: Path to resistance_debug.csv
 
     Returns:
-        dict mapping vehicleId to set of forward link IDs.
+        dict mapping vehicleId to ORDERED list of forward link IDs
+        (driving order — needed for cumulative-distance trimming).
     """
     _, links = load_matsim_network(str(network_path))
     link_nodes = {lid: (lk["from"], lk["to"]) for lid, lk in links.items()}
@@ -259,7 +329,7 @@ def get_forward_links_per_vehicle(network_path, debug_csv_path):
 
     for vehicle_id, vdf in groups:
         visited_nodes = set()
-        forward_ids = set()
+        forward_ids = []  # ordered
         for _, row in vdf.iterrows():
             lid = str(row["linkId"])
             if lid not in link_nodes:
@@ -270,7 +340,7 @@ def get_forward_links_per_vehicle(network_path, debug_csv_path):
                 break
             visited_nodes.add(from_node)
             visited_nodes.add(to_node)
-            forward_ids.add(lid)
+            forward_ids.append(lid)
         result[vehicle_id] = forward_ids
 
     return result
@@ -278,7 +348,7 @@ def get_forward_links_per_vehicle(network_path, debug_csv_path):
 
 def run_section_scenario(jar_path, network_path, output_dir, vehicle_params_list,
                          calibration_params=None, from_coord=None, to_coord=None,
-                         qsim_timestep=None):
+                         qsim_timestep=None, section=None):
     """
     Run the Java RunSectionScenario as a subprocess with multiple vehicles.
 
@@ -333,10 +403,10 @@ def run_section_scenario(jar_path, network_path, output_dir, vehicle_params_list
                 err_lines.append(text)
         return None, f"ERROR (see {log_file}):\n" + "\n".join(err_lines)
 
-    return parse_resistance_debug(output_dir, network_path=network_path), None
+    return parse_resistance_debug(output_dir, network_path=network_path, section=section), None
 
 
-def parse_resistance_debug(output_dir, network_path=None):
+def parse_resistance_debug(output_dir, network_path=None, section=None):
     """
     Parse resistance_debug.csv from MATSim output and compute per-vehicle summary.
 
@@ -344,9 +414,14 @@ def parse_resistance_debug(output_dir, network_path=None):
     walks through links in traversal order and stops when a node is visited twice
     (= route turned around). This filters out reverse-direction links in section networks.
 
+    If section is provided AND SECTION_TRIM_KM has an entry for it, the forward-driven
+    path is additionally trimmed to the [trim_min_km, trim_max_km] range along cumulative
+    distance. The trimmed length is what divides energy in kWh/km.
+
     Args:
         output_dir: Directory containing resistance_debug.csv
         network_path: If provided, path to the network XML for node-based forward filtering.
+        section: Section label (e.g. "q97") for looking up SECTION_TRIM_KM.
 
     Returns a dict mapping vehicle IDs (e.g. "truck_empty") to their energy summary,
     or a single-entry dict with key "truck_1" for legacy single-vehicle results.
@@ -357,29 +432,40 @@ def parse_resistance_debug(output_dir, network_path=None):
     if not debug_csv.exists():
         return None
 
-    # Compute per-vehicle forward link IDs using node-based filtering
+    # Compute per-vehicle forward link IDs (ordered) using node-based filtering
     forward_links_per_vehicle = None
     if network_path is not None:
         forward_links_per_vehicle = get_forward_links_per_vehicle(network_path, debug_csv)
 
-    df = pd.read_csv(debug_csv)
+    trim_range = SECTION_TRIM_KM.get(section) if section else None
 
-    # Group by vehicleId if the column exists
+    df = pd.read_csv(debug_csv)
+    df["linkId"] = df["linkId"].astype(str)
+
     if "vehicleId" in df.columns:
         groups = df.groupby("vehicleId")
     else:
-        # Legacy single-vehicle format
         groups = [("truck_1", df)]
 
     results = {}
     for vehicle_id, vdf in groups:
-        # Apply per-vehicle forward filtering if available
         if forward_links_per_vehicle is not None and vehicle_id in forward_links_per_vehicle:
             forward_ids = forward_links_per_vehicle[vehicle_id]
-            vdf = vdf[vdf["linkId"].astype(str).isin(forward_ids)]
+            # Project the per-vehicle rows onto the ordered forward path so the cumulative
+            # distance reflects actual driving order. linkId is unique per network, so
+            # set_index/reindex is safe.
+            vdf = vdf.set_index("linkId").reindex(forward_ids).dropna(how="all").reset_index()
+            if trim_range is not None and not vdf.empty:
+                trim_min_m, trim_max_m = trim_range[0] * 1000.0, trim_range[1] * 1000.0
+                # Cumulative distance up to the END of each link
+                cum_end = vdf["length_m"].cumsum()
+                cum_start = cum_end - vdf["length_m"]
+                # Keep links whose ENTIRE span lies within [trim_min, trim_max]
+                mask = (cum_start >= trim_min_m) & (cum_end <= trim_max_m)
+                vdf = vdf[mask]
 
-        total_length_m = vdf["length_m"].sum()
-        total_energy_wh = vdf["energy_Wh"].sum()
+        total_length_m = float(vdf["length_m"].sum())
+        total_energy_wh = float(vdf["energy_Wh"].sum())
         if total_length_m > 0:
             kwh_per_km = (total_energy_wh / 1000.0) / (total_length_m / 1000.0)
         else:
@@ -390,11 +476,10 @@ def parse_resistance_debug(output_dir, network_path=None):
             "kWh_per_km": kwh_per_km,
         }
 
-        # Bremsverlust-Spalten (optional, backward-kompatibel)
         if "brakeLossResist_Wh" in vdf.columns:
-            result["brakeLossResist_Wh"] = vdf["brakeLossResist_Wh"].sum()
+            result["brakeLossResist_Wh"] = float(vdf["brakeLossResist_Wh"].sum())
         if "brakeLossKinHyp_Wh" in vdf.columns:
-            result["brakeLossKinHyp_Wh"] = vdf["brakeLossKinHyp_Wh"].sum()
+            result["brakeLossKinHyp_Wh"] = float(vdf["brakeLossKinHyp_Wh"].sum())
 
         results[vehicle_id] = result
 
@@ -405,34 +490,37 @@ def _run_one_simulation(task):
     """
     Run a single simulation task. Designed to be called from ProcessPoolExecutor.
 
+    Each task runs ONE vehicle (one loading) with its own calibration parameter set,
+    so that empty and loaded variants can use independently calibrated parameters.
+
     Args:
-        task: tuple of (section, max_len, network_path, run_dir,
+        task: tuple of (section, max_len, loading, network_path, run_dir,
                         vehicle_params_list, jar_path, calibration_params,
                         from_coord, to_coord, qsim_timestep)
 
     Returns:
-        (section, max_len, results_dict_or_None, log_messages)
+        (section, max_len, loading, results_dict_or_None, log_messages)
     """
-    section, max_len, network_path, run_dir, vehicle_params_list, jar_path, calibration_params, from_coord, to_coord, qsim_timestep = task
+    (section, max_len, loading, network_path, run_dir, vehicle_params_list,
+     jar_path, calibration_params, from_coord, to_coord, qsim_timestep) = task
     log = []
 
     run_dir = Path(run_dir)
 
-    # For section networks, pass network_path so forward filtering is applied;
-    # for flat networks (network_path will still work but no turnaround occurs)
     if _is_cache_valid(run_dir, vehicle_params_list, calibration_params, qsim_timestep):
-        log.append(f"  Cached:     {section} / {max_len}m")
-        results = parse_resistance_debug(run_dir, network_path=network_path)
+        log.append(f"  Cached:     {section} / {max_len}m / {loading}")
+        results = parse_resistance_debug(run_dir, network_path=network_path, section=section)
     else:
-        log.append(f"  Simulating: {section} / {max_len}m")
+        log.append(f"  Simulating: {section} / {max_len}m / {loading}")
         results, err = run_section_scenario(
             jar_path, network_path, run_dir, vehicle_params_list, calibration_params,
-            from_coord=from_coord, to_coord=to_coord, qsim_timestep=qsim_timestep
+            from_coord=from_coord, to_coord=to_coord, qsim_timestep=qsim_timestep,
+            section=section,
         )
         if results:
             _write_params_cache(run_dir, vehicle_params_list, calibration_params, qsim_timestep)
         else:
-            log.append(f"  FAILED: {section} / {max_len}m" + (f" ({err})" if err else ""))
+            log.append(f"  FAILED: {section} / {max_len}m / {loading}" + (f" ({err})" if err else ""))
 
         # Extract debug lines from simulation log
         sim_log = run_dir / "simulation.log"
@@ -445,7 +533,7 @@ def _run_one_simulation(task):
         for vid, r in results.items():
             log.append(f"    {vid}: kWh/km = {r['kWh_per_km']:.4f}")
 
-    return section, max_len, results, log
+    return section, max_len, loading, results, log
 
 
 def _plot_energy_vs_link_length(results_df, ax, x_scale="log"):
@@ -559,9 +647,12 @@ def main():
         if not sections_dir.is_absolute():
             sections_dir = _SCRIPT_DIR / sections_dir
 
+        # Lazy-import the variant-generation pipeline (pulls geopandas etc.)
+        _gen = _import_variants_module()
+
         # Build list of sections that actually need generation
         section_tasks = []
-        for label, filename in SECTION_FILES.items():
+        for label, filename in _gen["SECTION_FILES"].items():
             section_path = sections_dir / filename
             if not section_path.exists():
                 print(f"\nWARNING: Section file not found: {section_path}. Skipping.")
@@ -577,18 +668,18 @@ def main():
         if section_tasks:
             # Only load heavy data when there is actual work to do
             print("\nLoading script 04 module...")
-            script04 = _import_script04()
+            script04 = _gen["_import_script04"]()
 
             print("Loading KDTree...")
-            kdtree_path = _SCRIPT_DIR / KDTREE_PATH
+            kdtree_path = _SCRIPT_DIR / _gen["KDTREE_PATH"]
             tree, coords, heights = script04.load_kdtree(str(kdtree_path))
 
             print("Loading simplified gpkg...")
-            simp_path = _SCRIPT_DIR / SIMPLIFIED_GPKG
+            simp_path = _SCRIPT_DIR / _gen["SIMPLIFIED_GPKG"]
             gdf_nodes_simplified, gdf_edges_simplified = script04.load_local_osm_file(str(simp_path))
 
             print("Loading detailed gpkg...")
-            det_path = _SCRIPT_DIR / DETAILED_GPKG
+            det_path = _SCRIPT_DIR / _gen["DETAILED_GPKG"]
             gdf_nodes_detailed, gdf_edges_detailed = script04.load_local_osm_file(str(det_path))
 
             # Generate variants in parallel (one thread per section)
@@ -601,7 +692,7 @@ def main():
             with ThreadPoolExecutor(max_workers=gen_workers) as pool:
                 futures = {
                     pool.submit(
-                        generate_variants_for_section,
+                        _gen["generate_variants_for_section"],
                         section_label=label,
                         section_path=spath,
                         link_lengths=missing_lengths,
@@ -643,8 +734,13 @@ def main():
     sim_results_dir = output_dir / "sim_results"
     sim_results_dir.mkdir(parents=True, exist_ok=True)
 
-    flat_networks_dir = output_dir / "flat_networks"
-    flat_networks_dir.mkdir(parents=True, exist_ok=True)
+    # Look for flat networks alongside the section variants first; only fall back
+    # to a private flat_networks/ subdir if they are not provided next to them.
+    if (variants_dir / "flat_50m.xml.gz").exists():
+        flat_networks_dir = variants_dir
+    else:
+        flat_networks_dir = output_dir / "flat_networks"
+        flat_networks_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Step 3: Generate flat base-case networks ---
     print("\n" + "=" * 60)
@@ -666,21 +762,24 @@ def main():
     print("Step 3: Running MATSim simulations")
     print("=" * 60)
 
-    vparams_list = VEHICLE_PARAMS_LIST
-    calib_params = CALIBRATION_DEFAULTS
-
-    # Collect all simulation tasks
+    # Collect all simulation tasks. Each task = one (section, max_len, loading)
+    # so empty/loaded vehicles get their own calibration set in separate Java runs.
     tasks = []
 
-    # Flat base-case tasks
+    def _vparams_for(loading):
+        return [{"id": f"truck_{loading}", **VEHICLE_PARAMS[loading]}]
+
+    # Flat base-case tasks (per loading)
     for max_len in LINK_LENGTHS:
         flat_net_path = flat_networks_dir / f"flat_{max_len}m.xml.gz"
         if not flat_net_path.exists():
             print(f"  SKIP flat/{max_len}m: network not found")
             continue
-        run_dir = sim_results_dir / f"flat_{max_len}m"
-        tasks.append(("flat", max_len, str(flat_net_path), str(run_dir),
-                       vparams_list, str(jar_path), calib_params, None, None, QSIM_TIMESTEP))
+        for loading in ("empty", "loaded"):
+            run_dir = sim_results_dir / f"flat_{max_len}m_{loading}"
+            tasks.append(("flat", max_len, loading, str(flat_net_path), str(run_dir),
+                           _vparams_for(loading), str(jar_path),
+                           CALIBRATION_PER_LOADING[loading], None, None, QSIM_TIMESTEP))
 
     # Section network tasks (Q75, Q97) — pass known endpoint coordinates for nearest-node resolution
     for section in SECTIONS:
@@ -692,10 +791,11 @@ def main():
             if not network_file.exists():
                 print(f"  SKIP: {network_file.name} not found")
                 continue
-
-            run_dir = sim_results_dir / f"{section}_{max_len}m"
-            tasks.append((section, max_len, str(network_file), str(run_dir),
-                           vparams_list, str(jar_path), calib_params, from_coord, to_coord, QSIM_TIMESTEP))
+            for loading in ("empty", "loaded"):
+                run_dir = sim_results_dir / f"{section}_{max_len}m_{loading}"
+                tasks.append((section, max_len, loading, str(network_file), str(run_dir),
+                               _vparams_for(loading), str(jar_path),
+                               CALIBRATION_PER_LOADING[loading], from_coord, to_coord, QSIM_TIMESTEP))
 
     print(f"\n  {len(tasks)} simulations to run ({max_workers} workers)\n")
 
@@ -704,15 +804,13 @@ def main():
     with ProcessPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_run_one_simulation, t): t for t in tasks}
         for future in as_completed(futures):
-            section, max_len, results, log_messages = future.result()
+            section, max_len, loading, results, log_messages = future.result()
             for msg in log_messages:
                 print(msg)
 
             if results:
-                # Split multi-vehicle results into individual rows
+                # Per-loading task: results dict has exactly one vehicle entry
                 for vehicle_id, r in results.items():
-                    # Extract loading name from vehicle_id (e.g. "truck_empty" -> "empty")
-                    loading = vehicle_id.replace("truck_", "")
                     row = {
                         "section": section,
                         "max_link_length": max_len,
@@ -721,7 +819,6 @@ def main():
                         "total_energy_Wh": r["total_energy_Wh"],
                         "kWh_per_km": r["kWh_per_km"],
                     }
-                    # Bremsverlust-Spalten (optional)
                     if "brakeLossResist_Wh" in r:
                         row["brakeLossResist_Wh"] = r["brakeLossResist_Wh"]
                     if "brakeLossKinHyp_Wh" in r:
