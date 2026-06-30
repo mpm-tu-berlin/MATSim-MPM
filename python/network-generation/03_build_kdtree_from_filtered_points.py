@@ -1,4 +1,13 @@
 # build_kdtree_from_gpkg_epsg4326.py
+#
+# ============================================================================
+# DEPRECATED (2026-06): Diese KD-Tree/npz-Hoehenstufe wird nicht mehr benoetigt.
+# Skript 04 sampelt die Hoehen jetzt DIREKT und CRS-korrekt aus dem LiDAR-DTM
+# (load_dtm / sample_heights), ohne npz-Punktwolke. Der hier gebaute KD-Tree
+# arbeitete im GRAD-Raum (anisotrop, 1 deg lon != 1 deg lat) + float32 -> ~2 m
+# Hoehenrauschen, vereinzelt Mehrmeter-Ausreisser an Bruecken/Parallelfahrbahnen.
+# Nur noch fuer Altlasten/Referenz aufheben; fuer neue Netze NICHT verwenden.
+# ============================================================================
 import os
 # Oversubscription vermeiden (stabilere Auslastung)
 os.environ.setdefault("OMP_NUM_THREADS", "1")

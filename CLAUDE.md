@@ -62,9 +62,9 @@ Scripts run **in sequence** (numbered 01–05). All outputs go to `python/networ
 | Script | Input | Output | Purpose |
 |--------|-------|--------|---------|
 | `01_save_filtered_osm_locally.py` | OSM (via osmnx) | `germany_simplified_DF.gpkg`, `germany_detailed_sorted_DF.gpkg` | Download + sort OSM edges; match simplified to detailed segments |
-| `02_generate_3d_roads_from_osm.py.py` | `.gpkg` files | 3D road geometry | Add z-coordinates from DTM |
-| `03_build_kdtree_from_filtered_points.py` | DTM `.tif` files (in `data/`) | `kdtree_germany_dtm20m_1m_acc.npz` | Build KDTree for height lookups |
-| `04_build_matsim_network_from_local_osm_and_kdtree.py` | `.gpkg` + `.npz` | `Germany_max_*_long_V0.xml.gz` | Build MATSim XML network with 3D nodes; splits long links |
+| `02_generate_3d_roads_from_osm.py.py` | `.gpkg` files | 3D road geometry | **DEPRECATED (2026-06)** – Höhen kommen jetzt direkt aus dem DTM in 04 |
+| `03_build_kdtree_from_filtered_points.py` | DTM `.tif` files (in `data/`) | `*.npz` | **DEPRECATED (2026-06)** – KD-Tree arbeitete im Grad-Raum (anisotrop) + float32; ersetzt durch direktes DTM-Sampling in 04 |
+| `04_build_matsim_network_from_local_osm_and_kdtree.py` | `.gpkg` + **DTM `.tif`** | `Germany_max_*_long_V0.xml.gz` | Build MATSim XML network with 3D nodes; splits long links. Höhen via direktem bilinearem DTM-Sampling (`load_dtm`/`sample_heights`), kein npz mehr |
 | `05_smooth_matsim_network.py` | `xml.gz` network | smoothed `xml.gz` network | Spline-smooth elevation profiles; optionally merge links |
 
 **DTM source data** (not in git, stored in `data/`):
@@ -73,7 +73,7 @@ Scripts run **in sequence** (numbered 01–05). All outputs go to `python/networ
 
 **Script 01 key logic:** Downloads both simplified and non-simplified OSM graphs, normalizes `reversed` flags, then iterates through simplified edges to find matching detailed sub-segments in order. This sorted detailed result becomes the network backbone.
 
-**Script 04 key logic:** Enforces `max_allowed_link_length` by recursively splitting long simplified edges at detailed segment boundaries. Elevation assigned via KDTree nearest-neighbor lookup.
+**Script 04 key logic:** Enforces `max_allowed_link_length` by recursively splitting long simplified edges at detailed segment boundaries. Elevation assigned via **direct bilinear DTM sampling** (`load_dtm`/`sample_heights`, CRS-correct EPSG:4326→DTM-CRS, thread-safe, block + tiled paths) — replaces the old anisotropic degree-space KDTree/npz lookup. Only OSM (`.gpkg`, topology) + DTM (`.tif`, elevation) are needed now.
 
 **Script 05 key logic:** Spline-smooths elevation along each network path using `scipy`. Config at top of file (INPUT_FILE, OUTPUT_FILE, SMOOTH_METHOD, MERGE_LINKS, etc.).
 

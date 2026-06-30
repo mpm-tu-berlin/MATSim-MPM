@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
 # Erzeugt 3D-Straßen aus OSM + DTM und eine OSM-HTML-Karte mit Punkt-Höhen (vor/nach Glättung).
+#
+# ============================================================================
+# DEPRECATED (2026-06): Die separate 3D-Roads/npz-Hoehenstufe (Skript 02+03) wird
+# nicht mehr benoetigt. Skript 04 sampelt die Hoehen jetzt direkt aus dem LiDAR-DTM
+# (load_dtm / sample_heights). Nur noch fuer Altlasten/Referenz aufheben.
+# ============================================================================
 
 from pathlib import Path
 import os, math, json

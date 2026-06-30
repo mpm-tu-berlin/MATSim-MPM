@@ -38,29 +38,136 @@ import gzip
 import xml.etree.ElementTree as ET
 import xml.dom.minidom as md
 
+import os
 import numpy as np
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import LineString
 from tqdm import tqdm
-from scipy.spatial import cKDTree as KDTree
+import rasterio
+from pyproj import Transformer
 
-# --------------------------- Utils / KDTree ---------------------------
+# --------------------------- Hoehen aus LiDAR-DTM ---------------------------
+# Frueher kamen die Knotenhoehen aus einer npz-Punktwolke per KD-Tree-Nearest-
+# Neighbor im GRAD-Raum (lon/lat). Das ist anisotrop (1 deg lon != 1 deg lat) und
+# erzeugte ~2 m Hoehenrauschen mit vereinzelten Mehrmeter-Ausreissern an Bruecken/
+# Parallelfahrbahnen, zusaetzlich float32-Quantisierung der Koordinaten.
+# Ersetzt durch direktes, CRS-korrektes bilineares Sampling des LiDAR-DTM an der
+# Knotenposition. Damit haengt die Pipeline nur noch an OSM (Topologie) + DTM (Hoehe).
 
-def kdtree_heights_vectorized(tree: KDTree, heights: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
-    """Return heights for (xs, ys) by nearest-neighbor lookup in a KDTree (lon, lat in EPSG:4326)."""
-    pts = np.column_stack([xs, ys])  # lon, lat
-    _, idx = tree.query(pts, k=1)
-    return heights[idx].astype(float)
+DTM_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "data", "DTM Germany 20m v3b by Sonny.tif")
+_DTM_QUERY_CRS = "EPSG:4326"        # Knotenkoordinaten beim Hoehenabruf (lon/lat)
+_DTM_MAX_BLOCK_PX = 150_000_000     # max. Fenster fuer Block-Sampling (~600 MB), sonst knotenweise
 
-def load_kdtree(input_path):
-    """Load KDTree (npz with 'coords' [lon, lat] and 'heights')."""
-    data = np.load(input_path)
-    coords = data["coords"]      # lon, lat (EPSG:4326)
-    heights = data["heights"]
-    tree = KDTree(coords)
-    print("KDTree loaded.")
-    return tree, coords, heights
+# OSM 'none' (unlimitierte Autobahn) -> Auslegungs-/Richtgeschwindigkeit. Der LKW wird
+# im Sim ohnehin durch seine eigene maximumVelocity begrenzt; entscheidend ist nur, dass
+# diese Links NICHT faelschlich auf 50 km/h Default fallen.
+NONE_MAXSPEED_KMH = 130.0
+
+
+def load_dtm(dtm_path: str = DTM_PATH) -> str:
+    """Prueft die DTM-Datei und gibt einen leichtgewichtigen Handle (den Pfad) zurueck.
+    Das Raster wird in sample_heights() PRO AUFRUF geoeffnet -> thread-sicher fuer die
+    parallele Varianten-Generierung."""
+    if not os.path.exists(dtm_path):
+        raise FileNotFoundError(f"LiDAR-DTM nicht gefunden: {dtm_path}")
+    return dtm_path
+
+
+def sample_heights(dtm_path: str, lons, lats) -> np.ndarray:
+    """Bilineare DTM-Hoehe an (lon, lat) in EPSG:4326. NaN ausserhalb/nodata.
+
+    Oeffnet das Raster selbst (thread-sicher), transformiert ins DTM-CRS und
+    interpoliert bilinear. Regionale Netze: umschliessendes Fenster einmal laden
+    (vektorisiert, schnell). Sehr grosse Bounding-Box: knotenweise 2x2-Fenster."""
+    lons = np.asarray(lons, dtype=float)
+    lats = np.asarray(lats, dtype=float)
+    out = np.full(lons.shape, np.nan, dtype=float)
+
+    with rasterio.open(dtm_path) as ds:
+        transformer = Transformer.from_crs(_DTM_QUERY_CRS, ds.crs, always_xy=True)
+        xs, ys = transformer.transform(lons, lats)
+        cols, rows = (~ds.transform) * (np.asarray(xs, float), np.asarray(ys, float))
+        cols = np.where(np.isfinite(cols), cols, -1e9)
+        rows = np.where(np.isfinite(rows), rows, -1e9)
+        c0 = np.floor(cols).astype("int64")
+        r0 = np.floor(rows).astype("int64")
+        inb = (c0 >= 0) & (r0 >= 0) & (c0 + 1 < ds.width) & (r0 + 1 < ds.height)
+        if not inb.any():
+            return out
+
+        nodata = ds.nodata
+        ci, ri = c0[inb], r0[inb]
+        fx, fy = cols[inb] - ci, rows[inb] - ri
+        cmin, cmax = int(ci.min()), int(ci.max())
+        rmin, rmax = int(ri.min()), int(ri.max())
+        win_w, win_h = cmax - cmin + 2, rmax - rmin + 2
+
+        if win_w * win_h <= _DTM_MAX_BLOCK_PX:
+            block = ds.read(1, window=rasterio.windows.Window(cmin, rmin, win_w, win_h)).astype(float)
+            if nodata is not None:
+                block = np.where(block == nodata, np.nan, block)
+            rr, cc = ri - rmin, ci - cmin
+            top = block[rr, cc] * (1 - fx) + block[rr, cc + 1] * fx
+            bot = block[rr + 1, cc] * (1 - fx) + block[rr + 1, cc + 1] * fx
+            vals = top * (1 - fy) + bot * fy
+        else:
+            # Sehr grosse Bounding-Box (z.B. deutschlandweites Feinnetz): in Kacheln
+            # <= _DTM_MAX_BLOCK_PX aufteilen, pro belegter Kachel EIN Fenster lesen und
+            # vektorisiert bilinear interpolieren (memory-bounded, schnell; nur Kacheln
+            # mit Knoten werden gelesen -> bei linienhaften Strassennetzen wenig Daten).
+            vals = np.full(ci.shape, np.nan, dtype=float)
+            tile = int(max(256, math.floor(math.sqrt(_DTM_MAX_BLOCK_PX))))  # Kachelkante [px]
+            n_tcol = ((cmax - cmin) // tile) + 1
+            tile_id = ((ri - rmin) // tile) * n_tcol + ((ci - cmin) // tile)
+            for tid in np.unique(tile_id):
+                m = tile_id == tid
+                cm0, cm1 = int(ci[m].min()), int(ci[m].max())
+                rm0, rm1 = int(ri[m].min()), int(ri[m].max())
+                w, h = cm1 - cm0 + 2, rm1 - rm0 + 2
+                blk = ds.read(1, window=rasterio.windows.Window(cm0, rm0, w, h)).astype(float)
+                if nodata is not None:
+                    blk = np.where(blk == nodata, np.nan, blk)
+                rr, cc, fxm, fym = ri[m] - rm0, ci[m] - cm0, fx[m], fy[m]
+                top = blk[rr, cc] * (1 - fxm) + blk[rr, cc + 1] * fxm
+                bot = blk[rr + 1, cc] * (1 - fxm) + blk[rr + 1, cc + 1] * fxm
+                vals[m] = top * (1 - fym) + bot * fym
+
+        out[inb] = vals
+    return out
+
+
+def _normalize_maxspeed(v):
+    """OSM-maxspeed -> km/h float. 'none' (unlimitierte Autobahn) -> NONE_MAXSPEED_KMH,
+    'walk' -> 7. Unbekannt/leer -> np.nan (Aufrufer setzt dann seinen Default)."""
+    if v is None or (isinstance(v, float) and not math.isfinite(v)):
+        return np.nan
+    s = str(v).strip().lower()
+    if s in ("none", "de:motorway", "signals", "variable"):
+        return float(NONE_MAXSPEED_KMH)
+    if s in ("walk", "de:walk", "de:living_street"):
+        return 7.0
+    try:
+        return float(s.replace(",", "."))
+    except Exception:
+        return np.nan
+
+
+# --- Rueckwaerts-kompatible Shims fuer bestehende Aufrufer -------------------
+# Die alte npz/KD-Tree-Schnittstelle bleibt aufrufbar, liefert aber jetzt DTM-Hoehen.
+# load_kdtree(pfad) ignoriert den (nicht mehr noetigen) npz-Pfad.
+
+def load_kdtree(input_path=None):
+    """DEPRECATED: Hoehen kommen jetzt direkt aus dem LiDAR-DTM. Gibt
+    (dtm_handle, None, None) zurueck, damit altes 3-Tupel-Entpacken weiter funktioniert."""
+    return load_dtm(), None, None
+
+
+def kdtree_heights_vectorized(tree, heights, xs, ys):
+    """DEPRECATED: ignoriert die alten KD-Tree-Argumente und sampelt das DTM direkt.
+    `tree` ist der dtm_handle aus load_kdtree(); `heights` wird ignoriert."""
+    return sample_heights(tree, xs, ys)
 
 def load_local_osm_file(local_osm_input_path):
     """Load nodes and edges from a local GeoPackage with layers 'nodes' and 'edges' (EPSG:4326)."""
@@ -752,10 +859,11 @@ def write_matsim_network(gdf_nodes, gdf_edges, epsg_code, output_path, nodes_wit
 
     def parse_maxspeed(val, default=130.0):
         if isinstance(val, (list, tuple, np.ndarray)):
-            cand = [_num(x) for x in val]
-            cand = [c for c in cand if c is not None]
+            cand = [_normalize_maxspeed(x) for x in val]
+            cand = [c for c in cand if c is not None and math.isfinite(c)]
             return max(cand) if cand else default
-        return _num(val, default=default)
+        r = _normalize_maxspeed(val)
+        return r if (r is not None and math.isfinite(r)) else default
 
     for _, row in gdf_edges.iterrows():
         u = _clean_text(row.get("u"), None)
@@ -764,11 +872,14 @@ def write_matsim_network(gdf_nodes, gdf_edges, epsg_code, output_path, nodes_wit
         if (u is None) or (v is None):
             continue
 
-        length_m = _num(row.get("length"), default=1.0)
+        length_m = _num(row.get("length"), default=None)
         if length_m is None or length_m <= 0:
-            # fallback from 3857 length
+            # Fallback: Geometrielaenge im (metrischen) Ziel-CRS des Netzes.
+            # gdf_edges ist hier bereits nach epsg_code (z.B. 4839) reprojiziert,
+            # daher ist geometry.length direkt in Metern. (Frueher: to_crs(3857),
+            # was in DE die Laenge um ~50-75 % ueberschaetzte.)
             try:
-                length_m = float(gpd.GeoSeries([row.geometry], crs=gdf_edges.crs).to_crs(3857).length.iloc[0])
+                length_m = float(row.geometry.length)
             except Exception:
                 length_m = 1.0
         length = str(int(round(max(1.0, length_m))))
@@ -905,15 +1016,13 @@ def sanitize_edges_for_export(gdf_edges: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         def _mx(v):
             if isinstance(v, (list, tuple, np.ndarray, pd.Series)):
                 try:
-                    vals = pd.to_numeric(pd.Series(list(v)), errors='coerce')
+                    vals = pd.to_numeric(
+                        pd.Series([_normalize_maxspeed(x) for x in v]), errors='coerce')
                     vals = vals[vals.notna()]
                     return float(vals.max()) if not vals.empty else np.nan
                 except Exception:
                     return np.nan
-            try:
-                return float(str(v).replace(",", "."))
-            except Exception:
-                return np.nan
+            return _normalize_maxspeed(v)
         df['maxspeed'] = df['maxspeed'].apply(_mx)
         df['maxspeed'] = pd.to_numeric(df['maxspeed'], errors='coerce').fillna(50.0).clip(lower=1.0)
 
@@ -941,13 +1050,14 @@ def generate_network(
         version: str = "V0",
 ):
     # --- Pfade & Namen ---
-    kdtree_input_path = f"data/germany_3d_raster_clamped_DF_kdtree_from_roads3d_epsg4326.npz" #f"data/{area}_kdtree_from_roads3d_epsg4326.npz"
+    # Hoehen kommen jetzt direkt aus dem LiDAR-DTM (siehe load_dtm/sample_heights),
+    # nicht mehr aus einer npz/KD-Tree-Punktwolke.
     local_osm_input_path_simplified = f"data/germany_simplified_DF.gpkg" #f"data/{area}_simplified.gpkg"
     local_osm_input_path_detailed   = f"data/germany_detailed_sorted_DF.gpkg" #f"data/{area}_detailed_sorted.gpkg"
     output_path = f"data/{area}_max{int(max_allowed_link_length)}m_{version}.xml.gz"
 
     # --- Daten laden ---
-    tree, coords, heights = load_kdtree(kdtree_input_path)
+    dtm = load_dtm()
     gdf_nodes_simplified, gdf_edges_simplified = load_local_osm_file(local_osm_input_path_simplified)
     gdf_nodes_detailed,   gdf_edges_detailed   = load_local_osm_file(local_osm_input_path_detailed)
 
@@ -1011,7 +1121,7 @@ def generate_network(
     gdf_nodes_export = gpd.GeoDataFrame(node_rows, crs="EPSG:4326")
     xs = gdf_nodes_export.geometry.x.to_numpy()
     ys = gdf_nodes_export.geometry.y.to_numpy()
-    gdf_nodes_export['height'] = kdtree_heights_vectorized(tree, heights, xs, ys)
+    gdf_nodes_export['height'] = sample_heights(dtm, xs, ys)
 
     # --- Export ---
     write_matsim_network(
