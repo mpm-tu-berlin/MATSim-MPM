@@ -154,7 +154,8 @@ def _is_structure(row):
 
 def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
                                    target_epsg=4839, sample_step_m=5.0,
-                                   smooth_rms_m=1.0, debug=False):
+                                   smooth_rms_m=1.0, debug=False,
+                                   collect_dense=False):
     """Aufloesungsunabhaengige, sanfte Hoehenzuweisung ueber ein Master-Profil.
 
     Statt das DTM nur an den (Post-Split-)Knoten zu sampeln, wird pro Korridor
@@ -171,6 +172,12 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
 
     Es faellt genau EIN DTM-Zugriff an (alle Punkte gebuendelt). Ersetzt Skript 05
     fuer die DTM-Pipeline. Rueckgabe: dict node_id(str) -> Hoehe [m] (NaN wo DTM fehlt).
+
+    collect_dense=True: zusaetzlich wird das DICHTE, geglaettete Fahrbahnprofil
+    (alle Sample-Punkte, nicht nur Knoten) als Nx3-Array [lon, lat, z] geliefert
+    -> Rueckgabe (z, dense) bzw. (z, dbg, dense). Ideal fuer eine reine
+    Koordinate->Hoehe-Lookup-Tabelle (Autobahn/Bundesstrasse), unabhaengig von der
+    MATSim-Netztopologie/Linklaenge.
     """
     from collections import defaultdict
     import warnings as _warn
@@ -290,10 +297,14 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
 
     z = {}
     dbg = {}
+    dense_rows = []      # Nx3 [lon, lat, z] fuer collect_dense
     for j, n in enumerate(direct_nodes):
         z[n] = float(zall[direct_start + j])
         if debug:
             dbg[n] = (float("nan"), float("nan"), False)
+        if collect_dense:
+            lo, la = node_lonlat[n]
+            dense_rows.append((float(lo), float(la), float(zall[direct_start + j])))
 
     for (path_nodes, node_s, start, n_samp, ss, edge_end_s, edge_struct) in slices:
         zdense = zall[start:start + n_samp].astype(float).copy()
@@ -339,7 +350,20 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
             z[n] = zfun(node_s[n])
             if debug:
                 dbg[n] = (Lc, float(node_s[n]), st)
+        if collect_dense:
+            lon_c = np.asarray(all_lon[start:start + n_samp], float)
+            lat_c = np.asarray(all_lat[start:start + n_samp], float)
+            z_c = np.fromiter((zfun(q) for q in ss), float, count=n_samp)
+            good = np.isfinite(z_c)
+            if good.any():
+                dense_rows.extend(zip(lon_c[good].tolist(),
+                                      lat_c[good].tolist(),
+                                      z_c[good].tolist()))
 
+    if collect_dense:
+        dense = (np.asarray(dense_rows, float).reshape(-1, 3)
+                 if dense_rows else np.empty((0, 3), float))
+        return (z, dbg, dense) if debug else (z, dense)
     return (z, dbg) if debug else z
 
 
@@ -1321,6 +1345,28 @@ def sanitize_edges_for_export(gdf_edges: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
     return df
 
+def _save_dense_heights_csv(dense, out_csv, coord_decimals=6, z_decimals=2):
+    """Speichert das dichte Fahrbahnprofil (Nx3 [lon, lat, z]) als lon,lat,z-CSV.
+    Rundet Koordinaten/Hoehe und mittelt z an mehrfach abgedeckten (lon,lat)-Punkten
+    (geteilte Knoten benachbarter Korridore) fuer eine konsistente Lookup-Tabelle."""
+    import os as _os
+    dense = np.asarray(dense, float).reshape(-1, 3)
+    df = pd.DataFrame({
+        "lon": np.round(dense[:, 0], coord_decimals),
+        "lat": np.round(dense[:, 1], coord_decimals),
+        "z":   np.round(dense[:, 2], z_decimals),
+    }).dropna()
+    df = df.groupby(["lon", "lat"], as_index=False)["z"].mean()
+    df["z"] = df["z"].round(z_decimals)
+    df = df.sort_values(["lat", "lon"], kind="mergesort")
+    d = _os.path.dirname(_os.path.abspath(out_csv))
+    if d:
+        _os.makedirs(d, exist_ok=True)
+    df.to_csv(out_csv, index=False)
+    print(f"Dichtes Fahrbahn-Hoehenprofil: {len(df)} Punkte -> {out_csv}")
+    return out_csv
+
+
 def generate_network(
         area: str,
         max_allowed_link_length: float,
@@ -1332,7 +1378,12 @@ def generate_network(
         output_path: str = None,
         smooth_rms_m: float = 1.0,
         sample_step_m: float = 5.0,
+        dense_heights_csv: str = None,
 ):
+    """Baut das MATSim-Netz. Wird `dense_heights_csv` gesetzt, wird zusaetzlich das
+    im Hoehen-Schritt ohnehin berechnete DICHTE Fahrbahnprofil (lon, lat, z) als CSV
+    gespeichert -- eine reine Koordinate->Hoehe-Lookup-Tabelle fuer Autobahn/Bundes-
+    strasse, unabhaengig von der gewaehlten Linklaenge. Kein zweiter OSM-/DTM-Zugriff."""
     # --- Pfade & Namen ---
     # Hoehen kommen jetzt direkt aus dem LiDAR-DTM (siehe load_dtm/sample_heights),
     # nicht mehr aus einer npz/KD-Tree-Punktwolke. GPKG-/DTM-/Output-Pfade sind
@@ -1409,9 +1460,16 @@ def generate_network(
     # (ersetzt Punkt-Sampling + Skript 05). smooth_rms_m=0 -> ungeglaettet.
     node_lonlat = {str(r['osmid']): (float(r['geometry'].x), float(r['geometry'].y))
                    for r in node_rows}
-    z_by_node = assign_heights_along_corridors(
-        gdf_edges_shortened, node_lonlat, dtm,
-        target_epsg=target_epsg, sample_step_m=sample_step_m, smooth_rms_m=smooth_rms_m)
+    if dense_heights_csv:
+        z_by_node, dense = assign_heights_along_corridors(
+            gdf_edges_shortened, node_lonlat, dtm,
+            target_epsg=target_epsg, sample_step_m=sample_step_m,
+            smooth_rms_m=smooth_rms_m, collect_dense=True)
+        _save_dense_heights_csv(dense, dense_heights_csv)
+    else:
+        z_by_node = assign_heights_along_corridors(
+            gdf_edges_shortened, node_lonlat, dtm,
+            target_epsg=target_epsg, sample_step_m=sample_step_m, smooth_rms_m=smooth_rms_m)
     gdf_nodes_export['height'] = [z_by_node.get(str(nid), np.nan)
                                   for nid in gdf_nodes_export['osmid']]
 
@@ -1433,6 +1491,14 @@ if __name__ == "__main__":
     parser.add_argument("--max-length", type=float, required=True, help="Max. Linklänge in Metern")
     parser.add_argument("--version", type=str, default="V0")
     parser.add_argument("--epsg", type=int, default=4839)
+    parser.add_argument("--dtm", type=str, default=None, help="Pfad zur DTM-.tif")
+    parser.add_argument("--simplified-gpkg", type=str, default=None)
+    parser.add_argument("--detailed-gpkg", type=str, default=None)
+    parser.add_argument("--output", type=str, default=None, help="Netz-Ausgabepfad (.xml.gz)")
+    parser.add_argument("--sample-step", type=float, default=5.0)
+    parser.add_argument("--smooth-rms", type=float, default=1.0)
+    parser.add_argument("--dense-heights-csv", type=str, default=None,
+                        help="Wenn gesetzt: dichtes Fahrbahnprofil (lon,lat,z) zusaetzlich hierhin speichern")
     args = parser.parse_args()
 
     generate_network(
@@ -1440,5 +1506,12 @@ if __name__ == "__main__":
         max_allowed_link_length=args.max_length,
         target_epsg=args.epsg,
         version=args.version,
+        dtm_path=args.dtm,
+        simplified_gpkg=args.simplified_gpkg,
+        detailed_gpkg=args.detailed_gpkg,
+        output_path=args.output,
+        sample_step_m=args.sample_step,
+        smooth_rms_m=args.smooth_rms,
+        dense_heights_csv=args.dense_heights_csv,
     )
 

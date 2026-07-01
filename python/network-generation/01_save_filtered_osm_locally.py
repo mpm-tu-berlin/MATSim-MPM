@@ -113,7 +113,7 @@ def normalize_reversed_flags(gdf_edges_simplified, starts_by_osmid, ends_by_osmi
 
 
 def build_region(area="Germany", bbox=None, out_prefix=None,
-                 highway_types='["highway"~"motorway"]'):
+                 highway_types='["highway"~"motorway|motorway_link|trunk|trunk_link|primary|primary_link"]'):
     """Laedt OSM-Strassennetz (simplified + detailed) fuer eine Region und schreibt
     zwei GPKGs (simplified + detailed_sorted). Region entweder per Ortsname `area`
     ODER `bbox`=(west, south, east, north). `out_prefix` bestimmt die Ausgabepfade
