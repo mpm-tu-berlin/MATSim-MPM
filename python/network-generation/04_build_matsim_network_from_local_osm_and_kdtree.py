@@ -154,7 +154,7 @@ def _is_structure(row):
 
 def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
                                    target_epsg=4839, sample_step_m=20.0,
-                                   smooth_rms_m=1.0):
+                                   smooth_rms_m=1.0, debug=False):
     """Aufloesungsunabhaengige, sanfte Hoehenzuweisung ueber ein Master-Profil.
 
     Statt das DTM nur an den (Post-Split-)Knoten zu sampeln, wird pro Korridor
@@ -287,8 +287,11 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
     zall = sample_heights(dtm_path, np.asarray(all_lon), np.asarray(all_lat))
 
     z = {}
+    dbg = {}
     for j, n in enumerate(direct_nodes):
         z[n] = float(zall[direct_start + j])
+        if debug:
+            dbg[n] = (float("nan"), float("nan"), False)
 
     for (path_nodes, node_s, start, n_samp, ss, edge_end_s, edge_struct) in slices:
         zdense = zall[start:start + n_samp].astype(float).copy()
@@ -329,10 +332,13 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
                 zfun = lambda q, a=s_fit, b=z_fit: float(np.interp(q, a, b))
         else:
             zfun = lambda q, a=s_fit, b=z_fit: float(np.interp(q, a, b))
+        st = any(edge_struct); Lc = float(ss[-1])
         for n in interior:
             z[n] = zfun(node_s[n])
+            if debug:
+                dbg[n] = (Lc, float(node_s[n]), st)
 
-    return z
+    return (z, dbg) if debug else z
 
 
 def _normalize_maxspeed(v):
@@ -877,6 +883,39 @@ def split_once_at_half(edge, seq_det: gpd.GeoDataFrame):
 
 import sys
 
+
+def _canonicalize_to_detailed(edge_row, seq_det):
+    """Ersetzt Geometrie + Laenge einer (nicht gesplitteten) Kante durch ihre
+    konkatenierte DETAILGEOMETRIE. Damit nutzen kept- und split-Kanten dieselbe
+    Repraesentation -> Laenge und Hoehenprofil sind unabhaengig von der erlaubten
+    Linklaenge. u/v und alle Tags (inkl. bridge/tunnel) bleiben erhalten.
+    Rueckgabe: Series (Kante) oder None, wenn keine brauchbare Sequenz."""
+    if seq_det is None or seq_det.empty:
+        return None
+    row = edge_row.copy()
+    coords = []
+    prev_end = None
+    for _, s in seq_det.iterrows():
+        g = s.geometry
+        if g is None:
+            continue
+        if prev_end is not None and g.coords[0] != prev_end:
+            g = LineString(list(g.coords)[::-1])
+        if not coords:
+            coords.extend(list(g.coords))
+        else:
+            coords.extend(list(g.coords)[1:])
+        prev_end = g.coords[-1]
+    if len(coords) < 2:
+        return None
+    row['geometry'] = LineString(coords)
+    L = pd.to_numeric(seq_det['length'], errors='coerce').fillna(0.0).sum()
+    if np.isfinite(L) and L > 0:
+        row['length'] = float(L)
+    row['origin'] = 'keep'
+    return row
+
+
 def short_edges(gdf_edges_simplified: gpd.GeoDataFrame,
                 gdf_edges_detailed: gpd.GeoDataFrame,
                 max_allowed_length: float):
@@ -898,6 +937,21 @@ def short_edges(gdf_edges_simplified: gpd.GeoDataFrame,
     long_edges = gdf_edges_simplified[is_long]
     keep_edges = gdf_edges_simplified[~is_long].copy()
     keep_edges['origin'] = 'keep'
+    # Kanonisierung: auch NICHT gesplittete Kanten auf ihre Detailgeometrie umstellen,
+    # damit Laenge/Hoehe unabhaengig von max_allowed_length sind (sonst nutzen kept-
+    # Kanten die simplified-, split-Kanten die detailed-Repraesentation -> ~0.6 %
+    # Laengen- und ~0.7 m Hoehen-Drift ueber Auflösungen). Bei fehlender Sequenz:
+    # simplified-Kante als Fallback behalten.
+    if len(keep_edges):
+        canon = []
+        for _, e in keep_edges.iterrows():
+            try:
+                seq = get_directed_detailed_sequence(e, gdf_edges_detailed, osmid_index)
+                r = _canonicalize_to_detailed(e, seq)
+            except Exception:
+                r = None
+            canon.append(r if r is not None else e)
+        keep_edges = gpd.GeoDataFrame(canon, crs="EPSG:4326")
 
     result_parts = [keep_edges]
     split_nodes_xy = {}
