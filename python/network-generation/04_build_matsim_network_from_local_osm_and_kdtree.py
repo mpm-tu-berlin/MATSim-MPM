@@ -138,6 +138,203 @@ def sample_heights(dtm_path: str, lons, lats) -> np.ndarray:
     return out
 
 
+def _is_structure(row):
+    """True, wenn die Kante als Bruecke/Tunnel/Viadukt getaggt ist (OSM bridge/tunnel).
+    Auf solchen Spans gibt das DTM (Bare-Earth) Talboden/Berg statt der Fahrbahn ->
+    dort wird die Hoehe linear zwischen den An-Grade-Enden interpoliert."""
+    for key in ("bridge", "tunnel"):
+        if key in row.index:
+            val = row[key]
+            if isinstance(val, (list, tuple)) and len(val):
+                val = val[0]
+            if str(val).strip().lower() in ("yes", "true", "1", "viaduct", "bridge", "tunnel"):
+                return True
+    return False
+
+
+def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
+                                   target_epsg=4839, sample_step_m=20.0,
+                                   smooth_rms_m=1.0):
+    """Aufloesungsunabhaengige, sanfte Hoehenzuweisung ueber ein Master-Profil.
+
+    Statt das DTM nur an den (Post-Split-)Knoten zu sampeln, wird pro Korridor
+    (Kette von Grad-2-Knoten zwischen Kreuzungen) das DTM DICHT entlang der
+    Kantengeometrie gesampelt (~sample_step_m), das Profil EINMAL sanft geglaettet
+    (Spline, Ziel-RMS = smooth_rms_m) und jede Knotenhoehe am zugehoerigen
+    Bogenlaengen-Punkt gelesen. Damit sind die Hoehen ueber alle Linklaengen
+    konsistent (kein Auflösungs-Confound), Bare-Earth-Artefakte (Damm/Bruecke)
+    werden ueber viele dichte Punkte geglaettet, ohne echtes Terrain zu loeschen.
+    Kreuzungsknoten (Grad != 2) werden direkt (ungeglaettet) gesampelt.
+    smooth_rms_m <= 0 -> keine Glaettung (nur dichtes Profil, ~Punktwert am Knoten).
+
+    Es faellt genau EIN DTM-Zugriff an (alle Punkte gebuendelt). Ersetzt Skript 05
+    fuer die DTM-Pipeline. Rueckgabe: dict node_id(str) -> Hoehe [m] (NaN wo DTM fehlt).
+    """
+    from collections import defaultdict
+    import warnings as _warn
+    try:
+        from scipy.interpolate import UnivariateSpline
+    except Exception:
+        UnivariateSpline = None
+
+    # --- Topologie ---
+    adj = defaultdict(list)      # node -> [(edge_key, other_node)]
+    egeom = {}                   # edge_key -> (LineString, u, v)
+    estruct = {}                 # edge_key -> bool (Bruecke/Tunnel)
+    for k, row in gdf_edges.iterrows():
+        u, v = str(row['u']), str(row['v'])
+        g = row.geometry
+        if g is None or u == v:
+            continue
+        egeom[k] = (g, u, v)
+        estruct[k] = _is_structure(row)
+        adj[u].append((k, v))
+        adj[v].append((k, u))
+
+    deg = {n: len(lst) for n, lst in adj.items()}
+    junctions = {n for n, d in deg.items() if d != 2}
+    tf = Transformer.from_crs("EPSG:4326", f"EPSG:{target_epsg}", always_xy=True)
+
+    # --- Korridore (Kanten in Pfadreihenfolge) aufbauen ---
+    visited = set()
+    corridors = []
+
+    def walk(start, first_edge, first_other):
+        path_nodes = [start, first_other]
+        path_edges = [first_edge]
+        visited.add(first_edge)
+        cur = first_other
+        while deg.get(cur, 0) == 2 and cur not in junctions:
+            nxts = [(ek, o) for (ek, o) in adj[cur] if ek not in visited]
+            if not nxts:
+                break
+            ek, o = nxts[0]
+            visited.add(ek)
+            path_nodes.append(o)
+            path_edges.append(ek)
+            cur = o
+            if o == start:   # Schleife geschlossen
+                break
+        return path_nodes, path_edges
+
+    for j in junctions:
+        for (ek, o) in adj[j]:
+            if ek not in visited:
+                corridors.append(walk(j, ek, o))
+    for k in list(egeom.keys()):       # reine Schleifen ohne Kreuzung
+        if k not in visited:
+            g, u, v = egeom[k]
+            corridors.append(walk(u, k, v))
+
+    # --- alle Sample-Punkte buendeln (dicht je Korridor + direkte Knoten) ---
+    all_lon, all_lat = [], []
+    slices = []          # (path_nodes, node_s, start, n_samp, ss)
+    covered = set()
+    direct_nodes = []
+
+    for path_nodes, path_edges in corridors:
+        try:
+            fx, fy = [], []
+            node_s = {path_nodes[0]: 0.0}
+            edge_end_s, edge_struct = [], []
+            cum = 0.0
+            for i, ek in enumerate(path_edges):
+                g, eu, ev = egeom[ek]
+                lon, lat = zip(*list(g.coords))
+                mx, my = tf.transform(np.asarray(lon, float), np.asarray(lat, float))
+                mx = np.asarray(mx, float); my = np.asarray(my, float)
+                if eu != path_nodes[i]:           # Geometrie an path_nodes[i] ausrichten
+                    mx, my = mx[::-1], my[::-1]
+                if i == 0:
+                    fx.extend(mx.tolist()); fy.extend(my.tolist())
+                else:
+                    fx.extend(mx[1:].tolist()); fy.extend(my[1:].tolist())
+                cum += float(np.hypot(np.diff(mx), np.diff(my)).sum())
+                node_s[path_nodes[i + 1]] = cum
+                edge_end_s.append(cum)
+                edge_struct.append(bool(estruct.get(ek, False)))
+            fx = np.asarray(fx); fy = np.asarray(fy)
+            seg = np.hypot(np.diff(fx), np.diff(fy))
+            s_vtx = np.concatenate([[0.0], np.cumsum(seg)])
+            L = float(s_vtx[-1])
+            if fx.size < 2 or L <= 0:
+                raise ValueError("degenerate")
+            n_samp = max(2, int(np.ceil(L / max(1.0, sample_step_m))) + 1)
+            ss = np.linspace(0.0, L, n_samp)
+            sx = np.interp(ss, s_vtx, fx); sy = np.interp(ss, s_vtx, fy)
+            lon_s, lat_s = tf.transform(sx, sy, direction="INVERSE")
+            start = len(all_lon)
+            all_lon.extend(np.asarray(lon_s).tolist())
+            all_lat.extend(np.asarray(lat_s).tolist())
+            slices.append((path_nodes, node_s, start, n_samp, ss,
+                           np.asarray(edge_end_s, float), edge_struct))
+            covered.update(path_nodes)
+        except Exception:
+            direct_nodes.extend(path_nodes)
+
+    for n in junctions:                # Kreuzungen immer direkt (konsistent ueber Korridore)
+        direct_nodes.append(n)
+    for n in adj:                      # nicht abgedeckte Knoten
+        if n not in covered and n not in junctions:
+            direct_nodes.append(n)
+    direct_nodes = list(dict.fromkeys(direct_nodes))
+    direct_start = len(all_lon)
+    for n in direct_nodes:
+        lo, la = node_lonlat[n]
+        all_lon.append(lo); all_lat.append(la)
+
+    # --- EIN DTM-Zugriff fuer alle Punkte ---
+    zall = sample_heights(dtm_path, np.asarray(all_lon), np.asarray(all_lat))
+
+    z = {}
+    for j, n in enumerate(direct_nodes):
+        z[n] = float(zall[direct_start + j])
+
+    for (path_nodes, node_s, start, n_samp, ss, edge_end_s, edge_struct) in slices:
+        zdense = zall[start:start + n_samp].astype(float).copy()
+        # Bruecken/Tunnel: Bare-Earth-DTM durch lineare Interpolation zwischen den
+        # An-Grade-Hoehen an den Bauwerksenden ersetzen (wie Skript 02).
+        if any(edge_struct):
+            eidx = np.clip(np.searchsorted(edge_end_s, ss, side="right"), 0, len(edge_struct) - 1)
+            is_st = np.fromiter((edge_struct[i] for i in eidx), bool, count=len(eidx))
+            i, N = 0, len(ss)
+            while i < N:
+                if is_st[i]:
+                    j = i
+                    while j < N and is_st[j]:
+                        j += 1
+                    z_a = zdense[i - 1] if (i > 0 and np.isfinite(zdense[i - 1])) else zdense[i]
+                    z_b = zdense[j] if (j < N and np.isfinite(zdense[j])) else zdense[j - 1]
+                    if np.isfinite(z_a) and np.isfinite(z_b):
+                        zdense[i:j] = np.linspace(z_a, z_b, j - i)
+                    i = j
+                else:
+                    i += 1
+        interior = [n for n in path_nodes if n not in junctions]
+        fin = np.isfinite(zdense)
+        if fin.sum() < 2:
+            for n in interior:
+                z.setdefault(n, float("nan"))
+            continue
+        s_fit, z_fit = ss[fin], zdense[fin]
+        if smooth_rms_m and smooth_rms_m > 0 and UnivariateSpline is not None and s_fit.size >= 4:
+            w = np.clip(np.abs(np.gradient(s_fit)), 1e-6, None)
+            k = min(3, s_fit.size - 1)
+            try:
+                with _warn.catch_warnings():
+                    _warn.simplefilter("ignore")
+                    spl = UnivariateSpline(s_fit, z_fit, w=w, s=(smooth_rms_m ** 2) * float(w.sum()), k=k)
+                zfun = lambda q, _spl=spl: float(_spl(q))
+            except Exception:
+                zfun = lambda q, a=s_fit, b=z_fit: float(np.interp(q, a, b))
+        else:
+            zfun = lambda q, a=s_fit, b=z_fit: float(np.interp(q, a, b))
+        for n in interior:
+            z[n] = zfun(node_s[n])
+
+    return z
+
+
 def _normalize_maxspeed(v):
     """OSM-maxspeed -> km/h float. 'none' (unlimitierte Autobahn) -> NONE_MAXSPEED_KMH,
     'walk' -> 7. Unbekannt/leer -> np.nan (Aufrufer setzt dann seinen Default)."""
@@ -1077,6 +1274,8 @@ def generate_network(
         detailed_gpkg: str = None,
         dtm_path: str = None,
         output_path: str = None,
+        smooth_rms_m: float = 1.0,
+        sample_step_m: float = 20.0,
 ):
     # --- Pfade & Namen ---
     # Hoehen kommen jetzt direkt aus dem LiDAR-DTM (siehe load_dtm/sample_heights),
@@ -1150,9 +1349,15 @@ def generate_network(
         seen.add(nid)
 
     gdf_nodes_export = gpd.GeoDataFrame(node_rows, crs="EPSG:4326")
-    xs = gdf_nodes_export.geometry.x.to_numpy()
-    ys = gdf_nodes_export.geometry.y.to_numpy()
-    gdf_nodes_export['height'] = sample_heights(dtm, xs, ys)
+    # Aufloesungsunabhaengige, sanft geglaettete Hoehen ueber Master-Korridor-Profile
+    # (ersetzt Punkt-Sampling + Skript 05). smooth_rms_m=0 -> ungeglaettet.
+    node_lonlat = {str(r['osmid']): (float(r['geometry'].x), float(r['geometry'].y))
+                   for r in node_rows}
+    z_by_node = assign_heights_along_corridors(
+        gdf_edges_shortened, node_lonlat, dtm,
+        target_epsg=target_epsg, sample_step_m=sample_step_m, smooth_rms_m=smooth_rms_m)
+    gdf_nodes_export['height'] = [z_by_node.get(str(nid), np.nan)
+                                  for nid in gdf_nodes_export['osmid']]
 
     # --- Export ---
     write_matsim_network(

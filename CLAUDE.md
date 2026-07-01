@@ -65,7 +65,7 @@ Scripts run **in sequence** (numbered 01–05). All outputs go to `python/networ
 | `02_generate_3d_roads_from_osm.py.py` | `.gpkg` files | 3D road geometry | **DEPRECATED (2026-06)** – Höhen kommen jetzt direkt aus dem DTM in 04 |
 | `03_build_kdtree_from_filtered_points.py` | DTM `.tif` files (in `data/`) | `*.npz` | **DEPRECATED (2026-06)** – KD-Tree arbeitete im Grad-Raum (anisotrop) + float32; ersetzt durch direktes DTM-Sampling in 04 |
 | `04_build_matsim_network_from_local_osm_and_kdtree.py` | `.gpkg` + **DTM `.tif`** | `Germany_max_*_long_V0.xml.gz` | Build MATSim XML network with 3D nodes; splits long links. Höhen via direktem bilinearem DTM-Sampling (`load_dtm`/`sample_heights`), kein npz mehr |
-| `05_smooth_matsim_network.py` | `xml.gz` network | smoothed `xml.gz` network | Spline-smooth elevation profiles; optionally merge links |
+| `05_smooth_matsim_network.py` | `xml.gz` network | smoothed `xml.gz` network | **OPTIONAL/LEGACY (2026-06)** – Glättung + Brücken/Tunnel-Linearisierung sind jetzt in 04 integriert (auflösungsunabhängig). 05 nur noch für Netze ohne Kantengeometrie oder als Sensitivität; nach 04 NICHT nötig (sonst Doppelglättung) |
 
 **DTM source data** (not in git, stored in `data/`):
 - `DTM Germany 20m v3b by Sonny.tif` – primary elevation source
@@ -73,7 +73,7 @@ Scripts run **in sequence** (numbered 01–05). All outputs go to `python/networ
 
 **Script 01 key logic:** Downloads both simplified and non-simplified OSM graphs, normalizes `reversed` flags, then iterates through simplified edges to find matching detailed sub-segments in order. This sorted detailed result becomes the network backbone.
 
-**Script 04 key logic:** Enforces `max_allowed_link_length` by recursively splitting long simplified edges at detailed segment boundaries. Elevation assigned via **direct bilinear DTM sampling** (`load_dtm`/`sample_heights`, CRS-correct EPSG:4326→DTM-CRS, thread-safe, block + tiled paths) — replaces the old anisotropic degree-space KDTree/npz lookup. Only OSM (`.gpkg`, topology) + DTM (`.tif`, elevation) are needed now.
+**Script 04 key logic:** Enforces `max_allowed_link_length` by recursively splitting long simplified edges at detailed segment boundaries. Elevation is assigned via **direct bilinear DTM sampling** (`load_dtm`/`sample_heights`, CRS-correct EPSG:4326→DTM-CRS, thread-safe, block + tiled paths) — replaces the old anisotropic degree-space KDTree/npz lookup. By default heights use **`assign_heights_along_corridors`**: per corridor the DTM is sampled densely (~`sample_step_m`) along the road geometry, the profile is gently smoothed once (`smooth_rms_m`, resolution-independent), **bridge/tunnel spans are linearised** between the at-grade ends (OSM `bridge`/`tunnel`, avoids bare-earth valley/mountain artifacts), and node z is read at each arc-length position. This folds Script 05's smoothing into 04. Only OSM (`.gpkg`, topology) + DTM (`.tif`, elevation) are needed.
 
 **Script 05 key logic:** Spline-smooths elevation along each network path using `scipy`. Config at top of file (INPUT_FILE, OUTPUT_FILE, SMOOTH_METHOD, MERGE_LINKS, etc.).
 

@@ -1,3 +1,11 @@
+# ============================================================================
+# HINWEIS (2026-06): Fuer die DTM-Pipeline ist dieses Skript OPTIONAL/LEGACY.
+# Skript 04 (assign_heights_along_corridors) glaettet die Hoehen jetzt bereits
+# AUFLÖSUNGSUNABHÄNGIG auf einem dichten Master-Korridorprofil UND linearisiert
+# Bruecken/Tunnel (OSM bridge/tunnel). Ein zusaetzlicher Lauf von 05 danach wuerde
+# DOPPELT glaetten. 05 bleibt nutzbar fuer Netze OHNE Kantengeometrie (nur Knoten)
+# oder als separate Glaettungs-Sensitivitaet.
+# ============================================================================
 import gzip
 import xml.etree.ElementTree as ET
 import networkx as nx
@@ -13,10 +21,15 @@ import warnings
 INPUT_FILE  = r"data\Germany_max_unlimited_long_V0.xml.gz"
 OUTPUT_FILE = r"data\Germany_max_unlimited_long_smoothened_not_merged_0_05.xml.gz"
 
-# Glättung (Spline)
+# Glättung (Spline) – SANFT, seit die Höhen direkt & rauscharm aus dem LiDAR-DTM
+# kommen (Skript 04, sample_heights). Früher diente die Glättung der Unterdrückung
+# des ~2 m KD-Tree-Rauschens (RMS 3 m) – das entfällt jetzt. Ziel ist nur noch
+# sanftes Glätten kurzwelliger Bare-Earth-Artefakte (Damm-/Brücken-Übergänge),
+# OHNE echtes Terrain zu löschen. Kleinerer RMS = weniger Glättung (sanfter):
+#   0.5 = sehr sanft (nur Sub-Meter-Jitter) · 1.0 = sanft (Damm-Skala) · 3.0 = alt/aggressiv
 SMOOTH_METHOD = "spline"
 SPLINE_S = None            # None = auto (siehe SPLINE_TARGET_RMS), sonst fester Wert
-SPLINE_TARGET_RMS = 3      # Ziel-RMS in m
+SPLINE_TARGET_RMS = 1.0    # Ziel-RMS [m] – sanft (war 3.0 für KD-Tree-Rauschen)
 
 DEBUG_PATH_PRINTS = False
 
