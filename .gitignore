@@ -38,6 +38,7 @@ python/calibration/scripts/optimize_multi_bet_g5.py
 python/calibration/scripts/analyze_real_validation.py
 python/calibration/scripts/results/
 python/calibration/REAL_VALIDATION_PLAN.md
+python/calibration/REVIEW_FINDINGS_2026-06.md
 
 # Python-Kalibrierung
 python/calibration/.venv/
@@ -50,3 +51,8 @@ python/calibration/nul
 python/calibration/resistance_debug.csv
 python/calibration/data/
 python/calibration/~$*
+
+# Netzgenerierung: große Rasterquellen (DTM), OSM-/Overpass-Cache, Python-Cache
+*.tif
+cache/
+python/network-generation/__pycache__/
