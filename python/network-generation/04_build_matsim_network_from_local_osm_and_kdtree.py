@@ -153,13 +153,15 @@ def _is_structure(row):
 
 
 def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
-                                   target_epsg=4839, sample_step_m=20.0,
+                                   target_epsg=4839, sample_step_m=5.0,
                                    smooth_rms_m=1.0, debug=False):
     """Aufloesungsunabhaengige, sanfte Hoehenzuweisung ueber ein Master-Profil.
 
     Statt das DTM nur an den (Post-Split-)Knoten zu sampeln, wird pro Korridor
     (Kette von Grad-2-Knoten zwischen Kreuzungen) das DTM DICHT entlang der
-    Kantengeometrie gesampelt (~sample_step_m), das Profil EINMAL sanft geglaettet
+    Kantengeometrie gesampelt (~sample_step_m; Default 5 m = 4x Oversampling der
+    20-m-DTM -> Nyquist-sicher gegen Aliasing der bilinearen Rasterflaeche, ohne
+    echte Info < 20 m vorzutaeuschen), das Profil EINMAL sanft geglaettet
     (Spline, Ziel-RMS = smooth_rms_m) und jede Knotenhoehe am zugehoerigen
     Bogenlaengen-Punkt gelesen. Damit sind die Hoehen ueber alle Linklaengen
     konsistent (kein Auflösungs-Confound), Bare-Earth-Artefakte (Damm/Bruecke)
@@ -1329,7 +1331,7 @@ def generate_network(
         dtm_path: str = None,
         output_path: str = None,
         smooth_rms_m: float = 1.0,
-        sample_step_m: float = 20.0,
+        sample_step_m: float = 5.0,
 ):
     # --- Pfade & Namen ---
     # Hoehen kommen jetzt direkt aus dem LiDAR-DTM (siehe load_dtm/sample_heights),
