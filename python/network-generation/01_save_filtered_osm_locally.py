@@ -112,22 +112,32 @@ def normalize_reversed_flags(gdf_edges_simplified, starts_by_osmid, ends_by_osmi
 
 
 
-if __name__ == "__main__":
-    area = ("Germany")
-    highway_types = ('["highway"~"motorway"]') #'["highway"~"motorway|trunk|primary"]'
-    output_file_simplified = f"data/{area.split(',')[0].lower()}_simplified_DF"
-    output_file_detailed_sorted= f"data/{area.split(',')[0].lower()}_detailed_sorted_DF"
+def build_region(area="Germany", bbox=None, out_prefix=None,
+                 highway_types='["highway"~"motorway"]'):
+    """Laedt OSM-Strassennetz (simplified + detailed) fuer eine Region und schreibt
+    zwei GPKGs (simplified + detailed_sorted). Region entweder per Ortsname `area`
+    ODER `bbox`=(west, south, east, north). `out_prefix` bestimmt die Ausgabepfade
+    (Default: data/<area>). Damit ist die Pipeline regional wiederverwendbar."""
+    if out_prefix is None:
+        base = (area.split(',')[0].lower() if area else "region")
+        out_prefix = f"data/{base}"
+    output_file_simplified = f"{out_prefix}_simplified_DF"
+    output_file_detailed_sorted = f"{out_prefix}_detailed_sorted_DF"
+
+    def _fetch(simplify, retain_all, truncate_by_edge):
+        if bbox is not None:
+            return ox.graph.graph_from_bbox(
+                bbox=bbox, network_type="drive", simplify=simplify,
+                retain_all=retain_all, truncate_by_edge=truncate_by_edge,
+                custom_filter=highway_types)
+        return ox.graph.graph_from_place(
+            query=area, network_type="drive", simplify=simplify,
+            retain_all=retain_all, truncate_by_edge=truncate_by_edge,
+            custom_filter=highway_types)
     #------------------------------------------------------
 
-    print(f"Lade vereinfachtes Straßennetz für: {area}")
-    G = ox.graph.graph_from_place(
-        query=area,
-        network_type="drive",
-        simplify=True, # Vereinfachte Kanten
-        retain_all=False,
-        truncate_by_edge=True,
-        custom_filter=highway_types
-    )
+    print(f"Lade vereinfachtes Straßennetz für: {area or bbox}")
+    G = _fetch(simplify=True, retain_all=False, truncate_by_edge=True)
     print("Konvertiere vereinfachtes Straßennetzwerk zu GeoDataFrames...")
     gdf_nodes_simplified, gdf_edges_simplified = ox.convert.graph_to_gdfs(
         G,
@@ -163,15 +173,8 @@ if __name__ == "__main__":
     #------------------------------------------------------------------------------------------------------------------------------------------------------------------
     #------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-    print(f"Lade detailliertes Straßennetz für: {area}")
-    G = ox.graph.graph_from_place(
-        query=area,
-        network_type="drive",
-        simplify=False,  #Detailiert Kanten
-        retain_all=True,
-        truncate_by_edge=False,    # weil weitere Informationen zu jeder vereinfachten Kante benötigt werden
-        custom_filter=highway_types
-    )
+    print(f"Lade detailliertes Straßennetz für: {area or bbox}")
+    G = _fetch(simplify=False, retain_all=True, truncate_by_edge=False)
     print("Konvertiere vereinfachtes Straßennetzwerk zu GeoDataFrames...")
     gdf_nodes_detailed, gdf_edges_detailed = ox.convert.graph_to_gdfs(
         G,
@@ -474,3 +477,7 @@ if __name__ == "__main__":
     gdf_edges_simplified_final.to_file(f"{output_file_simplified}.gpkg", layer="edges", driver="GPKG")
 
     print(f"Gesamtlänge aller Elemente in gdf_edges_simplified_final: {gdf_edges_simplified_final['length'].sum()}")
+
+
+if __name__ == "__main__":
+    build_region(area="Germany", out_prefix="data/germany")

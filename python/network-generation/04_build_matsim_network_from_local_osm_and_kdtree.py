@@ -154,6 +154,26 @@ def _normalize_maxspeed(v):
         return np.nan
 
 
+def _default_maxspeed_for(highway):
+    """Typ-abhaengiger maxspeed-Default [km/h], falls KEIN maxspeed-Tag vorhanden ist.
+    Greift nur bei fehlendem/unbekanntem Wert und ueberschreibt keine getaggten Werte.
+      motorway      -> 130 (Richtgeschwindigkeit; getaggtes 'none' -> ebenfalls 130)
+      motorway_link ->  60 (Rampen/Auffahrten)
+      trunk/primary -> 100 (Bundesstrasse ausserorts)
+      sonst         ->  50 (innerorts/Default)"""
+    h = highway
+    if isinstance(h, (list, tuple)) and h:
+        h = h[0]
+    h = str(h).strip().lower()
+    if h == "motorway":
+        return 130.0
+    if h == "motorway_link":
+        return 60.0
+    if h in ("trunk", "primary"):
+        return 100.0
+    return 50.0
+
+
 # --- Rueckwaerts-kompatible Shims fuer bestehende Aufrufer -------------------
 # Die alte npz/KD-Tree-Schnittstelle bleibt aufrufbar, liefert aber jetzt DTM-Hoehen.
 # load_kdtree(pfad) ignoriert den (nicht mehr noetigen) npz-Pfad.
@@ -884,7 +904,9 @@ def write_matsim_network(gdf_nodes, gdf_edges, epsg_code, output_path, nodes_wit
                 length_m = 1.0
         length = str(int(round(max(1.0, length_m))))
 
-        maxspeed = parse_maxspeed(row.get("maxspeed", 50.0), default=50.0)
+        # Default nur wenn maxspeed fehlt/unbekannt -> typ-abhaengig (Rampe/Bundesstrasse/...)
+        maxspeed = parse_maxspeed(row.get("maxspeed"),
+                                  default=_default_maxspeed_for(row.get("highway")))
         freespeed = round((maxspeed or 50.0) / 3.6, 2)
 
         cap = _num(row.get("capacity"), default=3000, as_int=True) or 3000
@@ -1009,9 +1031,11 @@ def sanitize_edges_for_export(gdf_edges: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         df['capacity'] = 3000
     df['capacity'] = pd.to_numeric(df['capacity'], errors='coerce').fillna(3000).clip(lower=100).round().astype(int)
 
-    # maxspeed
+    # maxspeed – fehlende/unbekannte Werte typ-abhaengig defaulten (nur wenn kein Tag)
+    _hw_default = (df['highway'].apply(_default_maxspeed_for)
+                   if 'highway' in df.columns else pd.Series(50.0, index=df.index))
     if 'maxspeed' not in df.columns:
-        df['maxspeed'] = 50.0
+        df['maxspeed'] = _hw_default
     else:
         def _mx(v):
             if isinstance(v, (list, tuple, np.ndarray, pd.Series)):
@@ -1023,8 +1047,9 @@ def sanitize_edges_for_export(gdf_edges: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
                 except Exception:
                     return np.nan
             return _normalize_maxspeed(v)
-        df['maxspeed'] = df['maxspeed'].apply(_mx)
-        df['maxspeed'] = pd.to_numeric(df['maxspeed'], errors='coerce').fillna(50.0).clip(lower=1.0)
+        ms = pd.to_numeric(df['maxspeed'].apply(_mx), errors='coerce')
+        df['maxspeed'] = ms.where(ms.notna(), _hw_default)
+    df['maxspeed'] = pd.to_numeric(df['maxspeed'], errors='coerce').fillna(50.0).clip(lower=1.0)
 
     # highway
     if 'highway' not in df.columns:
@@ -1048,16 +1073,22 @@ def generate_network(
         max_allowed_link_length: float,
         target_epsg: int = 4839,
         version: str = "V0",
+        simplified_gpkg: str = None,
+        detailed_gpkg: str = None,
+        dtm_path: str = None,
+        output_path: str = None,
 ):
     # --- Pfade & Namen ---
     # Hoehen kommen jetzt direkt aus dem LiDAR-DTM (siehe load_dtm/sample_heights),
-    # nicht mehr aus einer npz/KD-Tree-Punktwolke.
-    local_osm_input_path_simplified = f"data/germany_simplified_DF.gpkg" #f"data/{area}_simplified.gpkg"
-    local_osm_input_path_detailed   = f"data/germany_detailed_sorted_DF.gpkg" #f"data/{area}_detailed_sorted.gpkg"
-    output_path = f"data/{area}_max{int(max_allowed_link_length)}m_{version}.xml.gz"
+    # nicht mehr aus einer npz/KD-Tree-Punktwolke. GPKG-/DTM-/Output-Pfade sind
+    # parametrisierbar, damit die Pipeline regional wiederverwendbar ist.
+    local_osm_input_path_simplified = simplified_gpkg or "data/germany_simplified_DF.gpkg"
+    local_osm_input_path_detailed   = detailed_gpkg   or "data/germany_detailed_sorted_DF.gpkg"
+    if output_path is None:
+        output_path = f"data/{area}_max{int(max_allowed_link_length)}m_{version}.xml.gz"
 
     # --- Daten laden ---
-    dtm = load_dtm()
+    dtm = load_dtm(dtm_path) if dtm_path else load_dtm()
     gdf_nodes_simplified, gdf_edges_simplified = load_local_osm_file(local_osm_input_path_simplified)
     gdf_nodes_detailed,   gdf_edges_detailed   = load_local_osm_file(local_osm_input_path_detailed)
 
