@@ -125,6 +125,27 @@ def build_region(area="Germany", bbox=None, out_prefix=None,
     output_file_detailed_sorted = f"{out_prefix}_detailed_sorted_DF"
 
     def _fetch(simplify, retain_all, truncate_by_edge):
+        """OSM-Abruf via osmnx. Die vier steuerbaren Optionen und ihre Bedeutung:
+
+        - network_type="drive": fahrbare Strassen. Praktisch INERT, weil ein
+          custom_filter gesetzt ist und in osmnx Vorrang hat; nur Fallback.
+        - custom_filter=highway_types: WELCHE Strassenklassen geladen werden
+          (motorway/trunk/primary + _link). Treibt Abdeckung und Datenmenge.
+        - simplify: TOPOLOGIE. True = Grad-2-Zwischenknoten zu einer Kante
+          zwischen echten Kreuzungen zusammenfassen (Backbone); False = jeder
+          OSM-Knoten bleibt Knoten (volle Detailgeometrie). Die Pipeline braucht
+          BEIDES: Backbone fuer Topologie, Detail fuer exakte Split-Grenzen (04).
+        - retain_all: KOMPONENTEN (grenzunabhaengig!). False = nur die groesste
+          zusammenhaengende Komponente behalten, Inseln verwerfen; True = alle
+          Komponenten inkl. isolierter Fragmente.
+        - truncate_by_edge: GEBIETSGRENZE (nicht Topologie!). True = Kanten, die
+          das Abfrage-Polygon (bei area='Germany' die Bundesgrenze) kreuzen,
+          bleiben GANZ erhalten + erster Knoten jenseits der Grenze (Grenz-
+          uebergaenge intakt); False = an der Grenze abschneiden.
+
+        Wichtig: retain_all und truncate_by_edge sind ORTHOGONAL. Grenzuebergaenge
+        'bis zur Bundesgrenze' kommen von truncate_by_edge, NICHT von retain_all.
+        """
         if bbox is not None:
             return ox.graph.graph_from_bbox(
                 bbox=bbox, network_type="drive", simplify=simplify,
@@ -137,6 +158,10 @@ def build_region(area="Germany", bbox=None, out_prefix=None,
     #------------------------------------------------------
 
     print(f"Lade vereinfachtes Straßennetz für: {area or bbox}")
+    # PIPELINE-STANDARD (Backbone): simplify=True (Topologie), retain_all=False
+    # (robustes, ROUTBARES Netz = groesste zusammenhaengende Komponente; isolierte
+    # AB/B-Inseln werden verworfen, damit MATSim keine unerreichbaren Links bekommt),
+    # truncate_by_edge=True (Grenzuebergaenge ganz erhalten).
     G = _fetch(simplify=True, retain_all=False, truncate_by_edge=True)
     print("Konvertiere vereinfachtes Straßennetzwerk zu GeoDataFrames...")
     gdf_nodes_simplified, gdf_edges_simplified = ox.convert.graph_to_gdfs(
@@ -174,6 +199,11 @@ def build_region(area="Germany", bbox=None, out_prefix=None,
     #------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
     print(f"Lade detailliertes Straßennetz für: {area or bbox}")
+    # PIPELINE-STANDARD (Detail-Referenz): simplify=False (volle Geometrie),
+    # retain_all=True (ALLE Komponenten, damit kein Sub-Segment fehlt -> sonst
+    # braeche das Matching gegen den Backbone), truncate_by_edge=False (strikte
+    # Referenz; Backbone-Kanten ohne vollstaendige Detailgeometrie werden im
+    # Matching-Loop bewusst verworfen).
     G = _fetch(simplify=False, retain_all=True, truncate_by_edge=False)
     print("Konvertiere vereinfachtes Straßennetzwerk zu GeoDataFrames...")
     gdf_nodes_detailed, gdf_edges_detailed = ox.convert.graph_to_gdfs(
