@@ -112,8 +112,232 @@ def normalize_reversed_flags(gdf_edges_simplified, starts_by_osmid, ends_by_osmi
 
 
 
+def _sort_detailed_legacy(gdf_edges_simplified, gdf_edges_detailed, total_detailed_length):
+    """ORIGINAL-Sortierschleife (unveraendert extrahiert). O(n^2)-artig durch
+    Full-Scans + pd.concat pro Iteration — fuer Deutschland ~100+ h. Bleibt als
+    Referenz fuer Aequivalenz-Tests erhalten. Rueckgabe: (result_gdf, delete_mask)."""
+    edge_mask_to_be_deleted = []
+
+    pbar = tqdm(total=total_detailed_length, desc="Sorting progress", unit="m", mininterval=1, maxinterval=1)
+
+    result_gdf = None
+    while not gdf_edges_simplified.empty:
+
+        index, row = get_first_edge(gdf_edges_simplified)
+        geometry = row['geometry']
+
+        first_coords = geometry.coords[0]
+        all_coords = list(geometry.coords)
+
+        matching_candidates = find_matching_osmids(first_coords, all_coords, gdf_edges_detailed)
+
+        if matching_candidates.empty:
+            edge_mask_to_be_deleted.append(index)
+            gdf_edges_simplified = gdf_edges_simplified.drop(index=index)
+            continue
+
+        matching_osmid = matching_candidates['osmid'].iloc[0]
+        detailed_edges = filter_detailed_edges(gdf_edges_detailed, matching_osmid, row['reversed'])
+
+        if len(detailed_edges) == 1:
+            if result_gdf is None:
+                result_gdf = detailed_edges.copy()
+            else:
+                result_gdf = pd.concat([result_gdf, detailed_edges], ignore_index=True)
+            counter = 1
+        else:
+            simplified_geometries_coords = gdf_edges_simplified.loc[
+                gdf_edges_simplified['osmid'].apply(
+                    lambda x: matching_osmid in x if isinstance(x, list) else x == matching_osmid),
+                'geometry'
+            ]
+
+            if not simplified_geometries_coords.empty:
+                simplified_geometries_coords = simplified_geometries_coords.iloc[0].coords
+            else:
+                edge_mask_to_be_deleted.append(gdf_edges_simplified.index[0])
+                gdf_edges_simplified = gdf_edges_simplified.iloc[1:]
+                continue
+
+            detailed_edges_coords = {idx: (geom.coords[0][0], geom.coords[0][1]) for idx, geom in
+                                     detailed_edges['geometry'].items()}
+
+            matching_indices = []
+            for coord in simplified_geometries_coords:
+                if coord in detailed_edges_coords.values():
+                    matching_indices.append(
+                        list(detailed_edges_coords.keys())[list(detailed_edges_coords.values()).index(coord)]
+                    )
+
+            detailed_edges = detailed_edges.loc[matching_indices]
+
+            if result_gdf is None:
+                result_gdf = detailed_edges.copy()
+            else:
+                result_gdf = pd.concat([result_gdf, detailed_edges], ignore_index=True)
+
+            counter = len(matching_indices)
+
+        if isinstance(gdf_edges_simplified.iloc[0]['osmid'], list) and len(gdf_edges_simplified.iloc[0]['osmid']) == 1 or not isinstance(gdf_edges_simplified.iloc[0]['osmid'], list):
+            gdf_edges_simplified = gdf_edges_simplified.iloc[1:]
+        else:
+            if not gdf_edges_simplified.iloc[0]['geometry'].is_empty and counter < len(gdf_edges_simplified.iloc[0]['geometry'].coords):
+                if counter + 1 != len(gdf_edges_simplified.iloc[0]['geometry'].coords):
+                    gdf_edges_simplified.iloc[0, gdf_edges_simplified.columns.get_loc('geometry')] = \
+                        type(gdf_edges_simplified.iloc[0]['geometry'])(list(gdf_edges_simplified.iloc[0]['geometry'].coords)[counter:])
+                else:
+                    gdf_edges_simplified = gdf_edges_simplified.iloc[1:]
+
+            if not gdf_edges_simplified.empty:
+                gdf_edges_simplified.at[gdf_edges_simplified.index[0], 'osmid'] = (
+                    [os for os in gdf_edges_simplified.iloc[0]['osmid'] if os != matching_osmid]
+                    if isinstance(gdf_edges_simplified.iloc[0]['osmid'], list)
+                    else (None if gdf_edges_simplified.iloc[0]['osmid'] == matching_osmid else gdf_edges_simplified.iloc[0]['osmid'])
+                )
+
+            if isinstance(gdf_edges_simplified.iloc[0]['osmid'], list):
+                if gdf_edges_simplified.iloc[0]['osmid'] in [None, []]:
+                    gdf_edges_simplified = gdf_edges_simplified.iloc[1:]
+
+        update_value = round(detailed_edges['length'].sum())
+        pbar.update(update_value)
+
+    pbar.close()
+    return result_gdf, edge_mask_to_be_deleted
+
+
+def _sort_detailed_fast(gdf_edges_simplified, gdf_edges_detailed, total_detailed_length):
+    """Semantisch identischer, indexbasierter Ersatz fuer _sort_detailed_legacy.
+
+    Gleiche Ausgabe (Zeilen, Reihenfolge, Loeschmaske), aber O(~n) statt O(n^2):
+      - Hash-Indizes (start-Koordinate, osmid, (osmid, reversed)) statt Full-Scans
+        ueber gdf_edges_detailed pro Iteration,
+      - FIFO-Queue statt DataFrame-Drop/iloc[1:] (die Schleife entfernt Zeilen
+        ausschliesslich am Kopf und mutiert nur die Kopfzeile),
+      - Positionsliste + EIN gdf.iloc[...] am Ende statt pd.concat pro Iteration.
+
+    Bewusst repliziertes Original-Verhalten (bug-fuer-bug, per A5-Test verifiziert):
+      - Nach einem Kopf-Drop im Geometrie-Zweig wird der osmid-Strip auf die
+        NAECHSTE Zeile angewendet (wie im Original).
+      - Der osmid-Scan nimmt die ERSTE Zeile der aktuellen Restmenge in Reihenfolge.
+      - matching_indices kann Duplikate enthalten (Koordinaten-Mehrfachtreffer).
+    Einzige gewollte Abweichung: laeuft die Queue leer, wird sauber beendet,
+    wo das Original mit IndexError abstuerzen wuerde."""
+    from collections import deque, defaultdict
+
+    starts = gdf_edges_detailed['start'].tolist()
+    ends = gdf_edges_detailed['end'].tolist()
+    osmids_det = gdf_edges_detailed['osmid'].tolist()
+    revs_det = (gdf_edges_detailed['reversed'].tolist()
+                if 'reversed' in gdf_edges_detailed.columns
+                else [None] * len(starts))
+    lengths_det = pd.to_numeric(gdf_edges_detailed['length'], errors='coerce').fillna(0.0).tolist()
+
+    pos_by_start = defaultdict(list)
+    pos_by_osmid = defaultdict(list)
+    pos_by_osmid_rev = defaultdict(list)
+    for p, s in enumerate(starts):
+        pos_by_start[s].append(p)
+        o, r = osmids_det[p], revs_det[p]
+        try:
+            pos_by_osmid[o].append(p)
+            # rohe Werte als Keys: hash/eq von bool & np.bool_ sind identisch,
+            # damit exakt dieselbe Match-Semantik wie pandas `==` im Original
+            pos_by_osmid_rev[(o, r)].append(p)
+        except TypeError:
+            pass  # unhashbare osmid/reversed (Liste) — im detailed-Netz praktisch nicht vorhanden
+
+    queue = deque(
+        {'label': label, 'geometry': r['geometry'], 'osmid': r['osmid'], 'reversed': r['reversed']}
+        for label, r in gdf_edges_simplified.iterrows())
+
+    edge_mask_to_be_deleted = []
+    order = []   # Detailed-POSITIONEN in Ergebnis-Reihenfolge (Duplikate erlaubt)
+    pbar = tqdm(total=total_detailed_length, desc="Sorting progress", unit="m", mininterval=1, maxinterval=1)
+
+    while queue:
+        head = queue[0]
+        geometry = head['geometry']
+        first_coords = geometry.coords[0]
+        all_set = set(geometry.coords)
+
+        # find_matching_osmids: start == first_coords AND end in all_coords
+        cand = [p for p in pos_by_start.get(first_coords, ()) if ends[p] in all_set]
+        if not cand:
+            edge_mask_to_be_deleted.append(head['label'])
+            queue.popleft()
+            continue
+
+        matching_osmid = osmids_det[cand[0]]
+
+        # filter_detailed_edges: reversed-Liste -> nur osmid; sonst osmid+reversed
+        rv = head['reversed']
+        if isinstance(rv, list):
+            piece = pos_by_osmid.get(matching_osmid, [])
+        else:
+            try:
+                piece = pos_by_osmid_rev.get((matching_osmid, rv), [])
+            except TypeError:
+                piece = []
+
+        if len(piece) == 1:
+            order.extend(piece)
+            counter = 1
+            sel = piece
+        else:
+            # ERSTE Zeile der aktuellen Restmenge, deren osmid matching_osmid enthaelt
+            coords_iter = None
+            for entry in queue:
+                x = entry['osmid']
+                hit = (matching_osmid in x) if isinstance(x, list) else (x == matching_osmid)
+                if hit:
+                    coords_iter = entry['geometry'].coords
+                    break
+            if coords_iter is None:
+                edge_mask_to_be_deleted.append(head['label'])
+                queue.popleft()
+                continue
+
+            cand_starts = [(starts[p][0], starts[p][1]) for p in piece]
+            sel = []
+            for coord in coords_iter:
+                if coord in cand_starts:
+                    sel.append(piece[cand_starts.index(coord)])
+            order.extend(sel)
+            counter = len(sel)
+
+        # --- Kopfzeilen-Update (exakt wie Original, inkl. Folgezeilen-Effekt) ---
+        osmid0 = queue[0]['osmid']
+        if (isinstance(osmid0, list) and len(osmid0) == 1) or not isinstance(osmid0, list):
+            queue.popleft()
+        else:
+            g0 = queue[0]['geometry']
+            if (not g0.is_empty) and counter < len(g0.coords):
+                if counter + 1 != len(g0.coords):
+                    queue[0]['geometry'] = type(g0)(list(g0.coords)[counter:])
+                else:
+                    queue.popleft()
+
+            if queue:
+                o2 = queue[0]['osmid']
+                queue[0]['osmid'] = ([os for os in o2 if os != matching_osmid]
+                                     if isinstance(o2, list)
+                                     else (None if o2 == matching_osmid else o2))
+                if isinstance(queue[0]['osmid'], list) and queue[0]['osmid'] in [None, []]:
+                    queue.popleft()
+
+        pbar.update(round(sum(lengths_det[p] for p in sel)))
+
+    pbar.close()
+    if not order:
+        return None, edge_mask_to_be_deleted
+    result_gdf = gdf_edges_detailed.iloc[order].reset_index(drop=True)
+    return result_gdf, edge_mask_to_be_deleted
+
+
 def build_region(area="Germany", bbox=None, out_prefix=None,
-                 highway_types='["highway"~"motorway|motorway_link|trunk|trunk_link|primary|primary_link"]'):
+                 highway_types='["highway"~"motorway|motorway_link|trunk|trunk_link|primary|primary_link"]',
+                 sort_impl="fast"):
     """Laedt OSM-Strassennetz (simplified + detailed) fuer eine Region und schreibt
     zwei GPKGs (simplified + detailed_sorted). Region entweder per Ortsname `area`
     ODER `bbox`=(west, south, east, north). `out_prefix` bestimmt die Ausgabepfade
@@ -293,110 +517,18 @@ def build_region(area="Germany", bbox=None, out_prefix=None,
     total_detailed_length = gdf_edges_simplified['length'].sum()
     print(f"Gesamtlänge aller Elemente in gdf_edges_simplified: {total_detailed_length}")
     print(f"Gesamtlänge aller Elemente in gdf_edges_detailed: {gdf_edges_detailed['length'].sum()}")
-    total_current_length = 0
-
-    edge_mask_to_be_deleted = []  # Liste für zu löschende Indizes, weil nicht alle Punkte in der area liegen
-
     # Alle Start- und Endpunkte in den detailed edges extrahieren
     gdf_edges_detailed['start'] = gdf_edges_detailed['geometry'].apply(lambda geom: geom.coords[0])
     gdf_edges_detailed['end'] = gdf_edges_detailed['geometry'].apply(lambda geom: geom.coords[-1])
 
-    # Fortschrittsbalken basierend auf Gesamtlänge
-    pbar = tqdm(total=total_detailed_length, desc="Sorting progress", unit="m", mininterval=1, maxinterval=1)
-
-    result_gdf = None
-    result_gdf_list = []
-    while not gdf_edges_simplified.empty:
-
-        index, row = get_first_edge(gdf_edges_simplified)
-        geometry = row['geometry']
-
-        first_coords = geometry.coords[0]
-        all_coords = list(geometry.coords)
-
-        matching_candidates = find_matching_osmids(first_coords, all_coords, gdf_edges_detailed)
-
-        if matching_candidates.empty:
-            edge_mask_to_be_deleted.append(index)
-            gdf_edges_simplified = gdf_edges_simplified.drop(index=index)
-            continue
-
-        matching_osmid = matching_candidates['osmid'].iloc[0]
-        detailed_edges = filter_detailed_edges(gdf_edges_detailed, matching_osmid, row['reversed'])
-
-        # ------------------------------------------------------------------------------------------------------------------------------------------------------------------
-        # ------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-        if len(detailed_edges) == 1:
-            if result_gdf is None:
-                result_gdf = detailed_edges.copy()
-            else:
-                result_gdf = pd.concat([result_gdf, detailed_edges], ignore_index=True)
-            counter = 1
-        else:
-            simplified_geometries_coords = gdf_edges_simplified.loc[
-                gdf_edges_simplified['osmid'].apply(
-                    lambda x: matching_osmid in x if isinstance(x, list) else x == matching_osmid),
-                'geometry'
-            ]
-
-            if not simplified_geometries_coords.empty:
-                simplified_geometries_coords = simplified_geometries_coords.iloc[0].coords
-            else:
-                edge_mask_to_be_deleted.append(gdf_edges_simplified.index[0])
-                gdf_edges_simplified = gdf_edges_simplified.iloc[1:]  # Erste Zeile löschen
-                continue  # Beende den aktuellen Schleifendurchlauf, da nicht alle Punkte der simplified_edge innerhalb der geforderten area liegen
-
-            # Erstelle ein Dictionary mit den Startkoordinaten der detaillierten Geometrien
-            detailed_edges_coords = {idx: (geom.coords[0][0], geom.coords[0][1]) for idx, geom in
-                                     detailed_edges['geometry'].items()}
-
-            # Finde übereinstimmende Indizes basierend auf den Koordinaten
-            matching_indices = []
-            for coord in simplified_geometries_coords:
-                if coord in detailed_edges_coords.values():
-                    matching_indices.append(
-                        list(detailed_edges_coords.keys())[list(detailed_edges_coords.values()).index(coord)]
-                    )
-
-            # Filtere die detaillierten Kanten basierend auf den übereinstimmenden Indizes
-            detailed_edges = detailed_edges.loc[matching_indices]
-
-
-            # Füge die gefilterten detaillierten Kanten zum Ergebnis-GeoDataFrame hinzu
-            if result_gdf is None:
-                result_gdf = detailed_edges.copy()
-            else:
-                result_gdf = pd.concat([result_gdf, detailed_edges], ignore_index=True)
-
-            counter = len(matching_indices)  # Setze counter auf die Länge von matching_indices
-
-        # Aktualisiere die Geometrie der ersten Zeile, indem die ersten Anz. der `counter` Koordinaten entfernt werden
-        if isinstance(gdf_edges_simplified.iloc[0]['osmid'], list) and len(gdf_edges_simplified.iloc[0]['osmid']) == 1 or not isinstance(gdf_edges_simplified.iloc[0]['osmid'], list):
-            gdf_edges_simplified = gdf_edges_simplified.iloc[1:]  # Lösche die Zeile, wenn nur ein osmid vorhanden ist
-        else:
-            if not gdf_edges_simplified.iloc[0]['geometry'].is_empty and counter < len(gdf_edges_simplified.iloc[0]['geometry'].coords): #Wenn die Geometrie nicht leer ist und der counter kleiner als die Anzahl der Koordinaten in der Geometrie ist
-                if counter + 1 != len(gdf_edges_simplified.iloc[0]['geometry'].coords): #counter+1 ist nicht gleich der Länge der Geometrie (Sonst bleibt ein Punkt übrig im LINESTRING == Error!)
-                    gdf_edges_simplified.iloc[0, gdf_edges_simplified.columns.get_loc('geometry')] = \
-                        type(gdf_edges_simplified.iloc[0]['geometry'])(list(gdf_edges_simplified.iloc[0]['geometry'].coords)[counter:])
-                else:
-                    gdf_edges_simplified = gdf_edges_simplified.iloc[1:]  # Erste Zeile löschen, wenn nur noch ein Punkt in geometry übrig bleibt
-
-            if not gdf_edges_simplified.empty:
-                gdf_edges_simplified.at[gdf_edges_simplified.index[0], 'osmid'] = (
-                    [os for os in gdf_edges_simplified.iloc[0]['osmid'] if os != matching_osmid]
-                    if isinstance(gdf_edges_simplified.iloc[0]['osmid'], list)
-                    else (None if gdf_edges_simplified.iloc[0]['osmid'] == matching_osmid else gdf_edges_simplified.iloc[0]['osmid'])
-                )
-
-            if isinstance(gdf_edges_simplified.iloc[0]['osmid'], list):
-                if gdf_edges_simplified.iloc[0]['osmid'] in [None, []]:  # Prüfen, ob in der ersten Zeile keine osmid oder eine leere Liste enthalten ist
-                    gdf_edges_simplified = gdf_edges_simplified.iloc[1:]  # Erste Zeile löschen
-
-        update_value = round(detailed_edges['length'].sum())
-        pbar.update(update_value)
-
-    pbar.close()
+    # Sortier-Schleife: 'fast' (indexbasiert, ~O(n)) ist Default; 'legacy' ist das
+    # unveraenderte Original (Referenz fuer Aequivalenz-Tests, fuer DE unbrauchbar langsam).
+    if sort_impl == "legacy":
+        result_gdf, edge_mask_to_be_deleted = _sort_detailed_legacy(
+            gdf_edges_simplified, gdf_edges_detailed, total_detailed_length)
+    else:
+        result_gdf, edge_mask_to_be_deleted = _sort_detailed_fast(
+            gdf_edges_simplified, gdf_edges_detailed, total_detailed_length)
 
     print(f"Gesamtlänge aller Elemente in result_gdf: {result_gdf['length'].sum()}")
 
