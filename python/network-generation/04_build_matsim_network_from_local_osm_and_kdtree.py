@@ -918,6 +918,17 @@ def _canonicalize_to_detailed(edge_row, seq_det):
     Rueckgabe: Series (Kante) oder None, wenn keine brauchbare Sequenz."""
     if seq_det is None or seq_det.empty:
         return None
+    # Guard: get_directed_detailed_sequence kann bei Matching-Abbruch TEILKETTEN
+    # liefern. Eine unvollstaendige Sequenz wuerde hier stillschweigend zu kurze
+    # Geometrie/Laenge einsetzen (und darueber die Korridor-Bogenlaengen der
+    # Hoehenzuweisung verschieben). Daher: Sequenz muss die Kante exakt von u
+    # nach v ueberspannen, sonst simplified-Fallback (Rueckgabe None).
+    try:
+        if (int(seq_det.iloc[0]['u']) != int(edge_row['u'])
+                or int(seq_det.iloc[-1]['v']) != int(edge_row['v'])):
+            return None
+    except (TypeError, ValueError):
+        return None
     row = edge_row.copy()
     coords = []
     prev_end = None
