@@ -145,10 +145,12 @@ def _is_structure(row):
     for key in ("bridge", "tunnel"):
         if key in row.index:
             val = row[key]
-            if isinstance(val, (list, tuple)) and len(val):
-                val = val[0]
-            if str(val).strip().lower() in ("yes", "true", "1", "viaduct", "bridge", "tunnel"):
-                return True
+            # osmnx aggregiert abweichende Tags zu Listen (z.B. [nan, 'yes'] bei
+            # teilweiser Bruecke) -> ALLE Elemente pruefen, nicht nur das erste.
+            vals = val if isinstance(val, (list, tuple)) else [val]
+            for v in vals:
+                if str(v).strip().lower() in ("yes", "true", "1", "viaduct", "bridge", "tunnel"):
+                    return True
     return False
 
 
@@ -872,8 +874,15 @@ def split_once_at_half(edge, seq_det: gpd.GeoDataFrame):
         # attributes (conservative)
         row['highway']  = block.iloc[0].get('highway', row.get('highway', 'unknown'))
         if 'maxspeed' in block:
+            # _normalize_maxspeed statt rohem to_numeric: 'none' -> 130 statt NaN
+            # (sonst gewinnt in Mischbloecken [100, 'none'] faelschlich die 100).
             try:
-                row['maxspeed'] = float(pd.to_numeric(block['maxspeed'], errors='coerce').max())
+                vals = []
+                for x in block['maxspeed']:
+                    xs = x if isinstance(x, (list, tuple, np.ndarray)) else [x]
+                    vals.extend(_normalize_maxspeed(v) for v in xs)
+                vals = [v for v in vals if v is not None and math.isfinite(v)]
+                row['maxspeed'] = float(max(vals)) if vals else np.nan
             except Exception:
                 row['maxspeed'] = row.get('maxspeed', 50.0)
         else:
@@ -1305,8 +1314,10 @@ def sanitize_edges_for_export(gdf_edges: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     len_num = pd.to_numeric(df['length'], errors='coerce')
     bad_len = len_num.isna() | (len_num <= 0)
     if bad_len.any():
-        df3857 = df.to_crs(3857)
-        df.loc[bad_len, 'length'] = df3857.loc[bad_len, 'geometry'].length.values
+        # Geometrielaenge im metrischen Netz-CRS (frueher EPSG:3857, was in DE
+        # die Laenge um ~50-75 % ueberschaetzt; analog zum Fix in write_matsim_network).
+        df_m = df.to_crs(4839)
+        df.loc[bad_len, 'length'] = df_m.loc[bad_len, 'geometry'].length.values
     df['length'] = pd.to_numeric(df['length'], errors='coerce').fillna(1.0).clip(lower=1.0)
 
     # lanes
