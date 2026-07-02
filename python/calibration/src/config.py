@@ -113,15 +113,26 @@ STUDIES = [
 ACTIVE_PAYLOAD_CLASS: str = "all"
 
 # === Trip-End-KE-Korrektur (nur Vergleichsseite!) ===
-# Das Java-Modell startet jedes Leg bei v~0 und bucht die kinetische Anfahr-
-# Energie; die VECTO-/Realfahrt-Referenz misst dagegen rollend start-/endende
-# Fenster, in denen sich Start- und End-KE aufheben. Vor dem Vergleich wird
-# deshalb die am Trip-Ende noch im Fahrzeug steckende KE als gebuchte Anfahr-
-# Kosten storniert:  E_korr = 0.5 * mInertia * vEnd^2 / tractionEfficiency.
+# Das Java-Modell endet jedes Leg bei vEnd > 0 (letzter Link-Freespeed) und
+# bremst nie. Die Korrektur haengt von der RANDBEDINGUNG der Referenz ab:
+#
+#   "stop"    - Referenzzyklus bremst am Ende auf 0 (VECTO .vdri: letzter
+#               Punkt v=0 + Stop-Flag). Die Referenz enthaelt also bereits
+#               die Rekuperation der End-Bremsung, die dem Modell fehlt:
+#               E_korr = 0.5 * mInertia * vEnd^2 * recupEfficiency
+#   "rolling" - Referenzfenster endet ROLLEND (Realfahrt-Batteriedelta).
+#               Kein Bremsvorgang; Start- und End-KE heben sich im Fenster
+#               auf, das Modell hat aber die Anfahr-KE von 0 gebucht:
+#               E_korr = 0.5 * mInertia * vEnd^2 / tractionEfficiency
+#
+# FALSCH herum angewendet ueberkorrigiert das um Faktor 1/(eta_t*eta_r)~1.5
+# (Befund 2026-07-02: B2-Lauf mit "rolling" auf VECTO drueckte
+# tractionEfficiency unphysisch auf ~0.80). VECTO-Kalibrierung => "stop".
 # BEWUSST NICHT im Java-Modell verankert (Entscheidung 2026-07-02): im
 # deutschlandweiten Flottenszenario gibt es dieses Fenster-Artefakt nicht,
 # das Modell bleibt dort physikalisch unveraendert.
 TRIP_END_KE_CORRECTION = True
+TRIP_END_KE_BOUNDARY = "stop"   # VECTO-Zyklen enden im Stillstand
 
 # === Kalibrierungsparameter-Bereiche
 # Wertebereiche (low, high) fuer die 6 Optuna-Parameter.

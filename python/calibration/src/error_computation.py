@@ -81,23 +81,29 @@ def parse_trip_end_speeds(output_dir: Path) -> dict[str, float]:
 
 
 def trip_end_ke_corrections_kwh(output_dir: Path, mission: str,
-                                params: dict[str, float] | None) -> dict[str, float]:
-    """Storno der gebuchten Anfahr-KE am Trip-Ende [kWh] pro Fahrzeug.
+                                params: dict[str, float] | None,
+                                boundary: str | None = None) -> dict[str, float]:
+    """Trip-End-KE-Korrektur [kWh] pro Fahrzeug (Vergleichsseite, siehe config).
 
-    Das Modell bucht die KE von 0 auf vEnd mit 1/tractionEfficiency; die
-    Referenzfenster (VECTO/Realfahrt) starten und enden rollend und enthalten
-    diesen Posten nicht. KEIN physischer Rekuperations-Stopp (der LKW bremst am
-    Zyklusende nicht) — reine Buchungs-Korrektur fuer die Vergleichbarkeit.
+    Das Modell endet bei vEnd > 0 und bremst nie. Bewertung nach Randbedingung
+    der Referenz:
+      "stop"    (VECTO-Zyklen, enden im Stillstand): dem Modell fehlt die
+                Rekuperation der End-Bremsung -> Gutschrift * recupEfficiency.
+      "rolling" (Realfahrt-Fenster, enden rollend): Storno der gebuchten
+                Anfahr-KE -> / tractionEfficiency.
 
     Returns:
         Dict {vehicle_id: korrektur_kwh} (leer, wenn deaktiviert oder Daten fehlen).
     """
     if not getattr(_cfg, "TRIP_END_KE_CORRECTION", False) or not params:
         return {}
+    boundary = boundary or getattr(_cfg, "TRIP_END_KE_BOUNDARY", "stop")
     inertia_c = params.get("inertiaC")
     eta_t = params.get("tractionEfficiency")
-    if not inertia_c or not eta_t:
+    eta_r = params.get("recupEfficiency")
+    if not inertia_c or not eta_t or (boundary == "stop" and not eta_r):
         return {}
+    factor = eta_r if boundary == "stop" else 1.0 / eta_t
     v_end = parse_trip_end_speeds(output_dir)
     if not v_end:
         print(f"[trip-end-KE] WARNUNG: keine resistance_debug.csv in {output_dir} "
@@ -110,7 +116,7 @@ def trip_end_ke_corrections_kwh(output_dir: Path, mission: str,
             continue
         mass, payload = masses[vid]
         m_inertia = mass * inertia_c + payload
-        corrections[vid] = 0.5 * m_inertia * v * v / eta_t * _J_TO_KWH
+        corrections[vid] = 0.5 * m_inertia * v * v * factor * _J_TO_KWH
     return corrections
 
 
