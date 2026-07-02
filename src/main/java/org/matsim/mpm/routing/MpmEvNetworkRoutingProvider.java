@@ -28,6 +28,9 @@ import org.matsim.core.router.util.TravelTime;
 
 import com.google.inject.Inject;
 import com.google.inject.Provider;
+import com.google.inject.name.Named;
+
+import org.matsim.mpm.discharging.MpmDischargingModule;
 
 public class MpmEvNetworkRoutingProvider implements Provider<RoutingModule> {
     private static final Logger log = LogManager.getLogger(MpmEvNetworkRoutingProvider.class);
@@ -63,7 +66,10 @@ public class MpmEvNetworkRoutingProvider implements Provider<RoutingModule> {
     @Inject
     private ChargingInfrastructureSpecification chargingInfrastructureSpecification;
 
+    // Debug-freie Factory (C1): identische Physik wie die QSim-Factory, aber ohne
+    // resistance_debug.csv — Router-Schaetzungen kontaminieren die CSV nicht mehr.
     @Inject
+    @Named(MpmDischargingModule.ROUTING_FACTORY)
     private DriveEnergyConsumption.Factory driveConsumptionFactory;
 
     @Inject
