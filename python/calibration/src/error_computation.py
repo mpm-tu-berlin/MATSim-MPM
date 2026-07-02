@@ -7,6 +7,7 @@ import csv
 import gzip
 import math
 import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from src import config as _cfg
@@ -14,6 +15,103 @@ from src.config import REFERENCE_CONSUMPTION_FILE
 
 # Joule -> kWh
 _J_TO_KWH = 1.0 / 3_600_000.0
+
+
+# =====================================================================
+# Trip-End-KE-Korrektur (nur Vergleichsseite, siehe config.TRIP_END_KE_CORRECTION)
+# =====================================================================
+
+def load_vehicle_masses(mission: str) -> dict[str, tuple[float, float]]:
+    """Liest mass/payload pro Fahrzeug-ID aus der vehicles.xml des Szenarios.
+
+    Returns:
+        Dict {vehicle_id: (mass_kg, payload_kg)}
+    """
+    vehicles_file = _cfg.SCENARIOS[mission]["config"].parent / "vehicles.xml"
+    root = ET.parse(vehicles_file).getroot()
+
+    def _local(tag: str) -> str:
+        return tag.rsplit("}", 1)[-1]
+
+    type_masses: dict[str, tuple[float, float]] = {}
+    vehicle_masses: dict[str, tuple[float, float]] = {}
+    for el in root.iter():
+        if _local(el.tag) == "vehicleType":
+            mass = payload = None
+            for attr in el.iter():
+                if _local(attr.tag) == "attribute":
+                    if attr.get("name") == "mass":
+                        mass = float(attr.text)
+                    elif attr.get("name") == "payload":
+                        payload = float(attr.text)
+            if mass is not None:
+                type_masses[el.get("id")] = (mass, payload or 0.0)
+        elif _local(el.tag) == "vehicle":
+            t = el.get("type")
+            if t in type_masses:
+                vehicle_masses[el.get("id")] = type_masses[t]
+    return vehicle_masses
+
+
+def parse_trip_end_speeds(output_dir: Path) -> dict[str, float]:
+    """Liest die End-Geschwindigkeit (vExit des letzten QSim-Links) pro Fahrzeug
+    aus resistance_debug.csv.
+
+    Annahme: Router-Schaetzrows (C1-Befund) stehen VOR den QSim-Rows, da das
+    Routing vor der Mobsim laeuft — die letzte gueltige Zeile pro Fahrzeug ist
+    damit das echte Trip-Ende. Unparsbare (interleavte) Zeilen werden uebersprungen.
+
+    Returns:
+        Dict {vehicle_id: v_end_m_per_s}
+    """
+    csv_path = output_dir / "resistance_debug.csv"
+    if not csv_path.exists():
+        return {}
+    v_end: dict[str, float] = {}
+    with open(csv_path, encoding="utf-8") as f:
+        for line in f:
+            parts = line.rstrip("\n").split(",")
+            if len(parts) < 14 or parts[0] == "vehicleId":
+                continue
+            try:
+                v_end[parts[0]] = float(parts[5]) / 3.6  # vExit_kmh -> m/s
+            except ValueError:
+                continue
+    return v_end
+
+
+def trip_end_ke_corrections_kwh(output_dir: Path, mission: str,
+                                params: dict[str, float] | None) -> dict[str, float]:
+    """Storno der gebuchten Anfahr-KE am Trip-Ende [kWh] pro Fahrzeug.
+
+    Das Modell bucht die KE von 0 auf vEnd mit 1/tractionEfficiency; die
+    Referenzfenster (VECTO/Realfahrt) starten und enden rollend und enthalten
+    diesen Posten nicht. KEIN physischer Rekuperations-Stopp (der LKW bremst am
+    Zyklusende nicht) — reine Buchungs-Korrektur fuer die Vergleichbarkeit.
+
+    Returns:
+        Dict {vehicle_id: korrektur_kwh} (leer, wenn deaktiviert oder Daten fehlen).
+    """
+    if not getattr(_cfg, "TRIP_END_KE_CORRECTION", False) or not params:
+        return {}
+    inertia_c = params.get("inertiaC")
+    eta_t = params.get("tractionEfficiency")
+    if not inertia_c or not eta_t:
+        return {}
+    v_end = parse_trip_end_speeds(output_dir)
+    if not v_end:
+        print(f"[trip-end-KE] WARNUNG: keine resistance_debug.csv in {output_dir} "
+              f"— Korrektur entfaellt.")
+        return {}
+    masses = load_vehicle_masses(mission)
+    corrections = {}
+    for vid, v in v_end.items():
+        if vid not in masses:
+            continue
+        mass, payload = masses[vid]
+        m_inertia = mass * inertia_c + payload
+        corrections[vid] = 0.5 * m_inertia * v * v / eta_t * _J_TO_KWH
+    return corrections
 
 
 def load_reference(mission: str | None = None,
@@ -141,14 +239,15 @@ def parse_events_consumption(output_dir: Path) -> dict[str, float]:
     return {vid: e_j * _J_TO_KWH for vid, e_j in consumption_j.items()}
 
 
-def compute_scenario_error(output_dir: Path, mission: str,
-                           route_km: float) -> list[tuple[float, float]]:
+def compute_scenario_error(output_dir: Path, mission: str, route_km: float,
+                           params: dict[str, float] | None = None) -> list[tuple[float, float]]:
     """Berechnet die relativen Fehler fuer ein einzelnes Szenario.
 
     Args:
         output_dir: MATSim-Output-Verzeichnis.
         mission: Name der Mission ("LongHaul" oder "RegionalDelivery").
         route_km: Streckenlaenge in km.
+        params: Trial-Parameter (fuer die Trip-End-KE-Korrektur; None = keine).
 
     Returns:
         Liste von (rel_squared_error, abs_rel_error) pro Fahrzeug [-].
@@ -156,6 +255,7 @@ def compute_scenario_error(output_dir: Path, mission: str,
     """
     reference = load_reference(mission)
     consumption = parse_events_consumption(output_dir)
+    ke_corr = trip_end_ke_corrections_kwh(output_dir, mission, params)
 
     payload_class = _cfg.ACTIVE_PAYLOAD_CLASS  # "low", "high" oder "all"
 
@@ -168,7 +268,7 @@ def compute_scenario_error(output_dir: Path, mission: str,
                 f"Fahrzeug '{vid}' nicht in MATSim-Output gefunden. "
                 f"Vorhandene Fahrzeuge: {list(consumption.keys())}"
             )
-        matsim_ee = consumption[vid] / route_km
+        matsim_ee = (consumption[vid] - ke_corr.get(vid, 0.0)) / route_km
         ref_ee = ref_data["ee_kwh_per_km"]
         rel = (matsim_ee - ref_ee) / ref_ee
         errors.append((rel ** 2, abs(rel)))
@@ -228,8 +328,12 @@ def format_final_report(scenario_outputs: dict[str, Path], trial_number: int,
         route_km = _cfg.SCENARIOS[scenario_name]["route_km"]
         consumption = parse_events_consumption(out_dir)
         reference = load_reference(scenario_name)
+        ke_corr = trip_end_ke_corrections_kwh(out_dir, scenario_name, params)
 
         lines.append(f"\n  [{scenario_name}]  Strecke: {route_km} km")
+        if ke_corr:
+            corr_str = "  ".join(f"{vid}: -{c:.2f} kWh" for vid, c in sorted(ke_corr.items()))
+            lines.append(f"  Trip-End-KE-Korrektur (Storno Anfahr-Buchung): {corr_str}")
         lines.append(
             f"  {'Fahrzeug':<35} {'MATSim':>9} {'VECTO':>9} {'Diff':>9} {'Diff%':>7}"
         )
@@ -239,7 +343,7 @@ def format_final_report(scenario_outputs: dict[str, Path], trial_number: int,
         for vid, ref in sorted(reference.items()):
             if payload_class != "all" and not vid.endswith(f"_{payload_class}"):
                 continue
-            matsim = consumption[vid] / route_km
+            matsim = (consumption[vid] - ke_corr.get(vid, 0.0)) / route_km
             vecto = ref["ee_kwh_per_km"]
             diff = matsim - vecto
             rel_pct = diff / vecto * 100.0
@@ -259,11 +363,13 @@ def format_final_report(scenario_outputs: dict[str, Path], trial_number: int,
     return "\n".join(lines)
 
 
-def compute_combined_errors(scenario_outputs: dict[str, Path]) -> tuple[float, float]:
+def compute_combined_errors(scenario_outputs: dict[str, Path],
+                            params: dict[str, float] | None = None) -> tuple[float, float]:
     """Berechnet RMSE und MAE in Prozent ueber alle Szenarien.
 
     Args:
         scenario_outputs: Dict {scenario_name: output_dir}
+        params: Trial-Parameter (fuer die Trip-End-KE-Korrektur; None = keine).
 
     Returns:
         (rmse_pct, mae_pct): Relativer RMSE und MAE in % gegenueber VECTO.
@@ -275,7 +381,7 @@ def compute_combined_errors(scenario_outputs: dict[str, Path]) -> tuple[float, f
         if scenario_name not in _cfg.SCENARIOS:
             raise ValueError(f"Unbekanntes Szenario: {scenario_name}")
         route_km = _cfg.SCENARIOS[scenario_name]["route_km"]
-        for sq, ab in compute_scenario_error(output_dir, scenario_name, route_km):
+        for sq, ab in compute_scenario_error(output_dir, scenario_name, route_km, params):
             sq_errors.append(sq)
             abs_errors.append(ab)
 
@@ -287,14 +393,16 @@ def compute_combined_errors(scenario_outputs: dict[str, Path]) -> tuple[float, f
     return rmse_pct, mae_pct
 
 
-def compute_combined_error(scenario_outputs: dict[str, Path]) -> float:
+def compute_combined_error(scenario_outputs: dict[str, Path],
+                           params: dict[str, float] | None = None) -> float:
     """Gibt den RMSE in % zurueck (Optuna-Zielfunktion).
 
     Args:
         scenario_outputs: Dict {scenario_name: output_dir}
+        params: Trial-Parameter (fuer die Trip-End-KE-Korrektur; None = keine).
 
     Returns:
         Relativer RMSE in % gegenueber VECTO-Referenzwerten.
     """
-    rmse_pct, _ = compute_combined_errors(scenario_outputs)
+    rmse_pct, _ = compute_combined_errors(scenario_outputs, params)
     return rmse_pct

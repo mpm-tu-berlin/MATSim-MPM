@@ -28,7 +28,7 @@ def objective(trial: optuna.Trial) -> float:
     scenario_outputs = run_all_scenarios(params, run_id_prefix=run_id_prefix)
 
     # Kompakte Ausgabe pro Trial (landet via Tee auch im Log)
-    rmse_pct, mae_pct = compute_combined_errors(scenario_outputs)
+    rmse_pct, mae_pct = compute_combined_errors(scenario_outputs, params=params)
     params_str = "  ".join(
         f"{k}={v:.3f}" if k == "inertiaC" else
         f"{k}={v:.0f}" if k == "auxPowerW" else

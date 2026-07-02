@@ -112,6 +112,17 @@ STUDIES = [
 # Wird zur Laufzeit von run_optimization.py gesetzt (Monkey-Patch).
 ACTIVE_PAYLOAD_CLASS: str = "all"
 
+# === Trip-End-KE-Korrektur (nur Vergleichsseite!) ===
+# Das Java-Modell startet jedes Leg bei v~0 und bucht die kinetische Anfahr-
+# Energie; die VECTO-/Realfahrt-Referenz misst dagegen rollend start-/endende
+# Fenster, in denen sich Start- und End-KE aufheben. Vor dem Vergleich wird
+# deshalb die am Trip-Ende noch im Fahrzeug steckende KE als gebuchte Anfahr-
+# Kosten storniert:  E_korr = 0.5 * mInertia * vEnd^2 / tractionEfficiency.
+# BEWUSST NICHT im Java-Modell verankert (Entscheidung 2026-07-02): im
+# deutschlandweiten Flottenszenario gibt es dieses Fenster-Artefakt nicht,
+# das Modell bleibt dort physikalisch unveraendert.
+TRIP_END_KE_CORRECTION = True
+
 # === Kalibrierungsparameter-Bereiche
 # Wertebereiche (low, high) fuer die 6 Optuna-Parameter.
 # a1/a2 entfallen: kinetische Energie wird jetzt exakt pro Link berechnet.
