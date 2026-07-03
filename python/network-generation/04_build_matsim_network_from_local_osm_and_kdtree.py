@@ -962,6 +962,78 @@ def _canonicalize_to_detailed(edge_row, seq_det):
     return row
 
 
+def _geo_seg_lengths_m(coords):
+    """Haversine-Laengen [m] der Segmente einer lon/lat-Koordinatenliste."""
+    c = np.asarray(coords, dtype=float)
+    lon = np.radians(c[:, 0]); lat = np.radians(c[:, 1])
+    dlon = np.diff(lon); dlat = np.diff(lat)
+    a = np.sin(dlat / 2) ** 2 + np.cos(lat[:-1]) * np.cos(lat[1:]) * np.sin(dlon / 2) ** 2
+    return 2.0 * 6371000.0 * np.arcsin(np.sqrt(a))
+
+
+_FBS_SEQ = [0]  # Zaehler fuer synthetische Fallback-Split-Knoten-IDs
+
+
+def _split_edge_by_own_geometry(edge, max_allowed_length, split_nodes_xy):
+    """Fallback-Splitting OHNE Detail-Sequenz: teilt die Kante an ihren EIGENEN
+    Geometrie-Stuetzpunkten in ~gleich lange Teile <= max_allowed_length.
+    Noetig, weil Kanten mit leerer/unbrauchbarer Detail-Sequenz sonst UNGETEILT
+    uebernommen werden (Germany 2026-07: 14 Links >10 km, max 26,4 km -> ein
+    gemittelter Grade ueber die volle Laenge). Neue Knoten bekommen synthetische
+    String-IDs ('fbs<n>'), XY wird in split_nodes_xy registriert.
+    Rueckgabe: Liste von GeoDataFrames oder None (Geometrie nicht teilbar)."""
+    try:
+        coords = list(edge.geometry.coords)
+    except Exception:
+        return None
+    if len(coords) < 3:
+        return None
+    L = float(pd.to_numeric(edge['length'], errors='coerce'))
+    if not np.isfinite(L) or L <= 0:
+        return None
+    seg = _geo_seg_lengths_m(coords)
+    total = float(seg.sum())
+    if not np.isfinite(total) or total <= 0:
+        return None
+    cum = np.concatenate([[0.0], np.cumsum(seg)])
+    n_parts = int(np.ceil(L / float(max_allowed_length)))
+    if n_parts < 2:
+        return None
+
+    # Ziel-Schnittpositionen; je der naechstliegende Stuetzpunkt, strikt steigend.
+    cut_idx, last = [], 0
+    for j in range(1, n_parts):
+        k = int(np.argmin(np.abs(cum - total * j / n_parts)))
+        k = max(k, last + 1)
+        if k >= len(coords) - 1:
+            break
+        cut_idx.append(k)
+        last = k
+    if not cut_idx:
+        return None
+
+    bounds = [0] + cut_idx + [len(coords) - 1]
+    scale = L / total  # OSM-Laenge proportional auf die Teile verteilen
+    out, prev_nid = [], str(edge['u'])
+    for bi in range(len(bounds) - 1):
+        a, b = bounds[bi], bounds[bi + 1]
+        row = edge.copy()
+        row['u'] = prev_nid
+        if bi == len(bounds) - 2:
+            nid = str(edge['v'])
+        else:
+            _FBS_SEQ[0] += 1
+            nid = f"fbs{_FBS_SEQ[0]}"
+            split_nodes_xy[nid] = (float(coords[b][0]), float(coords[b][1]))
+        row['v'] = nid
+        row['geometry'] = LineString(coords[a:b + 1])
+        row['length'] = float(max(1.0, (cum[b] - cum[a]) * scale))
+        row['origin'] = 'split'
+        out.append(gpd.GeoDataFrame([row]).set_crs("EPSG:4326", allow_override=True))
+        prev_nid = nid
+    return out
+
+
 def short_edges(gdf_edges_simplified: gpd.GeoDataFrame,
                 gdf_edges_detailed: gpd.GeoDataFrame,
                 max_allowed_length: float):
@@ -1027,13 +1099,24 @@ def short_edges(gdf_edges_simplified: gpd.GeoDataFrame,
                       unit="edge", mininterval=0.3,
                       dynamic_ncols=True, leave=False, file=sys.stdout)
 
+    n_fb_edges = n_fb_parts = n_fb_unsplittable = 0
+
     # -------- Initial sequences --------
     for _, e in long_edges.iterrows():
         seq = get_directed_detailed_sequence(e, gdf_edges_detailed, osmid_index)
         if seq.empty:
-            ee = gpd.GeoDataFrame([e], crs="EPSG:4326"); ee['origin'] = 'keep'
-            result_parts.append(ee)
-            pbar_final.update(1)
+            # Keine Detail-Sequenz -> Fallback: an eigener Geometrie splitten
+            # (sonst bleibt die Kante ungeteilt, s. _split_edge_by_own_geometry).
+            parts = _split_edge_by_own_geometry(e, max_allowed_length, split_nodes_xy)
+            if parts is not None:
+                n_fb_edges += 1; n_fb_parts += len(parts)
+                result_parts.extend(parts)
+                pbar_final.update(len(parts))
+            else:
+                n_fb_unsplittable += 1
+                ee = gpd.GeoDataFrame([e], crs="EPSG:4326"); ee['origin'] = 'keep'
+                result_parts.append(ee)
+                pbar_final.update(1)
             if pbar_final.n > pbar_final.total:
                 pbar_final.total = pbar_final.n
                 pbar_final.refresh()
@@ -1067,9 +1150,18 @@ def short_edges(gdf_edges_simplified: gpd.GeoDataFrame,
 
         left, right, split_meta, left_seq, right_seq = split_once_at_half(edge, seq)
         if left is None or right is None:
-            ee = gpd.GeoDataFrame([edge], crs="EPSG:4326"); ee['origin'] = 'keep'
-            result_parts.append(ee)
-            pbar_final.update(1)
+            # Detail-Sequenz nicht weiter teilbar (z.B. n<2) -> Fallback an
+            # eigener Geometrie, sonst Kante ungeteilt uebernehmen wie bisher.
+            parts = _split_edge_by_own_geometry(edge, max_allowed_length, split_nodes_xy)
+            if parts is not None:
+                n_fb_edges += 1; n_fb_parts += len(parts)
+                result_parts.extend(parts)
+                pbar_final.update(len(parts))
+            else:
+                n_fb_unsplittable += 1
+                ee = gpd.GeoDataFrame([edge], crs="EPSG:4326"); ee['origin'] = 'keep'
+                result_parts.append(ee)
+                pbar_final.update(1)
             pbar_tasks.update(1)
             continue
 
@@ -1116,6 +1208,10 @@ def short_edges(gdf_edges_simplified: gpd.GeoDataFrame,
 
     pbar_tasks.close()
     pbar_final.close()
+
+    if n_fb_edges or n_fb_unsplittable:
+        print(f"Fallback-Splitting (eigene Geometrie): {n_fb_edges} Kante(n) -> "
+              f"{n_fb_parts} Teile; ungeteilt geblieben: {n_fb_unsplittable}")
 
     out = pd.concat(result_parts, ignore_index=True)
     if not out.crs:
