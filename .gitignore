@@ -40,6 +40,10 @@ python/calibration/scripts/results/
 python/calibration/REAL_VALIDATION_PLAN.md
 python/calibration/REVIEW_FINDINGS_2026-06.md
 
+# Paper-2-Arbeitsdokumente (nicht veröffentlichen)
+TTE_Gliederung_Paper2.md
+PAPER2_STATUS.md
+
 # Python-Kalibrierung
 python/calibration/.venv/
 python/calibration/results/
@@ -52,7 +56,9 @@ python/calibration/resistance_debug.csv
 python/calibration/data/
 python/calibration/~$*
 
-# Netzgenerierung: große Rasterquellen (DTM), OSM-/Overpass-Cache, Python-Cache
+# Netzgenerierung: große Rasterquellen (DTM), OSM-/Overpass-Cache, Python-Cache,
+# Daten (Sektionsnetze, GPKG, Zwischenstände — nie committen)
 *.tif
 cache/
 python/network-generation/__pycache__/
+python/network-generation/data/

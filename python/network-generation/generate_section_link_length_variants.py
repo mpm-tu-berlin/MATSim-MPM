@@ -2,13 +2,20 @@
 """
 Generate MATSim network variants at different max link lengths for representative sections.
 
-For each section (Q50/Q75/Q97) and each max_link_length, this script:
+For each section (Q75/Q97) and each max_link_length, this script:
   1. Reads the fine (50m) section network to get the bounding box + buffer
   2. Spatially filters the Germany-wide gpkg data to that bounding box
   3. Runs short_edges() from script 04 with the target max_link_length
-  4. Builds a MATSim network from the resulting edges + KDTree heights
+  4. Builds a MATSim network; Hoehen via assign_heights_along_corridors aus
+     Skript 04 (DTM-direkt, korridor-geglaettet, bruecken-linearisiert —
+     aufloesungsUNabhaengig, d.h. alle Varianten teilen dieselbe Hoehenbasis;
+     ersetzt das alte KD-Tree-npz-Sampling, A3-Konsistenz 2026-07)
   5. Finds the section path in the new network (start/end node matching)
   6. Exports only the section-path links as a MATSim sub-network
+
+Skript 04 und die Germany-GPKGs liegen im Netzgen-Worktree (../MATSim-MPM-netgen,
+Branch feature/network-generation) und werden von dort per Dateipfad importiert/geladen
+(bewusste Entscheidung 2026-07-01: kein Branch-Merge).
 
 Usage:
     python generate_section_link_length_variants.py [--sections-dir <path>] [--output-dir <path>]
@@ -36,9 +43,16 @@ from importlib.util import spec_from_file_location, module_from_spec
 
 _SCRIPT_DIR = Path(__file__).parent
 
+# Netzgen-Worktree (Geschwister-Checkout, Branch feature/network-generation):
+# dort liegen Skript 04 und die aktuellen Germany-GPKGs (Skript-01-Lauf 2026-07-03).
+_NETGEN_DIR = _SCRIPT_DIR.parents[2] / "MATSim-MPM-netgen" / "python" / "network-generation"
+
+
 def _import_script04():
-    """Import script 04 as a module."""
+    """Import script 04 as a module (lokal, sonst aus dem Netzgen-Worktree)."""
     script_path = _SCRIPT_DIR / "04_build_matsim_network_from_local_osm_and_kdtree.py"
+    if not script_path.exists():
+        script_path = _NETGEN_DIR / "04_build_matsim_network_from_local_osm_and_kdtree.py"
     spec = spec_from_file_location("script04", str(script_path))
     mod = module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -47,14 +61,20 @@ def _import_script04():
 # ==============================
 # Configuration
 # ==============================
-DEFAULT_SECTIONS_DIR = r"data\sections_quantile_run_20260307_090732"
+DEFAULT_SECTIONS_DIR = str(_NETGEN_DIR / "data" / "sections_quantile_run_20260307_090732")
 DEFAULT_DATA_DIR = r"data"
 
-KDTREE_PATH = r"data\germany_3d_raster_clamped_DF_kdtree_from_roads3d_epsg4326.npz"
-SIMPLIFIED_GPKG = r"data\germany_simplified_DF.gpkg"
-DETAILED_GPKG = r"data\germany_detailed_sorted_DF.gpkg"
+DTM_PATH = _SCRIPT_DIR / "data" / "DTM Germany 20m v3b by Sonny.tif"
+SIMPLIFIED_GPKG = _NETGEN_DIR / "data" / "germany_simplified_DF.gpkg"
+DETAILED_GPKG = _NETGEN_DIR / "data" / "germany_detailed_sorted_DF.gpkg"
 
-LINK_LENGTHS = [5000] #[50, 100, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000]
+# Hoehenzuweisung (wie generate_network-Defaults in Skript 04, A3 = geglaettet)
+SAMPLE_STEP_M = 5.0
+SMOOTH_RMS_M = 1.0
+
+# Knie-orientierte Leiter (identisch zu run_section_energy_analysis.LINK_LENGTHS)
+LINK_LENGTHS = [50, 100, 150, 200, 225, 250, 275, 300, 325, 350, 375, 400,
+                425, 450, 475, 500, 550, 600, 700, 800, 900, 1000]
 
 SECTION_FILES = {
     "q75": "section_q75_100km.xml.gz",
@@ -280,8 +300,8 @@ def export_path_subnetwork(nodes, links, link_elems_root, ordered_path, output_p
 
 
 def generate_variants_for_section(
-    section_label, section_path, link_lengths,
-    script04, tree, coords, heights,
+    section_label, section_path, link_lengths, dtm,
+    script04,
     gdf_nodes_simplified, gdf_edges_simplified,
     gdf_nodes_detailed, gdf_edges_detailed,
     output_dir
@@ -402,9 +422,15 @@ def generate_variants_for_section(
             seen.add(nid)
 
         gdf_nodes_export = gpd.GeoDataFrame(node_rows, crs="EPSG:4326")
-        xs = gdf_nodes_export.geometry.x.to_numpy()
-        ys = gdf_nodes_export.geometry.y.to_numpy()
-        gdf_nodes_export["height"] = script04.kdtree_heights_vectorized(tree, heights, xs, ys)
+        # Hoehen wie in script04.generate_network: korridor-geglaettetes DTM-Profil
+        # (aufloesungsunabhaengig -> alle max_len-Varianten teilen dieselbe Hoehenbasis).
+        node_lonlat = {str(r["osmid"]): (float(r["geometry"].x), float(r["geometry"].y))
+                       for r in node_rows}
+        z_by_node = script04.assign_heights_along_corridors(
+            edges_shortened, node_lonlat, dtm,
+            target_epsg=TARGET_EPSG, sample_step_m=SAMPLE_STEP_M, smooth_rms_m=SMOOTH_RMS_M)
+        gdf_nodes_export["height"] = [z_by_node.get(str(nid), np.nan)
+                                      for nid in gdf_nodes_export["osmid"]]
 
         # 6) Write full regional MATSim network
         edges_clean = script04.sanitize_edges_for_export(edges_shortened)
@@ -504,7 +530,8 @@ def main():
     parser.add_argument("--output-dir", type=str, default=None,
                         help="Output directory (default: auto-timestamped under data/)")
     parser.add_argument("--link-lengths", type=str, default=None,
-                        help="Comma-separated link lengths in meters (default: 50,100,...,5000)")
+                        help="Comma-separated link lengths in meters "
+                             "(Default: knie-orientierte Leiter 50..1000, s. LINK_LENGTHS)")
     args = parser.parse_args()
 
     sections_dir = Path(args.sections_dir)
@@ -529,18 +556,15 @@ def main():
     print("\nLoading script 04 module...")
     script04 = _import_script04()
 
-    # Load shared data (KDTree + gpkg)
-    print("\nLoading KDTree...")
-    kdtree_path = _SCRIPT_DIR / KDTREE_PATH
-    tree, coords, heights = script04.load_kdtree(str(kdtree_path))
+    # Load shared data (DTM + gpkg)
+    print("\nLoading DTM...")
+    dtm = script04.load_dtm(str(DTM_PATH))
 
     print("Loading simplified gpkg...")
-    simp_path = _SCRIPT_DIR / SIMPLIFIED_GPKG
-    gdf_nodes_simplified, gdf_edges_simplified = script04.load_local_osm_file(str(simp_path))
+    gdf_nodes_simplified, gdf_edges_simplified = script04.load_local_osm_file(str(SIMPLIFIED_GPKG))
 
     print("Loading detailed gpkg...")
-    det_path = _SCRIPT_DIR / DETAILED_GPKG
-    gdf_nodes_detailed, gdf_edges_detailed = script04.load_local_osm_file(str(det_path))
+    gdf_nodes_detailed, gdf_edges_detailed = script04.load_local_osm_file(str(DETAILED_GPKG))
 
     all_results = []
 
@@ -554,8 +578,8 @@ def main():
             section_label=label,
             section_path=str(section_path),
             link_lengths=link_lengths,
+            dtm=dtm,
             script04=script04,
-            tree=tree, coords=coords, heights=heights,
             gdf_nodes_simplified=gdf_nodes_simplified,
             gdf_edges_simplified=gdf_edges_simplified,
             gdf_nodes_detailed=gdf_nodes_detailed,
