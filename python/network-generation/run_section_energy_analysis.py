@@ -853,6 +853,11 @@ def main():
     print("=" * 60)
 
     try:
+        # plot_elevation_profiles liegt (wie Skript 04) im Netzgen-Worktree ->
+        # Laufzeit-Pfad-Fallback statt Branch-Merge (Entscheidung 2026-07-01).
+        _netgen_dir = Path(__file__).parent.parents[2] / "MATSim-MPM-netgen" / "python" / "network-generation"
+        if not (Path(__file__).parent / "plot_elevation_profiles.py").exists() and _netgen_dir.is_dir():
+            sys.path.insert(0, str(_netgen_dir))
         from plot_elevation_profiles import main as plot_elevation_main
         plot_elevation_main(data_dir=str(output_dir))
     except Exception as e:
