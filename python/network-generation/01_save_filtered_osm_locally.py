@@ -253,10 +253,33 @@ def _sort_detailed_fast(gdf_edges_simplified, gdf_edges_detailed, total_detailed
 
     edge_mask_to_be_deleted = []
     order = []   # Detailed-POSITIONEN in Ergebnis-Reihenfolge (Duplikate erlaubt)
+    stuck_labels = []
+    prev_state = None
     pbar = tqdm(total=total_detailed_length, desc="Sorting progress", unit="m", mininterval=1, maxinterval=1)
 
     while queue:
         head = queue[0]
+        # --- Stillstands-Guard (Altlast-Bug, Legacy identisch betroffen): Wenn
+        # matching_osmid via Koordinaten-Kollision zu einer ANDEREN Zeile gehoert
+        # (osmid-Strip am Kopf greift nie) UND counter >= Koordinatenzahl (keine
+        # Geometrie-Aenderung), aendert eine Iteration NICHTS -> deterministische
+        # Endlosschleife (Germany-Lauf 2026-07-02: 73 Gm "Fortschritt", MemoryError).
+        # Zustand ist (Objekt, osmid-Laenge, Koordinatenzahl); unveraendert =>
+        # Kante wie 'nicht matchbar' behandeln, Append der Pruef-Iteration zurueckrollen.
+        state = (id(head),
+                 len(head['osmid']) if isinstance(head['osmid'], list) else -1,
+                 len(head['geometry'].coords))
+        order_len_before = len(order)
+        if state == prev_state:
+            del order[prev_order_len:]
+            edge_mask_to_be_deleted.append(head['label'])
+            stuck_labels.append(head['label'])
+            queue.popleft()
+            prev_state = None
+            continue
+        prev_state = state
+        prev_order_len = order_len_before
+
         geometry = head['geometry']
         first_coords = geometry.coords[0]
         all_set = set(geometry.coords)
@@ -329,6 +352,10 @@ def _sort_detailed_fast(gdf_edges_simplified, gdf_edges_detailed, total_detailed
         pbar.update(round(sum(lengths_det[p] for p in sel)))
 
     pbar.close()
+    if stuck_labels:
+        print(f"WARNUNG: {len(stuck_labels)} simplified-Kante(n) durch Stillstands-Guard "
+              f"verworfen (Koordinaten-Kollision, Endlosschleifen-Altlast); Beispiele: "
+              f"{stuck_labels[:5]}")
     if not order:
         return None, edge_mask_to_be_deleted
     result_gdf = gdf_edges_detailed.iloc[order].reset_index(drop=True)
