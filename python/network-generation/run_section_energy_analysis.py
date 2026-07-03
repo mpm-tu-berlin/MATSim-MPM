@@ -61,7 +61,7 @@ def _import_variants_module():
         generate_variants_for_section,
         SECTION_FILES,
         _import_script04,
-        KDTREE_PATH,
+        DTM_PATH,
         SIMPLIFIED_GPKG,
         DETAILED_GPKG,
     )
@@ -69,7 +69,7 @@ def _import_variants_module():
         "generate_variants_for_section": generate_variants_for_section,
         "SECTION_FILES": SECTION_FILES,
         "_import_script04": _import_script04,
-        "KDTREE_PATH": KDTREE_PATH,
+        "DTM_PATH": DTM_PATH,
         "SIMPLIFIED_GPKG": SIMPLIFIED_GPKG,
         "DETAILED_GPKG": DETAILED_GPKG,
     }
@@ -148,30 +148,28 @@ FLAT_LANES = 2.0
 # QSim timestep [seconds] — passed to RunSectionScenario via --qsim-timestep
 QSIM_TIMESTEP = 0.5
 
-# Calibration parameters per loading.
-# tractionEfficiency, inertiaC, recupEfficiency, maxRecupPowerFraction: user-set values
-# (2026-06-03) replacing the 1m Optuna best trials, to align with literature/round defaults.
-# cdXA, rollingC: still from 1m Optuna LH run 20260529_094545_1m best trials
-# (lh_low Trial 120, lh_high Trial 75) since those were not part of the override.
-# auxPowerW was fixed at 4000 W during that calibration.
+# Calibration parameters per loading — Kandidat C aus B2v2
+# (Run 20260702_135312_250m, 500 Trials, stop-Boundary-KE-Korrektur, C1/C2 aktiv):
+# empty -> lh_low Trial #79 (RMSE 0,55 %), loaded -> lh_high Trial #261 (RMSE 0,87 %).
+# auxPowerW war in der Kalibrierung fix bei 4000 W.
 CALIBRATION_PER_LOADING = {
     "empty": {
-        "tractionEfficiency": 0.86,
-        "inertiaC": 1.03,
-        "recupEfficiency": 0.6,
-        "maxRecupPowerFraction": 0.95,
+        "tractionEfficiency": 0.80218,
+        "inertiaC": 1.02691,
+        "recupEfficiency": 0.75633,
+        "maxRecupPowerFraction": 0.62015,
         "auxPowerW": 4000.0,
-        "cdXA": 5.6613,
-        "rollingC": 0.0046,
+        "cdXA": 5.85643,
+        "rollingC": 0.00460,
     },
     "loaded": {
-        "tractionEfficiency": 0.92,
-        "inertiaC": 1.03,
-        "recupEfficiency": 0.6,
-        "maxRecupPowerFraction": 0.95,
+        "tractionEfficiency": 0.86981,
+        "inertiaC": 1.02980,
+        "recupEfficiency": 0.61631,
+        "maxRecupPowerFraction": 0.86073,
         "auxPowerW": 4000.0,
-        "cdXA": 5.7629,
-        "rollingC": 0.0049,
+        "cdXA": 5.76244,
+        "rollingC": 0.00539,
     },
 }
 # Backwards-compatible default (used only if a caller still wants a single set).
@@ -670,17 +668,14 @@ def main():
             print("\nLoading script 04 module...")
             script04 = _gen["_import_script04"]()
 
-            print("Loading KDTree...")
-            kdtree_path = _SCRIPT_DIR / _gen["KDTREE_PATH"]
-            tree, coords, heights = script04.load_kdtree(str(kdtree_path))
+            print("Loading DTM...")
+            dtm = script04.load_dtm(str(_gen["DTM_PATH"]))
 
             print("Loading simplified gpkg...")
-            simp_path = _SCRIPT_DIR / _gen["SIMPLIFIED_GPKG"]
-            gdf_nodes_simplified, gdf_edges_simplified = script04.load_local_osm_file(str(simp_path))
+            gdf_nodes_simplified, gdf_edges_simplified = script04.load_local_osm_file(str(_gen["SIMPLIFIED_GPKG"]))
 
             print("Loading detailed gpkg...")
-            det_path = _SCRIPT_DIR / _gen["DETAILED_GPKG"]
-            gdf_nodes_detailed, gdf_edges_detailed = script04.load_local_osm_file(str(det_path))
+            gdf_nodes_detailed, gdf_edges_detailed = script04.load_local_osm_file(str(_gen["DETAILED_GPKG"]))
 
             # Generate variants in parallel (one thread per section)
             all_gen_results = []
@@ -696,8 +691,8 @@ def main():
                         section_label=label,
                         section_path=spath,
                         link_lengths=missing_lengths,
+                        dtm=dtm,
                         script04=script04,
-                        tree=tree, coords=coords, heights=heights,
                         gdf_nodes_simplified=gdf_nodes_simplified,
                         gdf_edges_simplified=gdf_edges_simplified,
                         gdf_nodes_detailed=gdf_nodes_detailed,
