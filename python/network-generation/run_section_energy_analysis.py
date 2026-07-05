@@ -88,23 +88,28 @@ DEFAULT_SECTIONS_DIR = r"data\sections_quantile_run_20260307_090732"
 # Link lengths to test
 LINK_LENGTHS = [50, 100, 150, 200, 225, 250, 275, 300, 325, 350, 375, 400, 425, 450, 475, 500, 550, 600, 700, 800, 900, 1000]
 
-# Vehicle parameters for the two loading scenarios
+# Vehicle parameters for the two loading scenarios.
+# maxSpeed = 23.611 m/s = 85 km/h = VECTO-Vmax (2026-07-05: vorher 90 km/h ->
+# verliess den Kalibrierbereich und hob den Flat-Case ~10 % ueber Realwerte).
+# HINWEIS: cdXA/rollingC hier sind fuer den VERBRAUCH wirkungslos — der nutzt
+# die CalibrationParams (.properties, CALIBRATION_PER_LOADING); Werte bleiben
+# nur, weil die vehicles.csv die Spalten erwartet.
 VEHICLE_PARAMS = {
     "empty": {
         "mass": 19000,     # [kg] tare weight
         "payload": 0,      # [kg]
-        "cdXA": 5.0,       # [m^2]
-        "rollingC": 0.0046, # [-]
+        "cdXA": 5.0,       # [m^2] (unbenutzt, s. Hinweis)
+        "rollingC": 0.0046, # [-]  (unbenutzt, s. Hinweis)
         "maxMotorPower": 500000,  # [W]
-        "maxSpeed": 25.0,  # [m/s] = 90 km/h
+        "maxSpeed": 23.611,  # [m/s] = 85 km/h (VECTO-Vmax)
     },
     "loaded": {
         "mass": 19000,     # [kg] tare weight
         "payload": 21000,  # [kg] full payload
-        "cdXA": 5.0,       # [m^2]
-        "rollingC": 0.0046, # [-]
+        "cdXA": 5.0,       # [m^2] (unbenutzt, s. Hinweis)
+        "rollingC": 0.0046, # [-]  (unbenutzt, s. Hinweis)
         "maxMotorPower": 500000,  # [W]
-        "maxSpeed": 25.0,  # [m/s] = 90 km/h
+        "maxSpeed": 23.611,  # [m/s] = 85 km/h (VECTO-Vmax)
     },
 }
 
@@ -141,7 +146,7 @@ SECTION_LINESTYLES_EMPTY = {"flat": "--", "q75": "--", "q97": "--"}
 
 # Flat network parameters
 FLAT_TOTAL_LENGTH_M = 100_000  # 100 km
-FLAT_FREESPEED_MS = 25      # 90 km/h
+FLAT_FREESPEED_MS = 23.611  # 85 km/h = VECTO-Vmax (konsistent zu maxSpeed)
 FLAT_CAPACITY = 2000.0
 FLAT_LANES = 2.0
 
