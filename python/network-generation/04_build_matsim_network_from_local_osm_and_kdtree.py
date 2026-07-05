@@ -141,7 +141,14 @@ def sample_heights(dtm_path: str, lons, lats) -> np.ndarray:
 def _is_structure(row):
     """True, wenn die Kante als Bruecke/Tunnel/Viadukt getaggt ist (OSM bridge/tunnel).
     Auf solchen Spans gibt das DTM (Bare-Earth) Talboden/Berg statt der Fahrbahn ->
-    dort wird die Hoehe linear zwischen den An-Grade-Enden interpoliert."""
+    dort wird die Hoehe linear zwischen den An-Grade-Enden interpoliert.
+
+    ACHTUNG (Befund 2026-07-05): osmnx aggregiert Tags beim Simplifizieren mit
+    any-Semantik — eine 44-km-Kette mit EINEM Brueckenstueck bekommt bridge='yes'.
+    Ganz-Kanten-Flagging linearisiert dann kilometerweise echtes Terrain (q97/A72:
+    81 % der Korridorlaenge). Deshalb gilt dieses Flag nur noch als FALLBACK; wo
+    eine Detail-Sequenz existiert, kommen praezise Intervalle aus _struct_fractions
+    (Spalte '_struct_ivals')."""
     for key in ("bridge", "tunnel"):
         if key in row.index:
             val = row[key]
@@ -152,6 +159,32 @@ def _is_structure(row):
                 if str(v).strip().lower() in ("yes", "true", "1", "viaduct", "bridge", "tunnel"):
                     return True
     return False
+
+
+def _struct_fractions(seq_det):
+    """Bauwerks-Intervalle als Anteile [0..1] der Kantenlaenge, aus den DETAIL-
+    Segmenten (dort sind bridge/tunnel in Original-OSM-Granularitaet getaggt).
+    Rueckgabe: Liste von (f0, f1) — leere Liste = sicher KEIN Bauwerk;
+    None = nicht bestimmbar (Aufrufer faellt auf das Ganz-Kanten-Tag zurueck)."""
+    lens = pd.to_numeric(seq_det['length'], errors='coerce').fillna(0.0).to_numpy(dtype=float)
+    total = float(lens.sum())
+    if not np.isfinite(total) or total <= 0:
+        return None
+    cum = np.concatenate([[0.0], np.cumsum(lens)]) / total
+    ivals = []
+    for i, (_, s) in enumerate(seq_det.iterrows()):
+        if _is_structure(s):
+            if ivals and abs(ivals[-1][1] - cum[i]) < 1e-12:
+                ivals[-1] = (ivals[-1][0], float(cum[i + 1]))
+            else:
+                ivals.append((float(cum[i]), float(cum[i + 1])))
+    return ivals
+
+
+def _edge_struct_ivals(row):
+    """'_struct_ivals' einer Kante lesen (Liste von Anteils-Intervallen) oder None."""
+    iv = row.get('_struct_ivals') if hasattr(row, 'get') else None
+    return iv if isinstance(iv, list) else None
 
 
 def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
@@ -191,7 +224,8 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
     # --- Topologie ---
     adj = defaultdict(list)      # node -> [(edge_key, other_node)]
     egeom = {}                   # edge_key -> (LineString, u, v)
-    estruct = {}                 # edge_key -> bool (Bruecke/Tunnel)
+    estruct = {}                 # edge_key -> bool (Bruecke/Tunnel, Ganz-Kanten-Tag)
+    eivals = {}                  # edge_key -> Anteils-Intervalle aus Detail-Segmenten
     for k, row in gdf_edges.iterrows():
         u, v = str(row['u']), str(row['v'])
         g = row.geometry
@@ -199,6 +233,7 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
             continue
         egeom[k] = (g, u, v)
         estruct[k] = _is_structure(row)
+        eivals[k] = _edge_struct_ivals(row)
         adj[u].append((k, v))
         adj[v].append((k, u))
 
@@ -247,23 +282,35 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
         try:
             fx, fy = [], []
             node_s = {path_nodes[0]: 0.0}
-            edge_end_s, edge_struct = [], []
+            struct_spans = []            # (s0, s1) Bauwerks-Spans in Korridor-Bogenlaenge
             cum = 0.0
             for i, ek in enumerate(path_edges):
                 g, eu, ev = egeom[ek]
                 lon, lat = zip(*list(g.coords))
                 mx, my = tf.transform(np.asarray(lon, float), np.asarray(lat, float))
                 mx = np.asarray(mx, float); my = np.asarray(my, float)
-                if eu != path_nodes[i]:           # Geometrie an path_nodes[i] ausrichten
+                rev = (eu != path_nodes[i])
+                if rev:                           # Geometrie an path_nodes[i] ausrichten
                     mx, my = mx[::-1], my[::-1]
                 if i == 0:
                     fx.extend(mx.tolist()); fy.extend(my.tolist())
                 else:
                     fx.extend(mx[1:].tolist()); fy.extend(my[1:].tolist())
+                s0e = cum
                 cum += float(np.hypot(np.diff(mx), np.diff(my)).sum())
                 node_s[path_nodes[i + 1]] = cum
-                edge_end_s.append(cum)
-                edge_struct.append(bool(estruct.get(ek, False)))
+                Le = cum - s0e
+                iv = eivals.get(ek)
+                if iv is not None:
+                    # praezise Detail-Intervalle (Anteile -> Korridor-Bogenlaenge)
+                    for (f0, f1) in iv:
+                        a, b = ((1.0 - f1, 1.0 - f0) if rev else (f0, f1))
+                        struct_spans.append((s0e + a * Le, s0e + b * Le))
+                elif estruct.get(ek, False):
+                    # Fallback ohne Detail-Info: ganze Kante linearisieren
+                    # (User-Entscheidung 2026-07-05: besser als Bare-Earth-Artefakte
+                    # an echten Tunneln/Talbruecken)
+                    struct_spans.append((s0e, cum))
             fx = np.asarray(fx); fy = np.asarray(fy)
             seg = np.hypot(np.diff(fx), np.diff(fy))
             s_vtx = np.concatenate([[0.0], np.cumsum(seg)])
@@ -277,8 +324,7 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
             start = len(all_lon)
             all_lon.extend(np.asarray(lon_s).tolist())
             all_lat.extend(np.asarray(lat_s).tolist())
-            slices.append((path_nodes, node_s, start, n_samp, ss,
-                           np.asarray(edge_end_s, float), edge_struct))
+            slices.append((path_nodes, node_s, start, n_samp, ss, struct_spans))
             covered.update(path_nodes)
         except Exception:
             direct_nodes.extend(path_nodes)
@@ -308,13 +354,14 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
             lo, la = node_lonlat[n]
             dense_rows.append((float(lo), float(la), float(zall[direct_start + j])))
 
-    for (path_nodes, node_s, start, n_samp, ss, edge_end_s, edge_struct) in slices:
+    for (path_nodes, node_s, start, n_samp, ss, struct_spans) in slices:
         zdense = zall[start:start + n_samp].astype(float).copy()
         # Bruecken/Tunnel: Bare-Earth-DTM durch lineare Interpolation zwischen den
         # An-Grade-Hoehen an den Bauwerksenden ersetzen (wie Skript 02).
-        if any(edge_struct):
-            eidx = np.clip(np.searchsorted(edge_end_s, ss, side="right"), 0, len(edge_struct) - 1)
-            is_st = np.fromiter((edge_struct[i] for i in eidx), bool, count=len(eidx))
+        if struct_spans:
+            is_st = np.zeros(len(ss), dtype=bool)
+            for (a, b) in struct_spans:
+                is_st[(ss >= a) & (ss <= b)] = True
             i, N = 0, len(ss)
             while i < N:
                 if is_st[i]:
@@ -347,7 +394,7 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
                 zfun = lambda q, a=s_fit, b=z_fit: float(np.interp(q, a, b))
         else:
             zfun = lambda q, a=s_fit, b=z_fit: float(np.interp(q, a, b))
-        st = any(edge_struct); Lc = float(ss[-1])
+        st = bool(struct_spans); Lc = float(ss[-1])
         for n in interior:
             z[n] = zfun(node_s[n])
             if debug:
@@ -902,6 +949,7 @@ def split_once_at_half(edge, seq_det: gpd.GeoDataFrame):
         filtered_ids = [osm for osm in block_ids if (not orig_ids) or (osm in orig_ids)]
         row['osmid'] = "[" + ",".join(str(x) for x in filtered_ids) + "]"
 
+        row['_struct_ivals'] = _struct_fractions(block)
         row['origin'] = 'split'
         return gpd.GeoDataFrame([row]).set_crs("EPSG:4326", allow_override=True)
 
@@ -958,6 +1006,9 @@ def _canonicalize_to_detailed(edge_row, seq_det):
     L = pd.to_numeric(seq_det['length'], errors='coerce').fillna(0.0).sum()
     if np.isfinite(L) and L > 0:
         row['length'] = float(L)
+    # Bauwerks-Intervalle aus den Detail-Segmenten (ersetzt das durch osmnx-
+    # any-Aggregation unbrauchbare Ganz-Kanten-bridge/tunnel-Tag).
+    row['_struct_ivals'] = _struct_fractions(seq_det)
     row['origin'] = 'keep'
     return row
 
@@ -1014,10 +1065,20 @@ def _split_edge_by_own_geometry(edge, max_allowed_length, split_nodes_xy):
 
     bounds = [0] + cut_idx + [len(coords) - 1]
     scale = L / total  # OSM-Laenge proportional auf die Teile verteilen
+    parent_iv = _edge_struct_ivals(edge)  # Bauwerks-Intervalle des Elternteils (o. None)
     out, prev_nid = [], str(edge['u'])
     for bi in range(len(bounds) - 1):
         a, b = bounds[bi], bounds[bi + 1]
         row = edge.copy()
+        # Eltern-Intervalle auf den Teilabschnitt umrechnen; ohne Detail-Info bleibt
+        # das geerbte Ganz-Kanten-Tag wirksam (-> Linearisierung, Entscheidung
+        # 2026-07-05: besser als Bare-Earth-Artefakte an echten Bauwerken).
+        if parent_iv is not None:
+            ga, gb = cum[a] / total, cum[b] / total
+            row['_struct_ivals'] = [((max(f0, ga) - ga) / (gb - ga),
+                                     (min(f1, gb) - ga) / (gb - ga))
+                                    for (f0, f1) in parent_iv
+                                    if min(f1, gb) > max(f0, ga)]
         row['u'] = prev_nid
         if bi == len(bounds) - 2:
             nid = str(edge['v'])
