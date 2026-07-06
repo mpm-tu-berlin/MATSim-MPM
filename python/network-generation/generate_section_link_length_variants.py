@@ -62,7 +62,9 @@ def _import_script04():
 # ==============================
 # Configuration
 # ==============================
-DEFAULT_SECTIONS_DIR = str(_NETGEN_DIR / "data" / "sections_quantile_run_20260706_130433")
+# Run 182750 = kanonische Auswahl (Ketten-Export-Fix + Eindeutigkeits-Filter,
+# ce753b2 im Worktree; ersetzt Run 130433 mit 9 defekten Exporten)
+DEFAULT_SECTIONS_DIR = str(_NETGEN_DIR / "data" / "sections_quantile_run_20260706_182750")
 DEFAULT_DATA_DIR = r"data"
 
 DTM_PATH = _SCRIPT_DIR / "data" / "DTM Germany 20m v3b by Sonny.tif"
