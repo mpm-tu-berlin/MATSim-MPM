@@ -24,6 +24,7 @@ Usage:
 import argparse
 import copy
 import gzip
+import heapq
 import math
 import sys
 import xml.etree.ElementTree as ET
@@ -87,6 +88,7 @@ TARGET_EPSG = 4839
 NETWORK_CRS = "EPSG:4839"
 CORRIDOR_BUFFER_M = 500  # meters buffer around reference route for spatial filtering
 MAX_LENGTH_DEVIATION = 0.05  # 5% max allowed deviation from reference route length
+WAYPOINT_SPACING_M = 2000.0  # Fuehrungs-Waypoints entlang der Referenzroute
 
 
 # ==============================
@@ -198,6 +200,87 @@ def find_ordered_path(nodes, links, start, end):
     return path
 
 
+def sample_waypoints(coords, spacing_m=WAYPOINT_SPACING_M):
+    """Sample points every spacing_m of arc length along a coordinate sequence."""
+    waypoints = []
+    acc = 0.0
+    for i in range(1, len(coords)):
+        x0, y0 = coords[i - 1]
+        x1, y1 = coords[i]
+        acc += math.hypot(x1 - x0, y1 - y0)
+        if acc >= spacing_m:
+            waypoints.append((x1, y1))
+            acc = 0.0
+    return waypoints
+
+
+def find_guided_path(nodes, links, start, end, ref_waypoints_xy):
+    """Laengen-gewichteter Dijkstra durch Waypoints der Referenzroute.
+
+    Ersetzt den reinen BFS (wenigste Hops): der nahm auf groben Stufen
+    hop-guenstige Umwege (q5, +14,6 %) und im Korridor liegende
+    Parallelrouten als Shortcut (q10/q45, -22 %). Die Waypoints pinnen
+    den Pfad auf die Referenzstrasse; je Segment kuerzeste Laenge.
+    """
+    adj = {}
+    for lk in links.values():
+        u, v, ln = lk["from"], lk["to"], lk["length"]
+        for a, b in ((u, v), (v, u)):
+            cur = adj.setdefault(a, {})
+            if ln < cur.get(b, float("inf")):
+                cur[b] = ln
+
+    def dijkstra(src, dst):
+        dist = {src: 0.0}
+        parent = {src: None}
+        heap = [(0.0, src)]
+        while heap:
+            d, curr = heapq.heappop(heap)
+            if curr == dst:
+                break
+            if d > dist.get(curr, float("inf")):
+                continue
+            for nb, w in adj.get(curr, {}).items():
+                nd = d + w
+                if nd < dist.get(nb, float("inf")):
+                    dist[nb] = nd
+                    parent[nb] = curr
+                    heapq.heappush(heap, (nd, nb))
+        if dst not in parent:
+            return None
+        seg = []
+        node = dst
+        while node is not None:
+            seg.append(node)
+            node = parent[node]
+        seg.reverse()
+        return seg
+
+    stops = [start]
+    for wx, wy in ref_waypoints_xy:
+        nid, _ = find_nearest_node(wx, wy, nodes)
+        if nid is not None and nid != stops[-1]:
+            stops.append(nid)
+    if stops[-1] != end:
+        stops.append(end)
+
+    full_path = [start]
+    for i in range(len(stops) - 1):
+        seg = dijkstra(stops[i], stops[i + 1])
+        if seg is None:
+            return None
+        full_path.extend(seg[1:])
+
+    # Unmittelbare Rueckwaertsschritte (A,B,A) aus Waypoint-Ueberschiessen entfernen
+    cleaned = []
+    for nid in full_path:
+        if len(cleaned) >= 2 and cleaned[-2] == nid:
+            cleaned.pop()
+        else:
+            cleaned.append(nid)
+    return cleaned
+
+
 def find_nearest_node(target_x, target_y, candidate_nodes):
     """Find the nearest node to (target_x, target_y) in candidate_nodes dict."""
     best_nid = None
@@ -251,10 +334,16 @@ def export_path_subnetwork(nodes, links, link_elems_root, ordered_path, output_p
             pair_to_source[pair] = link
 
     # Create two links per consecutive path pair (forward + reverse = bidirectional)
+    emitted_pairs = set()
     for i in range(len(ordered_path) - 1):
         from_id = ordered_path[i]
         to_id = ordered_path[i + 1]
         pair = frozenset((from_id, to_id))
+        if pair in emitted_pairs:
+            # Schutz gegen doppelte Link-IDs, falls der gefuehrte Pfad ein
+            # Paar erneut durchlaeuft (Waypoint-Snapping)
+            continue
+        emitted_pairs.add(pair)
         src = pair_to_source.get(pair)
         if src is None:
             continue
@@ -332,6 +421,15 @@ def generate_variants_for_section(
     # Reference route total length for validation
     ref_total_length = sum(lk["length"] for lk in section_links.values())
     print(f"  Reference route length: {ref_total_length:.1f} m")
+
+    # Waypoints entlang der Referenzroute fuer den gefuehrten Pfadfinder
+    ref_path_nodes = find_ordered_path(section_nodes, section_links, start_node, end_node)
+    if ref_path_nodes is None:
+        print(f"  WARNING: No ordered path in reference section! Skipping section.")
+        return []
+    ref_coords = [(section_nodes[n]["x"], section_nodes[n]["y"]) for n in ref_path_nodes]
+    ref_waypoints = sample_waypoints(ref_coords)
+    print(f"  Reference waypoints: {len(ref_waypoints)} (spacing {WAYPOINT_SPACING_M:.0f} m)")
 
     # 3) Spatial filter of gpkg edges using corridor polygon
     edges_simp_filtered = gdf_edges_simplified[gdf_edges_simplified.intersects(corridor_polygon)].copy()
@@ -479,8 +577,8 @@ def generate_variants_for_section(
 
         print(f"    Matched start: {new_start} (dist={dist_s:.1f}m), end: {new_end} (dist={dist_e:.1f}m)")
 
-        # BFS to find path
-        path = find_ordered_path(full_nodes, full_links, new_start, new_end)
+        # Gefuehrter Pfad (Dijkstra durch Referenz-Waypoints statt BFS)
+        path = find_guided_path(full_nodes, full_links, new_start, new_end, ref_waypoints)
         if path is None:
             print(f"    WARNING: No path found between start and end. Skipping.")
             tmp_network_path.unlink(missing_ok=True)
@@ -488,12 +586,27 @@ def generate_variants_for_section(
 
         print(f"    Path: {len(path)} nodes")
 
-        # Length validation: compute path total length and compare to reference
-        path_node_set = set(path)
-        path_length = sum(
-            lk["length"] for lk in full_links.values()
-            if lk["from"] in path_node_set and lk["to"] in path_node_set
-        )
+        # Length validation: nur konsekutive Pfad-Paare zaehlen (x2, weil die
+        # Referenz beide Richtungen summiert); die alte Node-Set-Summe zaehlte
+        # auch Querlinks zwischen nicht-konsekutiven Pfadknoten mit
+        pair_len = {}
+        for lk in full_links.values():
+            pair = frozenset((lk["from"], lk["to"]))
+            if lk["length"] < pair_len.get(pair, float("inf")):
+                pair_len[pair] = lk["length"]
+        oneway_length = 0.0
+        pair_missing = False
+        for i in range(len(path) - 1):
+            pair = frozenset((path[i], path[i + 1]))
+            if pair not in pair_len:
+                pair_missing = True
+                break
+            oneway_length += pair_len[pair]
+        if pair_missing:
+            print(f"    WARNING: Path contains node pair without link. Skipping.")
+            tmp_network_path.unlink(missing_ok=True)
+            continue
+        path_length = 2.0 * oneway_length
         length_deviation = abs(path_length - ref_total_length) / ref_total_length if ref_total_length > 0 else 0
         print(f"    Path length: {path_length:.1f} m (ref: {ref_total_length:.1f} m, "
               f"deviation: {length_deviation:.1%})")
