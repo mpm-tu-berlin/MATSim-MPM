@@ -420,10 +420,6 @@ def generate_variants_for_section(
     print(f"  Corridor bounds (WGS84): lon=[{corridor_bounds[0]:.3f}, {corridor_bounds[2]:.3f}], "
           f"lat=[{corridor_bounds[1]:.3f}, {corridor_bounds[3]:.3f}]")
 
-    # Reference route total length for validation
-    ref_total_length = sum(lk["length"] for lk in section_links.values())
-    print(f"  Reference route length: {ref_total_length:.1f} m")
-
     # Waypoints entlang der Referenzroute fuer den gefuehrten Pfadfinder
     ref_path_nodes = find_ordered_path(section_nodes, section_links, start_node, end_node)
     if ref_path_nodes is None:
@@ -432,6 +428,21 @@ def generate_variants_for_section(
     ref_coords = [(section_nodes[n]["x"], section_nodes[n]["y"]) for n in ref_path_nodes]
     ref_waypoints = sample_waypoints(ref_coords)
     print(f"  Reference waypoints: {len(ref_waypoints)} (spacing {WAYPOINT_SPACING_M:.0f} m)")
+
+    # Reference route total length for validation: wie beim Varianten-Pfad
+    # 2x Einweg ueber konsekutive Paare. Die naive Summe aller Links zaehlte
+    # Oneway-Abschnitte nur einfach -> bis ~18 % Schein-Abweichung (q5),
+    # obwohl der Pfad korrekt war
+    ref_pair_len = {}
+    for lk in section_links.values():
+        pair = frozenset((lk["from"], lk["to"]))
+        if lk["length"] < ref_pair_len.get(pair, float("inf")):
+            ref_pair_len[pair] = lk["length"]
+    ref_total_length = 2.0 * sum(
+        ref_pair_len[frozenset((ref_path_nodes[i], ref_path_nodes[i + 1]))]
+        for i in range(len(ref_path_nodes) - 1)
+    )
+    print(f"  Reference route length: {ref_total_length:.1f} m (2x oneway)")
 
     # 3) Spatial filter of gpkg edges using corridor polygon
     edges_simp_filtered = gdf_edges_simplified[gdf_edges_simplified.intersects(corridor_polygon)].copy()
