@@ -84,7 +84,7 @@ DEFAULT_JAR = _SCRIPT_DIR / ".." / ".." / "matsim-example-project-0.0.1-SNAPSHOT
 
 # Section input directory (Referenz-Sektionen der 20er-Auswahl im Netzgen-Worktree)
 _NETGEN_DIR = _SCRIPT_DIR.parents[2] / "MATSim-MPM-netgen" / "python" / "network-generation"
-DEFAULT_SECTIONS_DIR = str(_NETGEN_DIR / "data" / "sections_quantile_run_20260706_095407")
+DEFAULT_SECTIONS_DIR = str(_NETGEN_DIR / "data" / "sections_quantile_run_20260706_130433")
 
 # Link lengths to test — reduzierte 12er-Leiter (identisch zum Generator)
 LINK_LENGTHS = [50, 100, 150, 200, 250, 300, 350, 400, 500, 600, 750, 1000]

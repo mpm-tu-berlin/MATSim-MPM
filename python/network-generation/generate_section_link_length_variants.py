@@ -61,7 +61,7 @@ def _import_script04():
 # ==============================
 # Configuration
 # ==============================
-DEFAULT_SECTIONS_DIR = str(_NETGEN_DIR / "data" / "sections_quantile_run_20260706_095407")
+DEFAULT_SECTIONS_DIR = str(_NETGEN_DIR / "data" / "sections_quantile_run_20260706_130433")
 DEFAULT_DATA_DIR = r"data"
 
 DTM_PATH = _SCRIPT_DIR / "data" / "DTM Germany 20m v3b by Sonny.tif"
