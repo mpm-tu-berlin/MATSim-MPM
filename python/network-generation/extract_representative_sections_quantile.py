@@ -754,15 +754,14 @@ if __name__ == "__main__":
     print(f"\nRunning {N_ITERATIONS} iterations in parallel...")
     args_list = [(coarse_nodes, coarse_links, i) for i in range(N_ITERATIONS)]
 
-    # max_workers begrenzt: jeder Spawn-Worker bekommt Kopien der Netz-Dicts
-    # (V2: 480k Knoten / 727k Links) und importiert numpy parallel
-    # (BLAS-FPE-Haenger 2026-07-06) -> 6 ist sicher und schnell genug.
-    with ProcessPoolExecutor(max_workers=6) as pool:
-        results = list(tqdm(
-            pool.map(_run_iteration, args_list),
-            total=N_ITERATIONS,
-            desc="Iterations",
-        ))
+    # SERIELL statt ProcessPool: numpy haengt unter Python 3.14/Windows sporadisch
+    # beim Import in Spawn-Workern (blas_fpe_check-Spin; 2x aufgetreten 2026-07-06,
+    # auch mit OPENBLAS_NUM_THREADS=1). Die 50 Iterationen kosten seriell nur
+    # wenige Minuten — Robustheit schlaegt Parallelitaet.
+    results = [
+        _run_iteration(a)
+        for a in tqdm(args_list, total=N_ITERATIONS, desc="Iterations")
+    ]
 
     # --- Step 3: Merge & deduplicate paths ---
     all_paths = []
