@@ -101,7 +101,7 @@ VEHICLE_PARAMS = {
         "cdXA": 5.0,       # [m^2] (unbenutzt, s. Hinweis)
         "rollingC": 0.0046, # [-]  (unbenutzt, s. Hinweis)
         "maxMotorPower": 500000,  # [W]
-        "maxSpeed": 23.611,  # [m/s] = 85 km/h (VECTO-Vmax)
+        "maxSpeed": 22.222,  # [m/s] = 80 km/h (dt. Lkw-Tempolimit; User 2026-07-06)
     },
     "loaded": {
         "mass": 19000,     # [kg] tare weight
@@ -109,7 +109,7 @@ VEHICLE_PARAMS = {
         "cdXA": 5.0,       # [m^2] (unbenutzt, s. Hinweis)
         "rollingC": 0.0046, # [-]  (unbenutzt, s. Hinweis)
         "maxMotorPower": 500000,  # [W]
-        "maxSpeed": 23.611,  # [m/s] = 85 km/h (VECTO-Vmax)
+        "maxSpeed": 22.222,  # [m/s] = 80 km/h (dt. Lkw-Tempolimit; User 2026-07-06)
     },
 }
 
@@ -146,7 +146,7 @@ SECTION_LINESTYLES_EMPTY = {"flat": "--", "q75": "--", "q97": "--"}
 
 # Flat network parameters
 FLAT_TOTAL_LENGTH_M = 100_000  # 100 km
-FLAT_FREESPEED_MS = 23.611  # 85 km/h = VECTO-Vmax (konsistent zu maxSpeed)
+FLAT_FREESPEED_MS = 22.222  # 80 km/h = dt. Lkw-Tempolimit (konsistent zu maxSpeed)
 FLAT_CAPACITY = 2000.0
 FLAT_LANES = 2.0
 
