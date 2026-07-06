@@ -43,19 +43,25 @@ from tqdm import tqdm
 # ==============================================================================
 # Configuration
 # ==============================================================================
-COARSE_NETWORK = r"data\Germany_max500m_V0_smoothed.xml.gz"   # for path search
-FINE_NETWORK   = r"data\Germany_max50m_V0_smoothed.xml.gz"    # for final export
+# 2026-07-06: Umstellung auf das V2-Netz (kanonisierte Laengen, korridor-
+# geglaettete Hoehen, Bauwerks-Intervalle) — die alte Auswahl (Run 20260307)
+# basierte auf V0_smoothed mit KD-Tree-Hoehen. Pfadsuche und Export nutzen
+# jetzt DASSELBE 250-m-Netz (kein separates Fein-Netz mehr noetig; der
+# Sweep-Generator braucht nur Korridor+Endpunkte der Referenz).
+COARSE_NETWORK = r"data\germany_network_250m_V2.xml.gz"   # for path search
+FINE_NETWORK   = r"data\germany_network_250m_V2.xml.gz"   # for final export
 
 TARGET_LENGTH_M    = 100_000   # target section length
 LENGTH_TOLERANCE_M = 2_000     # +/- tolerance around target
 MAX_ANGLE_RAD      = pi / 2    # reject turns sharper than 90 deg
 N_ITERATIONS       = 50        # number of randomised corridor-building iterations
 
-QUANTILES = [50, 75, 97]
+# 20 Sektionen gleichmaessig ueber die sigma_g-Quantile (User 2026-07-06)
+QUANTILES = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97]
 
 # Color palette for all quantiles (blue → orange → red gradient)
 _PALETTE = ["#2196F3", "#FF9800", "#E53935", "#C62828", "#AD1457", "#6A1B9A", "#4A148C"]
-COLORS = {f"q{q}": _PALETTE[i] for i, q in enumerate(QUANTILES)}
+COLORS = {f"q{q}": _PALETTE[i % len(_PALETTE)] for i, q in enumerate(QUANTILES)}
 LABELS = {f"q{q}": f"Q{q}" + (" (Median)" if q == 50 else "") for q in QUANTILES}
 
 # CRS of the MATSim network
@@ -383,12 +389,14 @@ def select_sections(df):
 
     for q in QUANTILES:
         q_val = df["sigma_g"].quantile(q / 100.0)
-        idx = (df["sigma_g"] - q_val).abs().idxmin()
+        # naechstliegender NOCH FREIER Pfad (bei 20 Quantilen sonst Duplikate)
+        order = (df["sigma_g"] - q_val).abs().sort_values().index
+        idx = next((i for i in order if i not in selected.values()), order[0])
         key = f"q{q}"
         selected[key] = idx
         row = df.loc[idx]
         print(f"  Q{q:>3d} (target={q_val:.3f}): sigma_g={row['sigma_g']:.3f}  "
-              f"D+={row['D_plus_m']:.0f} m  L={row['L_m']/1000:.1f} km")
+              f"D+={row['D_plus_per_km']:.1f} Hm/km  L={row['L_m']/1000:.1f} km")
 
     return selected
 
@@ -746,7 +754,10 @@ if __name__ == "__main__":
     print(f"\nRunning {N_ITERATIONS} iterations in parallel...")
     args_list = [(coarse_nodes, coarse_links, i) for i in range(N_ITERATIONS)]
 
-    with ProcessPoolExecutor() as pool:
+    # max_workers begrenzt: jeder Spawn-Worker bekommt Kopien der Netz-Dicts
+    # (V2: 480k Knoten / 727k Links) und importiert numpy parallel
+    # (BLAS-FPE-Haenger 2026-07-06) -> 6 ist sicher und schnell genug.
+    with ProcessPoolExecutor(max_workers=6) as pool:
         results = list(tqdm(
             pool.map(_run_iteration, args_list),
             total=N_ITERATIONS,
@@ -789,6 +800,16 @@ if __name__ == "__main__":
 
     # --- Step 5: Select quantile sections ---
     selected = select_sections(df)
+
+    # Kennzahlen fuer nachgelagerte Auswertung (Knie-vs-Topografie-Scatter):
+    # alle Kandidaten + die selektierten Sektionen mit Quantil-Label.
+    df.drop(columns=["node_list"]).to_csv(run_dir / "candidate_paths_features.csv", index=False)
+    sel_rows = []
+    for label, idx in selected.items():
+        r = df.loc[idx].drop(labels=["node_list"]).to_dict()
+        r["section"] = label
+        sel_rows.append(r)
+    pd.DataFrame(sel_rows).to_csv(run_dir / "selected_sections_features.csv", index=False)
 
     # --- Step 6: Load fine network, export sub-networks & collect data for report ---
     fine_nodes, fine_links, fine_link_elems = load_network(FINE_NETWORK)
