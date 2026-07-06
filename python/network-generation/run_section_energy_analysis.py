@@ -82,11 +82,12 @@ _SCRIPT_DIR = Path(__file__).parent
 # Path to MATSim JAR
 DEFAULT_JAR = _SCRIPT_DIR / ".." / ".." / "matsim-example-project-0.0.1-SNAPSHOT.jar"
 
-# Section input directory (fine 50m sections)
-DEFAULT_SECTIONS_DIR = r"data\sections_quantile_run_20260307_090732"
+# Section input directory (Referenz-Sektionen der 20er-Auswahl im Netzgen-Worktree)
+_NETGEN_DIR = _SCRIPT_DIR.parents[2] / "MATSim-MPM-netgen" / "python" / "network-generation"
+DEFAULT_SECTIONS_DIR = str(_NETGEN_DIR / "data" / "sections_quantile_run_20260706_095407")
 
-# Link lengths to test
-LINK_LENGTHS = [50, 100, 150, 200, 225, 250, 275, 300, 325, 350, 375, 400, 425, 450, 475, 500, 550, 600, 700, 800, 900, 1000]
+# Link lengths to test — reduzierte 12er-Leiter (identisch zum Generator)
+LINK_LENGTHS = [50, 100, 150, 200, 250, 300, 350, 400, 500, 600, 750, 1000]
 
 # Vehicle parameters for the two loading scenarios.
 # maxSpeed = 23.611 m/s = 85 km/h = VECTO-Vmax (2026-07-05: vorher 90 km/h ->
@@ -118,31 +119,45 @@ VEHICLE_PARAMS_LIST = [
     {"id": name, **params} for name, params in VEHICLE_PARAMS.items()
 ]
 
-# Sections to simulate (Q50 dropped, flat + Q75 + Q97)
-SECTIONS = ["q75", "q97"]
+# 20-Sektionen-Studie (Auswahl 2026-07-06 auf V2, sigma_g-Quantile Q5..Q97)
+SECTIONS = [f"q{q}" for q in (5, 10, 15, 20, 25, 30, 35, 40, 45, 50,
+                              55, 60, 65, 70, 75, 80, 85, 90, 95, 97)]
 
-# Known endpoint coordinates (EPSG:4839) for each section, from the fine-grained network.
-# Used to pass --from-coord / --to-coord to RunSectionScenario, which finds the nearest node.
-SECTION_ENDPOINT_COORDS = {
-    "q75": ((-103334.667, 55497.774), (-84251.504, 17070.947)),
-    "q97": ((91784.105, -73786.243), (159121.952, -30462.392)),
-}
+# Endpunkt-Koordinaten werden DYNAMISCH aus den Referenz-Sektionsnetzen gelesen
+# (Grad-1-Knoten; ersetzt die alten hartkodierten q75/q97-Koordinaten).
+def endpoints_from_reference(section_path):
+    """((x1,y1),(x2,y2)) der beiden Grad-1-Knoten eines Referenz-Sektionsnetzes."""
+    nodes, links = load_matsim_network(str(section_path))
+    from collections import defaultdict
+    nbrs = defaultdict(set)
+    for lk in links.values():
+        nbrs[lk["from"]].add(lk["to"])
+        nbrs[lk["to"]].add(lk["from"])
+    ends = [n for n, s in nbrs.items() if len(s) == 1]
+    if len(ends) != 2:
+        raise ValueError(f"{section_path}: {len(ends)} Endpunkte statt 2")
+    return ((nodes[ends[0]]["x"], nodes[ends[0]]["y"]),
+            (nodes[ends[1]]["x"], nodes[ends[1]]["y"]))
 
-# Per-section cumulative-distance trim along the forward driving path [km].
-# Crops sections that start/end on asymmetric net-descent stretches (e.g. Q97 dropping
-# from 597 m at km 0 to 466 m at km 101, which artificially lowers kWh/km via net
-# potential-energy recuperation). Trimmed link distance is what divides energy.
-SECTION_TRIM_KM = {
-    # Endpoints chosen so both ends land near z = 560 m (km 5.5: z=554, km 95.91: z=558),
-    # symmetric framing around the hilly mid-stretch.
-    "q97": (5.5, 95.91),
-}
+# Trims sind in der 20-Sektionen-Studie OBSOLET: Die Darstellung ist relativ zur
+# 250-m-Stufe je Sektion/Beladung, und der Netto-Hoehenenergie-Bias (Grund des
+# alten q97-Trims) ist aufloesungsUNabhaengig -> kuerzt sich exakt heraus.
+SECTION_TRIM_KM = {}
 
-# Plot styling
-SECTION_COLORS = {"flat": "#757575", "q75": "#FF9800", "q97": "#E53935"}
-SECTION_LABELS = {"flat": "Flat (no grade)", "q75": "Q75 (medium)", "q97": "Q97 (hilly)"}
-SECTION_LINESTYLES_LOADED = {"flat": "-", "q75": "-", "q97": "-"}
-SECTION_LINESTYLES_EMPTY = {"flat": "--", "q75": "--", "q97": "--"}
+# Plot styling — dynamisch fuer alle 20 Sektionen (Farbverlauf blau->rot nach Quantil)
+def _quantile_color(i, n):
+    import matplotlib.cm as cm
+    return cm.get_cmap("coolwarm")(i / max(1, n - 1))
+
+SECTION_COLORS = {"flat": "#757575"}
+SECTION_LABELS = {"flat": "Flat (no grade)"}
+SECTION_LINESTYLES_LOADED = {"flat": "-"}
+SECTION_LINESTYLES_EMPTY = {"flat": "--"}
+for _i, _s in enumerate(SECTIONS):
+    SECTION_COLORS[_s] = _quantile_color(_i, len(SECTIONS))
+    SECTION_LABELS[_s] = _s.upper()
+    SECTION_LINESTYLES_LOADED[_s] = "-"
+    SECTION_LINESTYLES_EMPTY[_s] = "--"
 
 # Flat network parameters
 FLAT_TOTAL_LENGTH_M = 100_000  # 100 km
@@ -781,9 +796,17 @@ def main():
                            _vparams_for(loading), str(jar_path),
                            CALIBRATION_PER_LOADING[loading], None, None, QSIM_TIMESTEP))
 
-    # Section network tasks (Q75, Q97) — pass known endpoint coordinates for nearest-node resolution
+    # Section network tasks — Endpunkte dynamisch aus den Referenz-Sektionen
+    ref_dir = Path(args.sections_dir)
+    if not ref_dir.is_absolute():
+        ref_dir = _SCRIPT_DIR / ref_dir
     for section in SECTIONS:
-        coords = SECTION_ENDPOINT_COORDS.get(section)
+        ref_file = ref_dir / f"section_{section}_100km.xml.gz"
+        try:
+            coords = endpoints_from_reference(ref_file)
+        except Exception as e:
+            print(f"  WARNING: Endpunkte fuer {section} nicht bestimmbar ({e}) — skip")
+            continue
         from_coord = f"{coords[0][0]},{coords[0][1]}" if coords else None
         to_coord = f"{coords[1][0]},{coords[1][1]}" if coords else None
         for max_len in LINK_LENGTHS:
@@ -799,9 +822,12 @@ def main():
 
     print(f"\n  {len(tasks)} simulations to run ({max_workers} workers)\n")
 
-    # Run simulations in parallel
+    # Run simulations in parallel.
+    # ThreadPool statt ProcessPool: MATSim laeuft ohnehin als java-Subprozess
+    # (GIL frei); Spawn-Worker haengen unter Py3.14/Windows sporadisch am
+    # numpy-Import (blas_fpe_check, 2x 2026-07-05/06).
     all_results = []
-    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_run_one_simulation, t): t for t in tasks}
         for future in as_completed(futures):
             section, max_len, loading, results, log_messages = future.result()
