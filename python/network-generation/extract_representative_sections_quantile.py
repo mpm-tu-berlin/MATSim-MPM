@@ -405,8 +405,12 @@ def select_sections(df, coarse_nodes):
 
     def _is_valid(i):
         if i not in valid_cache:
-            valid_cache[i] = _self_proximity_ok(
-                df.loc[i, "node_list"].split(";"), coarse_nodes)
+            nodes_seq = df.loc[i, "node_list"].split(";")
+            # Knoten-Wiederholung = Route beruehrt sich selbst (Schleife):
+            # als Teststrecke unbrauchbar, jeder Router kuerzt die Schleife ab
+            # (Befund 2026-07-06: q15/q25 des Runs 130433)
+            valid_cache[i] = (len(set(nodes_seq)) == len(nodes_seq)
+                              and _self_proximity_ok(nodes_seq, coarse_nodes))
         return valid_cache[i]
 
     print(f"\n--- Selected sections (quantile-based) ---")
@@ -433,9 +437,19 @@ def select_sections(df, coarse_nodes):
 # ==============================================================================
 # Part 6: Export sub-network from fine network
 # ==============================================================================
-def export_subnetwork(fine_nodes, fine_links, fine_link_elems, path_node_set, output_path):
-    """Export a MATSim sub-network for nodes in path_node_set."""
+def export_subnetwork(fine_nodes, fine_links, fine_link_elems, ordered_path, output_path):
+    """Export a MATSim sub-network entlang des GEORDNETEN Pfads (reine Kette).
+
+    Nur Links konsekutiver Pfad-Paare werden exportiert. Der alte Export ueber
+    das Knoten-SET nahm auch Querlinks zwischen nicht-konsekutiven Routenknoten
+    mit — 9/20 Sektionen des Runs 130433 hatten dadurch keine sauberen Grad-1-
+    Endpunkte, und die Pfadsuche des Varianten-Generators lief auf Abwege."""
     print(f"Exporting sub-network to {output_path}...")
+
+    consecutive_pairs = {
+        frozenset((ordered_path[i], ordered_path[i + 1]))
+        for i in range(len(ordered_path) - 1)
+    }
 
     network = ET.Element("network")
     network.insert(1, ET.Comment("=" * 70))
@@ -450,7 +464,7 @@ def export_subnetwork(fine_nodes, fine_links, fine_link_elems, path_node_set, ou
     used_node_ids = set()
     n_links = 0
     for lid, lk in fine_links.items():
-        if lk["from"] in path_node_set and lk["to"] in path_node_set:
+        if frozenset((lk["from"], lk["to"])) in consecutive_pairs:
             orig_elem = fine_link_elems[lid]
             links_element.append(orig_elem)
             used_node_ids.add(lk["from"])
@@ -839,6 +853,13 @@ if __name__ == "__main__":
         sel_rows.append(r)
     pd.DataFrame(sel_rows).to_csv(run_dir / "selected_sections_features.csv", index=False)
 
+    # Knotenlisten der Auswahl persistieren: erlaubt Re-Export/Reparatur der
+    # Sektionsnetze ohne kompletten Neulauf der Kandidatengenerierung
+    pd.DataFrame([
+        {"section": label, "node_list": df.loc[idx, "node_list"]}
+        for label, idx in selected.items()
+    ]).to_csv(run_dir / "selected_sections_node_lists.csv", index=False)
+
     # --- Step 6: Load fine network, export sub-networks & collect data for report ---
     fine_nodes, fine_links, fine_link_elems = load_network(FINE_NETWORK)
 
@@ -853,7 +874,7 @@ if __name__ == "__main__":
         print(f"  Coarse nodes: {len(coarse_path_nodes)}, Fine nodes: {len(fine_set)}")
 
         export_subnetwork(fine_nodes, fine_links, fine_link_elems,
-                          fine_set, str(run_dir / filename))
+                          fine_ordered, str(run_dir / filename))
 
         sections_for_report.append((label, row, coarse_path_nodes, fine_ordered))
 
