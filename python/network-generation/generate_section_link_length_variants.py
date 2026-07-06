@@ -61,7 +61,7 @@ def _import_script04():
 # ==============================
 # Configuration
 # ==============================
-DEFAULT_SECTIONS_DIR = str(_NETGEN_DIR / "data" / "sections_quantile_run_20260307_090732")
+DEFAULT_SECTIONS_DIR = str(_NETGEN_DIR / "data" / "sections_quantile_run_20260706_095407")
 DEFAULT_DATA_DIR = r"data"
 
 DTM_PATH = _SCRIPT_DIR / "data" / "DTM Germany 20m v3b by Sonny.tif"
@@ -72,13 +72,15 @@ DETAILED_GPKG = _NETGEN_DIR / "data" / "germany_detailed_sorted_DF.gpkg"
 SAMPLE_STEP_M = 5.0
 SMOOTH_RMS_M = 1.0
 
-# Knie-orientierte Leiter (identisch zu run_section_energy_analysis.LINK_LENGTHS)
-LINK_LENGTHS = [50, 100, 150, 200, 225, 250, 275, 300, 325, 350, 375, 400,
-                425, 450, 475, 500, 550, 600, 700, 800, 900, 1000]
+# Reduzierte Leiter fuer die 20-Sektionen-Studie (identisch zur Analyse);
+# dicht genug fuer Kneedle je Sektion, 12 statt 22 Stufen (Rechenzeit).
+LINK_LENGTHS = [50, 100, 150, 200, 250, 300, 350, 400, 500, 600, 750, 1000]
 
+# 20 Sektionen ueber die sigma_g-Quantile (Auswahl 2026-07-06 auf V2)
 SECTION_FILES = {
-    "q75": "section_q75_100km.xml.gz",
-    "q97": "section_q97_100km.xml.gz",
+    f"q{q}": f"section_q{q}_100km.xml.gz"
+    for q in (5, 10, 15, 20, 25, 30, 35, 40, 45, 50,
+              55, 60, 65, 70, 75, 80, 85, 90, 95, 97)
 }
 
 TARGET_EPSG = 4839
