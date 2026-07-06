@@ -378,25 +378,54 @@ def compute_features(path_nodes, nodes):
 # ==============================================================================
 # Part 5: Select flat / medium / hilly
 # ==============================================================================
-def select_sections(df):
+def _self_proximity_ok(path_nodes, nodes, min_sep_m=2000.0, min_dist_m=1200.0):
+    """False, wenn der Pfad sich selbst naeher als min_dist_m kommt (bei
+    Bogenlaengen-Abstand > min_sep_m). Solche Routen (Schleifen/Haarnadeln)
+    erlauben im 500-m-Korridor des Varianten-Generators Shortcut-Pfade —
+    Befund 2026-07-06: q30/q35/q45 fielen mit 22 % Laengenabweichung durch."""
+    from scipy.spatial import cKDTree
+    xy = np.array([(nodes[n]["x"], nodes[n]["y"]) for n in path_nodes], dtype=float)
+    seg = np.hypot(np.diff(xy[:, 0]), np.diff(xy[:, 1]))
+    s = np.concatenate([[0.0], np.cumsum(seg)])
+    pairs = cKDTree(xy).query_pairs(min_dist_m, output_type="ndarray")
+    if len(pairs) == 0:
+        return True
+    return not np.any(np.abs(s[pairs[:, 0]] - s[pairs[:, 1]]) > min_sep_m)
+
+
+def select_sections(df, coarse_nodes):
     """Select sections at each quantile in QUANTILES of sigma_g.
 
+    Kandidaten mit Selbstannaeherung werden uebersprungen (s. _self_proximity_ok);
+    es rueckt der naechstliegende gueltige sigma_g-Kandidat nach.
     Returns dict {f"q{q}": row_index} for each quantile.
     """
     selected = {}
+    valid_cache = {}
+
+    def _is_valid(i):
+        if i not in valid_cache:
+            valid_cache[i] = _self_proximity_ok(
+                df.loc[i, "node_list"].split(";"), coarse_nodes)
+        return valid_cache[i]
+
     print(f"\n--- Selected sections (quantile-based) ---")
     print(f"  sigma_g distribution: min={df['sigma_g'].min():.5f}  max={df['sigma_g'].max():.5f}")
 
     for q in QUANTILES:
         q_val = df["sigma_g"].quantile(q / 100.0)
-        # naechstliegender NOCH FREIER Pfad (bei 20 Quantilen sonst Duplikate)
         order = (df["sigma_g"] - q_val).abs().sort_values().index
-        idx = next((i for i in order if i not in selected.values()), order[0])
+        idx = next((i for i in order
+                    if i not in selected.values() and _is_valid(i)), None)
+        if idx is None:
+            print(f"  Q{q:>3d}: KEIN gueltiger Kandidat — uebersprungen!")
+            continue
         key = f"q{q}"
         selected[key] = idx
         row = df.loc[idx]
         print(f"  Q{q:>3d} (target={q_val:.3f}): sigma_g={row['sigma_g']:.3f}  "
-              f"D+={row['D_plus_per_km']:.1f} Hm/km  L={row['L_m']/1000:.1f} km")
+              f"D+={row['D_plus_per_km']:.1f} Hm/km  L={row['L_m']/1000:.1f} km  "
+              f"(verworfen bis dahin: {sum(1 for v in valid_cache.values() if not v)})")
 
     return selected
 
@@ -798,7 +827,7 @@ if __name__ == "__main__":
     print(f"Paths with valid features: {n_total_paths}")
 
     # --- Step 5: Select quantile sections ---
-    selected = select_sections(df)
+    selected = select_sections(df, coarse_nodes)
 
     # Kennzahlen fuer nachgelagerte Auswertung (Knie-vs-Topografie-Scatter):
     # alle Kandidaten + die selektierten Sektionen mit Quantil-Label.
