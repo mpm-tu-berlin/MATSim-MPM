@@ -105,6 +105,12 @@ def process_pass(part, pass_id, tree, dtm, s04, tf, sink):
     mx, my = tf.transform(lon, lat)
     mx = np.asarray(mx, float); my = np.asarray(my, float)
 
+    # ungueltige GPS-Fixe (0/0, ausserhalb Projektionsbereich -> inf) raus
+    finite = np.isfinite(mx) & np.isfinite(my)
+    if finite.sum() < 10:
+        return 0
+    mx, my, zt = mx[finite], my[finite], zt[finite]
+
     # On-Network-Filter
     dist, _ = tree.query(np.column_stack([mx, my]), k=1,
                          distance_upper_bound=MATCH_TOL_M)
