@@ -534,6 +534,10 @@ def main():
     parser.add_argument("--link-lengths", type=str, default=None,
                         help="Comma-separated link lengths in meters "
                              "(Default: knie-orientierte Leiter 50..1000, s. LINK_LENGTHS)")
+    parser.add_argument("--sections", type=str, default=None,
+                        help="Nur diese Sektions-Labels (kommagetrennt, z.B. 'q5,q10'); "
+                             "erlaubt parallele Instanzen mit disjunkten Teilmengen "
+                             "(bereits existierende Varianten werden ohnehin uebersprungen)")
     args = parser.parse_args()
 
     sections_dir = Path(args.sections_dir)
@@ -570,7 +574,13 @@ def main():
 
     all_results = []
 
-    for label, filename in SECTION_FILES.items():
+    section_files = SECTION_FILES
+    if args.sections:
+        wanted = {s.strip() for s in args.sections.split(",")}
+        section_files = {k: v for k, v in SECTION_FILES.items() if k in wanted}
+        print(f"Sektions-Filter aktiv: {sorted(section_files)}")
+
+    for label, filename in section_files.items():
         section_path = sections_dir / filename
         if not section_path.exists():
             print(f"\nWARNING: Section file not found: {section_path}. Skipping.")
@@ -590,10 +600,15 @@ def main():
         )
         all_results.extend(results)
 
-    # Save summary CSV
+    # Save summary CSV (bei --sections instanz-eigener Name, sonst ueberschreiben
+    # sich parallele Instanzen gegenseitig)
     if all_results:
         summary_df = pd.DataFrame(all_results)
-        summary_path = output_dir / "variants_summary.csv"
+        if args.sections:
+            tag = "_".join(sorted(section_files))
+            summary_path = output_dir / f"variants_summary_{tag}.csv"
+        else:
+            summary_path = output_dir / "variants_summary.csv"
         summary_df.to_csv(summary_path, index=False)
         print(f"\nSummary saved to: {summary_path}")
 
