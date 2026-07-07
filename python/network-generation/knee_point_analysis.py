@@ -169,54 +169,82 @@ def compute_sensitivity(rel_df, feats):
     return pd.DataFrame(rows)
 
 
-def plot_sensitivity_vs_topography(sens_df, output_dir):
-    fig, ax = plt.subplots(1, 1, figsize=(9, 6.5))
-    for loading in ("empty", "loaded"):
-        sub = sens_df[(sens_df.loading == loading) & (sens_df.section != "flat")]
-        sub = sub.sort_values("D_plus_per_km")
+def plot_sensitivity_and_knee(sens_df, knee_df, feats, output_dir):
+    """Kombinierte Kernfigur: mittlere abs. Steigung [%] auf x; links die
+    Verbrauchsaenderung 50->1000 m (steigt), rechts die Knie-Linklaenge (flach).
+
+    Eine Aussage: je steiler die Route, desto teurer eine Gitter-Fehlwahl —
+    aber die optimale Aufloesung bleibt konstant (~250 m). Ersetzt die zwei
+    separaten Scatter (Knie korreliert mit KEINER Topografie-Kennzahl,
+    Sensitivitaet am staerksten mit g_abs_mean, rho=0,62).
+    """
+    def grade_pct(section):
+        return 100.0 * float(feats.loc[section, "g_abs_mean"])
+
+    COL_SENS = "#C0392B"   # crimson — Sensitivitaet (linke Achse)
+    COL_KNEE = "#21618C"   # blau    — Knie (rechte Achse)
+
+    fig, ax1 = plt.subplots(figsize=(10.5, 6.8))
+    ax2 = ax1.twinx()
+
+    # --- LINKS: Verbrauchsaenderung 50->1000 m ---
+    for loading, marker, filled in (("loaded", "o", True), ("empty", "s", False)):
+        sub = sens_df[(sens_df.loading == loading) & (sens_df.section != "flat")].copy()
         if sub.empty:
             continue
-        ax.scatter(sub.D_plus_per_km, sub.span_50_1000_pct,
-                   marker=LOADING_MARKER[loading], s=70, zorder=3,
-                   edgecolors="black", linewidths=0.6, label=loading)
-    # Flat-Kontrolle als Referenzlinie (grade-frei -> ~0)
-    flat = sens_df[sens_df.section == "flat"]
+        sub["grade_pct"] = sub.section.map(grade_pct)
+        sub = sub.sort_values("grade_pct")
+        ax1.scatter(sub.grade_pct, sub.span_50_1000_pct, marker=marker, s=75, zorder=4,
+                    edgecolors=COL_SENS, linewidths=1.3,
+                    facecolors=(COL_SENS if filled else "none"),
+                    label=f"consumption change ({loading})")
+    # Trendlinie loaded
+    subL = sens_df[(sens_df.loading == "loaded") & (sens_df.section != "flat")].copy()
+    subL["grade_pct"] = subL.section.map(grade_pct)
+    m, b = np.polyfit(subL.grade_pct, subL.span_50_1000_pct, 1)
+    xs = np.linspace(subL.grade_pct.min(), subL.grade_pct.max(), 50)
+    ax1.plot(xs, m * xs + b, color=COL_SENS, lw=1.4, alpha=0.55, zorder=2)
+    # Flat-Anker bei Steigung 0
+    flat = sens_df[(sens_df.section == "flat") & (sens_df.loading == "loaded")]
     if not flat.empty:
-        ax.axhline(flat.span_50_1000_pct.abs().max(), color="grey", ls=":", lw=1,
-                   label="flat control (grade-free)")
-    ax.set_xlabel("Elevation gain [Hm/km]", fontsize=12)
-    ax.set_ylabel("Discretisation span 50 m - 1000 m [%pt]", fontsize=12)
-    ax.set_title("Discretisation sensitivity scales with topography", fontsize=13)
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="best", fontsize=10)
+        ax1.scatter([0.0], [flat.span_50_1000_pct.iloc[0]], marker="^", s=70,
+                    color="grey", edgecolors="black", linewidths=0.5, zorder=4,
+                    label="flat control (grade-free)")
+
+    # --- RECHTS: Knie-Linklaenge (loaded = belastbar), flaches Band ---
+    subK = knee_df[knee_df.loading == "loaded"].dropna(subset=["knee_link_length_m"]).copy()
+    subK["grade_pct"] = subK.section.map(grade_pct)
+    ax2.scatter(subK.grade_pct, subK.knee_link_length_m, marker="D", s=55, zorder=4,
+                facecolors=COL_KNEE, edgecolors="black", linewidths=0.6,
+                label="knee (loaded)")
+    med = subK.knee_link_length_m.median()
+    q1, q3 = subK.knee_link_length_m.quantile([0.25, 0.75])
+    ax2.axhline(med, color=COL_KNEE, lw=1.8, zorder=3)
+    ax2.axhspan(q1, q3, color=COL_KNEE, alpha=0.10, zorder=1)
+    ax2.text(0.98, med, f" median {med:.0f} m  (IQR {q1:.0f}-{q3:.0f})",
+             transform=ax2.get_yaxis_transform(), ha="right", va="bottom",
+             fontsize=9, color=COL_KNEE, fontweight="bold")
+
+    ax1.set_xlabel("Mean absolute grade [%]", fontsize=12)
+    ax1.set_ylabel("Consumption change, 50 m → 1000 m grid [%]",
+                   fontsize=12, color=COL_SENS)
+    ax2.set_ylabel("Knee link length [m]", fontsize=12, color=COL_KNEE)
+    ax1.tick_params(axis="y", colors=COL_SENS)
+    ax2.tick_params(axis="y", colors=COL_KNEE)
+    ax1.set_ylim(0, None)
+    ax2.set_ylim(0, 500)
+    ax1.set_xlim(left=-0.05)
+    ax1.grid(True, alpha=0.25)
+    ax1.set_title("Steeper routes raise the stakes, not the optimal resolution",
+                  fontsize=13)
+
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=9, framealpha=0.9)
+
     fig.tight_layout()
     for ext in ("pdf", "png"):
-        fig.savefig(output_dir / f"sensitivity_vs_topography.{ext}", dpi=300, bbox_inches="tight")
-    plt.close(fig)
-
-
-def plot_knee_vs_topography(knee_df, output_dir, topo_col="D_plus_per_km",
-                            topo_label="Elevation gain [Hm/km]"):
-    fig, ax = plt.subplots(1, 1, figsize=(9, 6.5))
-    for loading in ("empty", "loaded"):
-        sub = knee_df[(knee_df.loading == loading) & knee_df.knee_link_length_m.notna()]
-        sub = sub.sort_values(topo_col)
-        if sub.empty:
-            continue
-        ax.scatter(sub[topo_col], sub.knee_link_length_m,
-                   marker=LOADING_MARKER[loading], s=70, zorder=3,
-                   edgecolors="black", linewidths=0.6, label=loading)
-        for _, r in sub.iterrows():
-            ax.annotate(r["section"], xy=(r[topo_col], r["knee_link_length_m"]),
-                        xytext=(4, 4), textcoords="offset points", fontsize=7, alpha=0.7)
-    ax.set_xlabel(topo_label, fontsize=12)
-    ax.set_ylabel("Knee link length [m]", fontsize=12)
-    ax.set_title("Discretisation knee vs. section topography", fontsize=13)
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="best", fontsize=10, title="loading")
-    fig.tight_layout()
-    for ext in ("pdf", "png"):
-        fig.savefig(output_dir / f"knee_vs_topography.{ext}", dpi=300, bbox_inches="tight")
+        fig.savefig(output_dir / f"sensitivity_and_knee.{ext}", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -308,8 +336,7 @@ def main():
     sens_df = compute_sensitivity(rel_df, feats)
     sens_df.to_csv(results_dir / "sensitivity_vs_topography.csv", index=False)
 
-    plot_sensitivity_vs_topography(sens_df, results_dir)
-    plot_knee_vs_topography(knee_df, results_dir)
+    plot_sensitivity_and_knee(sens_df, knee_df, feats, results_dir)
     plot_knee_overview(curves, sections, results_dir)
 
     # --- Konsolen-Zusammenfassung fuer paper_findings.md ---
