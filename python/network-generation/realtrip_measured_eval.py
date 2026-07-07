@@ -89,7 +89,8 @@ def load_chain_profile(path):
         s.append(s[-1] + length)
     z = [nodes[n][2] for n in order]
     return {"s": np.array(s), "z": np.array(z), "chain": chain_links,
-            "tree": tree, "root": root, "order": order}
+            "tree": tree, "root": root, "order": order,
+            "node_xy": {n: (nodes[n][0], nodes[n][1]) for n in (order[0], order[-1])}}
 
 
 SCALE_SEARCH = np.linspace(0.985, 1.015, 31)  # Odometer-/Projektions-Skalendrift
@@ -102,20 +103,25 @@ def align_profiles(s_net, z_net, s_meas, z_meas):
     -> ohne Streckung schmiert die Ausrichtung am Routenende (User-Hinweis
     2026-07-07). Rueckgabe (direction, offset_m, scale, corr):
     Messung bei Bogenlaenge s entspricht Netz bei s*scale + offset."""
+    # Korrelation auf dem STEIGUNGSPROFIL (Ableitung), nicht auf der Hoehe:
+    # ein fast-flaches Hoehenprofil sieht rueckwaerts aehnlich aus (19t:
+    # z-corr 0,99 fuer die FALSCHE Richtung -> Leistungsvergleich corr -0,49),
+    # aber die Steigungen sind vorzeichenverkehrt — die Ableitung
+    # disambiguiert die Fahrtrichtung.
     grid = np.arange(0, max(s_net[-1], s_meas[-1]) * 1.02 + GRID_M, GRID_M)
-    zn = np.interp(grid, s_net, z_net)
+    gn = np.diff(np.interp(grid, s_net, z_net))
     n_off = int(OFFSET_SEARCH_M / GRID_M)
     best = None
     for direction in (+1, -1):
         zm_s = s_meas if direction == +1 else (s_meas[-1] - s_meas[::-1])
         zm_z = z_meas if direction == +1 else z_meas[::-1]
         for scale in SCALE_SEARCH:
-            zm = np.interp(grid, zm_s * scale, zm_z)
+            gm = np.diff(np.interp(grid, zm_s * scale, zm_z))
             for k in range(-n_off, n_off + 1):
                 if k >= 0:
-                    a, b = zn[k:], zm[:len(zn) - k if k else None]
+                    a, b = gn[k:], gm[:len(gn) - k if k else None]
                 else:
-                    a, b = zn[:k], zm[-k:]
+                    a, b = gn[:k], gm[-k:]
                 m = min(len(a), len(b))
                 a, b = a[:m], b[:m]
                 valid = np.isfinite(a) & np.isfinite(b)

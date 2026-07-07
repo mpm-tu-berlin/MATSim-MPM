@@ -74,20 +74,23 @@ def load_chain(path):
         nxt = [n for n in adj[order[-1]] if n != prev]
         prev = order[-1]
         order.append(nxt[0])
-    out = []
+    # BEIDE gerichteten Link-IDs je Kettensegment registrieren (die Sim kann
+    # die Route in Gegenrichtung fahren und nutzt dann die Reverse-Links);
+    # Steigung jeweils in FAHRTRICHTUNG des Links (fuer die Stratifizierung).
+    arc_by_link = {}
     s = 0.0
     for a, b in zip(order[:-1], order[1:]):
-        l = links.get((a, b))
-        rev = False
-        if l is None:
-            l = links[(b, a)]
-            rev = True
-        length = float(l.get("length"))
-        grade = (nodes[b] - nodes[a]) / length
-        out.append({"id": l.get("id"), "s0": s, "s1": s + length,
-                    "grade": grade, "reversed": rev})
+        l_f = links.get((a, b))
+        l_r = links.get((b, a))
+        ref = l_f if l_f is not None else l_r
+        length = float(ref.get("length"))
+        grade_ab = (nodes[b] - nodes[a]) / length
+        if l_f is not None:
+            arc_by_link[l_f.get("id")] = {"s0": s, "s1": s + length, "grade": grade_ab}
+        if l_r is not None:
+            arc_by_link[l_r.get("id")] = {"s0": s, "s1": s + length, "grade": -grade_ab}
         s += length
-    return out, s
+    return arc_by_link, s
 
 
 def main():
@@ -137,8 +140,7 @@ def main():
 
         # Netz-Kette (realspeed-Netz = Sim-Netz) + Sim-Leistung je Link
         net_path = net_dir / f"section_{trip}_{CANONICAL_L}m_realspeed.xml.gz"
-        chain, total_len = load_chain(net_path)
-        arc_by_link = {c["id"]: c for c in chain}
+        arc_by_link, total_len = load_chain(net_path)
 
         for cset in ("lh_low", "lh_high"):
             run_dir = net_dir / "validation_sims" / f"{trip}_{CANONICAL_L}m_{cset}"

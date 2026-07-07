@@ -88,16 +88,29 @@ def main():
     sim_dir = net_dir / "validation_sims"
     sim_dir.mkdir(exist_ok=True)
 
+    # Reale Fahrtrichtung aus der Profil-Ausrichtung: dir=+1 -> Start am
+    # Kettenanfang, dir=-1 -> Start am Kettenende. endpoints_from_reference
+    # lieferte BELIEBIGE Reihenfolge -> Sim konnte rueckwaerts fahren
+    # (Leistungs-corr -0,49 beim 19t; bei Netto-Hoehendifferenz nicht symmetrisch).
+    rme = _import_module("rme", "realtrip_measured_eval.py")
+    align = pd.read_csv(net_dir / "realtrip_profile_validation.csv") \
+        .drop_duplicates("trip").set_index("trip")
+
     tasks = []
     for trip, vp in TRIP_VEHICLES.items():
+        direction = int(align.loc[trip, "direction"]) if trip in align.index else +1
         for L in LINK_LENGTHS:
             network = net_dir / f"section_{trip}_{L}m_realspeed.xml.gz"
             if not network.exists():
                 print(f"  WARNING: {network.name} fehlt — skip")
                 continue
-            coords = rsea.endpoints_from_reference(network)
-            from_coord = f"{coords[0][0]},{coords[0][1]}"
-            to_coord = f"{coords[1][0]},{coords[1][1]}"
+            prof = rme.load_chain_profile(network)
+            start_node = prof["order"][0] if direction == +1 else prof["order"][-1]
+            end_node = prof["order"][-1] if direction == +1 else prof["order"][0]
+            sx, sy = prof["node_xy"][start_node]
+            ex, ey = prof["node_xy"][end_node]
+            from_coord = f"{sx},{sy}"
+            to_coord = f"{ex},{ey}"
             for cname, calib in csets.items():
                 run_dir = sim_dir / f"{trip}_{L}m_{cname}"
                 tasks.append((trip, L, cname, str(network), str(run_dir),
