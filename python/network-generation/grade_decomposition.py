@@ -54,6 +54,26 @@ def _import_module(name, filename):
     return mod
 
 
+def load_network_with_freespeed(path):
+    """Nodes (x,y,z) + Links (from,to,length,freespeed) aus MATSim-XML."""
+    import gzip
+    import xml.etree.ElementTree as ET
+    with gzip.open(path, "rb") as f:
+        root = ET.parse(f).getroot()
+    nodes = {}
+    for n in root.find("nodes").findall("node"):
+        z = n.get("z")
+        nodes[n.get("id")] = {"z": float(z) if z is not None else None}
+    links = {}
+    for l in root.find("links").findall("link"):
+        links[l.get("id")] = {
+            "from": l.get("from"), "to": l.get("to"),
+            "length": float(l.get("length", "0")),
+            "freespeed": float(l.get("freespeed", "22.222")),
+        }
+    return nodes, links
+
+
 def solve_vmax(fa, lin_coeff, p_mech):
     """Loest fa*v^3 + lin_coeff*v = p_mech (positives lin_coeff) per Newton."""
     v = V_TARGET
@@ -68,8 +88,13 @@ def solve_vmax(fa, lin_coeff, p_mech):
 
 
 def static_link_energy(lengths, grades, calib, mass, payload, max_motor_w,
-                       power_limited_speed=True):
+                       freespeeds=None, power_limited_speed=True):
     """Vektorisierte statische Batterieenergie je Link [J] + Terme.
+
+    freespeeds: Link-Freespeed [m/s] — vTarget = min(freespeed, 80 km/h,
+    Power-Cap) wie im Java-Modell. Ohne freespeeds gilt ueberall 80 km/h
+    (das unterschaetzte das Residuum: 20-30 % der Streckenlaenge liegen in
+    50-km/h-Ortsdurchfahrten, Befund aero_jensen 2026-07-07).
 
     Rueckgabe dict mit: e_batt [J-Array], T1 [J], loss [J], cap_extra [J],
     v [m/s-Array].
@@ -85,16 +110,20 @@ def static_link_energy(lengths, grades, calib, mass, payload, max_motor_w,
     L = np.asarray(lengths, dtype=float)
     cosg = np.sqrt(1.0 - g * g)
 
-    # Zielgeschwindigkeit je Link: bergauf ggf. leistungsbegrenzt (wie Java)
-    v = np.full_like(g, V_TARGET)
+    # Zielgeschwindigkeit je Link: min(Freespeed, 80 km/h), bergauf ggf.
+    # leistungsbegrenzt (wie Java)
+    if freespeeds is not None:
+        v = np.minimum(np.asarray(freespeeds, dtype=float), V_TARGET)
+    else:
+        v = np.full_like(g, V_TARGET)
     if power_limited_speed:
         total_c = c_rr * cosg + g
         p_mech_max = max_motor_w * eta_t
-        # nur Links pruefen, die bei 80 km/h mehr als p_mech_max braeuchten
-        need = fa * V_TARGET ** 3 + m_sum * G * total_c * V_TARGET
+        # nur Links pruefen, die bei ihrem vTarget mehr als p_mech_max braeuchten
+        need = fa * v ** 3 + m_sum * G * total_c * v
         idx = np.where((total_c > 0) & (need > p_mech_max))[0]
         for i in idx:
-            v[i] = solve_vmax(fa, m_sum * G * total_c[i], p_mech_max)
+            v[i] = min(v[i], solve_vmax(fa, m_sum * G * total_c[i], p_mech_max))
 
     F = m_sum * G * (c_rr * cosg + g) + fa * v * v          # [N]
     e_mech = L * F                                           # [J]
@@ -139,7 +168,7 @@ def main():
             network_path = results_dir / f"section_{section}_{max_len}m.xml.gz"
             if not network_path.exists():
                 continue
-            nodes, links = rsea.load_matsim_network(str(network_path))
+            nodes, links = load_network_with_freespeed(str(network_path))
             for loading in ("empty", "loaded"):
                 run_dir = results_dir / "sim_results" / f"{section}_{max_len}m_{loading}"
                 debug_csv = run_dir / "resistance_debug.csv"
@@ -153,24 +182,33 @@ def main():
                 vdf = (ddf[ddf.vehicleId == vehicle_id].set_index("linkId")
                        .reindex(fwd_ids).dropna(how="all"))
 
-                # Grades mit voller Praezision aus dem Netz (Fallback: grade_pct)
-                grades, lengths = [], []
+                # Grades mit voller Praezision + Freespeed aus dem Netz
+                grades, lengths, freespeeds = [], [], []
                 for lid, r in vdf.iterrows():
                     lk = links.get(str(lid))
                     if lk is not None:
+                        freespeeds.append(lk["freespeed"])
                         zf = nodes[lk["from"]].get("z")
                         zt = nodes[lk["to"]].get("z")
                         if zf is not None and zt is not None and lk["length"] > 0:
                             grades.append((zt - zf) / lk["length"])
                             lengths.append(lk["length"])
                             continue
+                    else:
+                        freespeeds.append(V_TARGET)
                     grades.append(float(r["grade_pct"]) / 100.0)
                     lengths.append(float(r["length_m"]))
 
                 calib = rsea.CALIBRATION_PER_LOADING[loading]
                 vp = rsea.VEHICLE_PARAMS[loading]
+                # Kanonisch: konstante 80 km/h (Mechanismus-Quantifizierung).
+                # Zusatzvariante mit Tempozonen: Robustheits-Check, ob das
+                # Residuum ein fehlender STATISCHER Term ist (Antwort: nein).
                 res = static_link_energy(lengths, grades, calib,
                                          vp["mass"], vp["payload"], vp["maxMotorPower"])
+                res_zone = static_link_energy(lengths, grades, calib,
+                                              vp["mass"], vp["payload"], vp["maxMotorPower"],
+                                              freespeeds=freespeeds)
 
                 # Selbstcheck auf Steady-State-Links (Ein-/Ausfahrt ~80 km/h, kein Cap)
                 steady = ((vdf["vEntry_kmh"] > 79.5) & (vdf["vExit_kmh"] > 79.5)).values
@@ -192,6 +230,8 @@ def main():
                     "loss_kWh": res["loss"] / 3.6e6,
                     "cap_extra_kWh": res["cap_extra"] / 3.6e6,
                     "n_powerlimited_links": int(np.sum(res["v"] < V_TARGET - 1e-6)),
+                    "E_stat_zones_kWh": float(np.sum(res_zone["e_batt"])) / 3.6e6,
+                    "loss_zones_kWh": res_zone["loss"] / 3.6e6,
                 })
         print(f"{section}: fertig")
 
@@ -213,6 +253,7 @@ def main():
                 "dLoss_rel250_kWh": r.loss_kWh - ref.loss_kWh,
                 "dE_stat_rel250_kWh": r.E_stat_kWh - ref.E_stat_kWh,
                 "dE_sim_rel250_kWh": r.E_sim_kWh - ref.E_sim_kWh,
+                "dE_stat_zones_rel250_kWh": r.E_stat_zones_kWh - ref.E_stat_zones_kWh,
             })
     out_df = pd.DataFrame(out)
     out_df.to_csv(results_dir / "grade_decomposition.csv", index=False)
@@ -226,10 +267,14 @@ def main():
     for loading in ("empty", "loaded"):
         sub = ne[ne.loading == loading]
         expl = sub.dE_stat_rel250_kWh / sub.dE_sim_rel250_kWh
+        expl_z = sub.dE_stat_zones_rel250_kWh / sub.dE_sim_rel250_kWh
         loss_share = sub.dLoss_rel250_kWh / sub.dE_stat_rel250_kWh
         resid = (sub.dE_sim_rel250_kWh - sub.dE_stat_rel250_kWh).abs()
         print(f"\n{loading}: erklaerte Delta-Fraktion dE_stat/dE_sim: "
               f"Median {expl.median():.2f} (IQR {expl.quantile(.25):.2f}-{expl.quantile(.75):.2f})")
+        print(f"  Zonen-Variante (Robustheits-Check): Median {expl_z.median():.2f} "
+              f"(IQR {expl_z.quantile(.25):.2f}-{expl_z.quantile(.75):.2f}) — "
+              f"statische Tempozonen schliessen das Residuum NICHT")
         print(f"  Loss-Anteil an dE_stat: Median {loss_share.median():.2f}")
         print(f"  |Residuum| Median {resid.median():.2f} kWh "
               f"(vs |dE_sim| Median {sub.dE_sim_rel250_kWh.abs().median():.2f} kWh)")
