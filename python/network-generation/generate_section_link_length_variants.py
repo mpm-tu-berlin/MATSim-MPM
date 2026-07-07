@@ -290,16 +290,22 @@ def find_guided_path(nodes, links, start, end, ref_waypoints_xy, ref_coords=None
         seg.reverse()
         return seg
 
-    # Waypoints nur auf Schlauch-Knoten snappen (sonst zeigt ein Stop aus dem
-    # Graphen heraus und das Segment schlaegt fehl)
-    snap_nodes = {n: nodes[n] for n in allowed} if allowed is not None else nodes
-    stops = [start]
-    for wx, wy in ref_waypoints_xy:
-        nid, _ = find_nearest_node(wx, wy, snap_nodes)
-        if nid is not None and nid != stops[-1]:
-            stops.append(nid)
-    if stops[-1] != end:
-        stops.append(end)
+    # MIT Schlauch: KEINE Waypoints — der Schlauch ist die Fuehrung (Parallel-
+    # strassen ausgeschlossen), kuerzester Weg Start->Ende = die Route. Waypoint-
+    # Snapping im Schlauch traf auf groben Netzen die GEGENFAHRBAHN (naechster
+    # Knoten liegt quer statt laengs) -> Dijkstra fuhr zur naechsten Anschluss-
+    # stelle und zurueck (24t: +3,7 km bei 250 m, deterministisch).
+    # OHNE Schlauch (Fallback): Waypoints wie gehabt.
+    if allowed is not None:
+        stops = [start, end]
+    else:
+        stops = [start]
+        for wx, wy in ref_waypoints_xy:
+            nid, _ = find_nearest_node(wx, wy, nodes)
+            if nid is not None and nid != stops[-1]:
+                stops.append(nid)
+        if stops[-1] != end:
+            stops.append(end)
 
     full_path = [start]
     for i in range(len(stops) - 1):
