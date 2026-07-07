@@ -1,0 +1,141 @@
+# -*- coding: utf-8 -*-
+"""
+WP4: Validierungs-Sims auf den Realspeed-Routen-Netzen (V2) gegen die
+batterieseitige Mess-Ground-Truth.
+
+Setup je Fahrt (19t/24t/43t) x C-Set x Aufloesung [100, 250, 400] m:
+  - Netz: section_<t>_<L>m_realspeed.xml.gz (freespeed = gemessene
+    Geschwindigkeit je Link -> Speed-Profil-Fehler eliminiert)
+  - Fahrzeug: reale Massen (19t: 19+0, 24t: 19+5, 43t: 19+24 t), 600 kW,
+    vMax aus alten Szenarien
+  - Kalibrierung: BEIDE B2v2-C-Sets (lh_low + lh_high) fuer ALLE Fahrten
+    (2x3-Matrix = Identifizierbarkeits-/Sensitivitaets-Story; User-Entscheidung
+    2026-07-07: 24t mit beiden Sets als Sensitivitaet)
+  - JAR: C2-aktiver Build; rolling-Boundary-Handling wie im Sweep
+
+Zielgroesse: FAHR-Energie batterieseitig. Messung liefert
+  target = |BatteryPower| - HVACpower - PowerOtherAuxiliary   [kWh/km]
+(die Sim-Energie energy_Wh enthaelt keinen Aux -> sauberer Vergleich ohne
+Aux-Annahme; frueher musste aux geschaetzt werden).
+
+Alle Ein-/Ausgaben liegen im gitignorten Netz-Ordner (private Realfahrten);
+ausgegeben werden nur Aggregate.
+"""
+
+import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from importlib.util import spec_from_file_location, module_from_spec
+
+import numpy as np
+import pandas as pd
+
+_SCRIPT_DIR = Path(__file__).parent
+
+TRIP_VEHICLES = {
+    "19t": {"id": "truck_19t", "mass": 19000, "payload": 0,
+            "cdXA": 5.79, "rollingC": 0.0048,  # unbenutzt (CalibrationParams)
+            "maxMotorPower": 600000, "maxSpeed": 25.0},
+    # 24t-Fahrt: Beladungswechsel unterwegs (erste 2/5: 24 t, letzte 3/5: 25 t;
+    # User 2026-07-07) -> streckengewichtetes Mittel 24,6 t. MATSim kann die
+    # Masse nicht mid-trip aendern; bei Bedarf spaeter Routen-Split.
+    "24t": {"id": "truck_24t", "mass": 19000, "payload": 5600,
+            "cdXA": 5.79, "rollingC": 0.0048,
+            "maxMotorPower": 600000, "maxSpeed": 27.778},
+    "43t": {"id": "truck_43t", "mass": 19000, "payload": 24000,
+            "cdXA": 5.79, "rollingC": 0.0048,
+            "maxMotorPower": 600000, "maxSpeed": 27.778},
+}
+LINK_LENGTHS = [100, 250, 400]
+
+
+def _import_module(name, filename):
+    spec = spec_from_file_location(name, str(_SCRIPT_DIR / filename))
+    mod = module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def main():
+    parser = argparse.ArgumentParser(description="WP4-Validierungs-Sims (Realspeed-Netze).")
+    parser.add_argument("--networks-dir", type=str, required=True)
+    parser.add_argument("--jar", type=str, default=None)
+    parser.add_argument("--workers", type=int, default=6)
+    args = parser.parse_args()
+    net_dir = Path(args.networks_dir)
+
+    rsea = _import_module("rsea", "run_section_energy_analysis.py")
+    jar_path = Path(args.jar) if args.jar else Path(rsea.DEFAULT_JAR).resolve()
+    if not jar_path.exists():
+        raise SystemExit(f"JAR fehlt: {jar_path}")
+
+    # C-Sets: 'empty' = lh_low (#79), 'loaded' = lh_high (#261)
+    csets = {"lh_low": rsea.CALIBRATION_PER_LOADING["empty"],
+             "lh_high": rsea.CALIBRATION_PER_LOADING["loaded"]}
+
+    # Mess-Ground-Truth (Aggregate aus realtrip_measured_eval.py)
+    energy_csv = net_dir / "realtrip_measured_energy.csv"
+    targets = {}
+    if energy_csv.exists():
+        edf = pd.read_csv(energy_csv).set_index("trip")
+        for t in edf.index:
+            targets[t] = (abs(edf.loc[t, "BatteryPower_kWh_per_km"])
+                          - edf.loc[t, "HVACpower_kWh_per_km"]
+                          - edf.loc[t, "PowerOtherAuxiliary_kWh_per_km"])
+    else:
+        print(f"WARNING: {energy_csv} fehlt — Targets leer, nur Sim-Werte.")
+
+    sim_dir = net_dir / "validation_sims"
+    sim_dir.mkdir(exist_ok=True)
+
+    tasks = []
+    for trip, vp in TRIP_VEHICLES.items():
+        for L in LINK_LENGTHS:
+            network = net_dir / f"section_{trip}_{L}m_realspeed.xml.gz"
+            if not network.exists():
+                print(f"  WARNING: {network.name} fehlt — skip")
+                continue
+            coords = rsea.endpoints_from_reference(network)
+            from_coord = f"{coords[0][0]},{coords[0][1]}"
+            to_coord = f"{coords[1][0]},{coords[1][1]}"
+            for cname, calib in csets.items():
+                run_dir = sim_dir / f"{trip}_{L}m_{cname}"
+                tasks.append((trip, L, cname, str(network), str(run_dir),
+                              [vp], str(jar_path), calib,
+                              from_coord, to_coord, rsea.QSIM_TIMESTEP))
+
+    print(f"{len(tasks)} Validierungs-Sims ({args.workers} Worker)\n")
+    rows = []
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futures = {pool.submit(rsea._run_one_simulation, t): t for t in tasks}
+        for fut in as_completed(futures):
+            trip, L, cname, results, log = fut.result()
+            for msg in log:
+                print(msg)
+            if not results:
+                continue
+            for vid, r in results.items():
+                target = targets.get(trip)
+                rows.append({
+                    "trip": trip, "max_link_length": L, "cset": cname,
+                    "sim_kWh_per_km": r["kWh_per_km"],
+                    "sim_total_kWh": r["total_energy_Wh"] / 1000.0,
+                    "driven_km": r["total_length_m"] / 1000.0,
+                    "target_drive_kWh_per_km": target,
+                    "diff_pct": (100.0 * (r["kWh_per_km"] / target - 1.0)
+                                 if target else np.nan),
+                })
+
+    df = pd.DataFrame(rows).sort_values(["trip", "cset", "max_link_length"])
+    out_csv = net_dir / "realtrip_validation_results.csv"
+    df.to_csv(out_csv, index=False)
+
+    print("\n=== WP4-Validierung: Sim (Fahr-Energie) vs. Messung (Batterie - Aux) ===")
+    print(df.round(3).to_string(index=False))
+    if targets:
+        print("\nTargets [kWh/km]: " + ", ".join(f"{t}: {v:.3f}" for t, v in targets.items()))
+    print(f"\nCSV: {out_csv}")
+
+
+if __name__ == "__main__":
+    main()
