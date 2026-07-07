@@ -91,6 +91,11 @@ NETWORK_CRS = "EPSG:4839"
 CORRIDOR_BUFFER_M = 500  # meters buffer around reference route for spatial filtering
 MAX_LENGTH_DEVIATION = 0.05  # 5% max allowed deviation from reference route length
 WAYPOINT_SPACING_M = 2000.0  # Fuehrungs-Waypoints entlang der Referenzroute
+# Dijkstra-Schlauch um die Referenzlinie: Knoten weiter weg sind tabu.
+# Schliesst Parallelstrassen im 500-m-Korridor aus (Fund 2026-07-07: 24t-Route
+# nahm bei 250/400 m einen +4,2-km-Umweg ueber eine Parallelstrasse, weil ein
+# Waypoint dorthin snappte); Richtungsfahrbahnen (<50 m) bleiben drin.
+ROUTE_TUBE_M = 150.0
 
 
 # ==============================
@@ -216,17 +221,44 @@ def sample_waypoints(coords, spacing_m=WAYPOINT_SPACING_M):
     return waypoints
 
 
-def find_guided_path(nodes, links, start, end, ref_waypoints_xy):
+def find_guided_path(nodes, links, start, end, ref_waypoints_xy, ref_coords=None,
+                     tube_m=ROUTE_TUBE_M):
     """Laengen-gewichteter Dijkstra durch Waypoints der Referenzroute.
 
     Ersetzt den reinen BFS (wenigste Hops): der nahm auf groben Stufen
     hop-guenstige Umwege (q5, +14,6 %) und im Korridor liegende
     Parallelrouten als Shortcut (q10/q45, -22 %). Die Waypoints pinnen
     den Pfad auf die Referenzstrasse; je Segment kuerzeste Laenge.
+
+    ref_coords (optional): Referenz-Polylinie — der Graph wird auf Knoten
+    innerhalb tube_m um die Linie beschraenkt (Schlauch). Verhindert
+    Waypoint-Snaps auf Parallelstrassen (24t-Fund 2026-07-07). Faellt der
+    Schlauch-Pfad aus, wird ohne Schlauch wiederholt.
     """
+    allowed = None
+    if ref_coords is not None:
+        from scipy.spatial import cKDTree
+        pts = np.asarray(ref_coords, dtype=float)
+        # Referenzlinie dicht nachsampeln (~50 m), damit der Schlauch auch
+        # zwischen weit auseinanderliegenden Referenzknoten geschlossen ist
+        seg = np.hypot(np.diff(pts[:, 0]), np.diff(pts[:, 1]))
+        s = np.concatenate([[0.0], np.cumsum(seg)])
+        grid = np.arange(0.0, s[-1], 50.0)
+        dense = np.column_stack([np.interp(grid, s, pts[:, 0]),
+                                 np.interp(grid, s, pts[:, 1])])
+        tree = cKDTree(dense)
+        node_ids = list(nodes.keys())
+        xy = np.array([(nodes[n]["x"], nodes[n]["y"]) for n in node_ids])
+        dists, _ = tree.query(xy, k=1)
+        allowed = {n for n, d in zip(node_ids, dists) if d <= tube_m}
+        allowed.add(start)
+        allowed.add(end)
+
     adj = {}
     for lk in links.values():
         u, v, ln = lk["from"], lk["to"], lk["length"]
+        if allowed is not None and (u not in allowed or v not in allowed):
+            continue
         for a, b in ((u, v), (v, u)):
             cur = adj.setdefault(a, {})
             if ln < cur.get(b, float("inf")):
@@ -258,9 +290,12 @@ def find_guided_path(nodes, links, start, end, ref_waypoints_xy):
         seg.reverse()
         return seg
 
+    # Waypoints nur auf Schlauch-Knoten snappen (sonst zeigt ein Stop aus dem
+    # Graphen heraus und das Segment schlaegt fehl)
+    snap_nodes = {n: nodes[n] for n in allowed} if allowed is not None else nodes
     stops = [start]
     for wx, wy in ref_waypoints_xy:
-        nid, _ = find_nearest_node(wx, wy, nodes)
+        nid, _ = find_nearest_node(wx, wy, snap_nodes)
         if nid is not None and nid != stops[-1]:
             stops.append(nid)
     if stops[-1] != end:
@@ -270,6 +305,12 @@ def find_guided_path(nodes, links, start, end, ref_waypoints_xy):
     for i in range(len(stops) - 1):
         seg = dijkstra(stops[i], stops[i + 1])
         if seg is None:
+            if allowed is not None:
+                # Schlauch zu eng (z. B. Referenz weicht lokal von OSM ab):
+                # einmal ohne Schlauch wiederholen
+                print(f"    Hinweis: Schlauch-Pfad fehlgeschlagen — Retry ohne Schlauch")
+                return find_guided_path(nodes, links, start, end, ref_waypoints_xy,
+                                        ref_coords=None)
             return None
         full_path.extend(seg[1:])
 
@@ -590,8 +631,9 @@ def generate_variants_for_section(
 
         print(f"    Matched start: {new_start} (dist={dist_s:.1f}m), end: {new_end} (dist={dist_e:.1f}m)")
 
-        # Gefuehrter Pfad (Dijkstra durch Referenz-Waypoints statt BFS)
-        path = find_guided_path(full_nodes, full_links, new_start, new_end, ref_waypoints)
+        # Gefuehrter Pfad (Dijkstra durch Referenz-Waypoints, Schlauch um Referenzlinie)
+        path = find_guided_path(full_nodes, full_links, new_start, new_end, ref_waypoints,
+                                ref_coords=ref_coords)
         if path is None:
             print(f"    WARNING: No path found between start and end. Skipping.")
             tmp_network_path.unlink(missing_ok=True)
