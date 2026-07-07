@@ -46,6 +46,16 @@ LOADING_LINESTYLE = {"loaded": "-", "empty": "--"}
 LOADING_MARKER = {"loaded": "o", "empty": "s"}
 
 
+def _savefig(fig, output_dir, name):
+    """Speichert PNG + PDF; gesperrte Dateien (im Viewer offen) werden mit
+    Warnung uebersprungen statt den Lauf abzubrechen. PNG zuerst (seltener gelockt)."""
+    for ext in ("png", "pdf"):
+        try:
+            fig.savefig(output_dir / f"{name}.{ext}", dpi=300, bbox_inches="tight")
+        except PermissionError:
+            print(f"  WARNING: {name}.{ext} gesperrt (offen im Viewer?) — uebersprungen.")
+
+
 def _quantile_number(section):
     """'q97' -> 97; 'flat' -> -1 (fuer Sortierung/Farbe)."""
     if section == "flat":
@@ -138,8 +148,7 @@ def plot_relative(rel_df, sections, output_dir):
     fig.suptitle("Discretisation sensitivity relative to the 250 m calibration scale",
                  fontsize=13)
     fig.tight_layout()
-    for ext in ("pdf", "png"):
-        fig.savefig(output_dir / f"energy_relative_to_250m.{ext}", dpi=300, bbox_inches="tight")
+    _savefig(fig, output_dir, "energy_relative_to_250m")
     plt.close(fig)
 
 
@@ -169,14 +178,17 @@ def compute_sensitivity(rel_df, feats):
     return pd.DataFrame(rows)
 
 
-def plot_sensitivity_and_knee(sens_df, knee_df, feats, output_dir):
-    """Kombinierte Kernfigur: mittlere abs. Steigung [%] auf x; links die
-    Verbrauchsaenderung 50->1000 m (steigt), rechts die Knie-Linklaenge (flach).
+def plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, output_dir):
+    """Zweizeilige Kernfigur ueber x = mittlere absolute Steigung [%].
 
-    Eine Aussage: je steiler die Route, desto teurer eine Gitter-Fehlwahl —
-    aber die optimale Aufloesung bleibt konstant (~250 m). Ersetzt die zwei
-    separaten Scatter (Knie korreliert mit KEINER Topografie-Kennzahl,
-    Sensitivitaet am staerksten mit g_abs_mean, rho=0,62).
+    OBEN: Verteilung der Streckensteigung im dt. Fernstrassennetz (1707
+    Kandidatenrouten) — die Masse ist flach, unser Q5–Q97-Sample daher dort
+    dicht. UNTEN Dual-Achse: links Verbrauchsaenderung 50→1000 m (steigt klar
+    mit der Steigung), rechts Knie-Linklaenge (Marker nach Verlaesslichkeit =
+    Kurven-Spread skaliert; mild-steigende gewichtete Trendlinie). Ehrliche
+    Aussage statt „konstant": der Grossteil des Netzes ist flach und dort fast
+    aufloesungsunabhaengig; Sensitivitaet UND optimale Linklaenge steigen erst
+    im seltenen steilen Schwanz.
     """
     def grade_pct(section):
         return 100.0 * float(feats.loc[section, "g_abs_mean"])
@@ -184,45 +196,76 @@ def plot_sensitivity_and_knee(sens_df, knee_df, feats, output_dir):
     COL_SENS = "#C0392B"   # crimson — Sensitivitaet (linke Achse)
     COL_KNEE = "#21618C"   # blau    — Knie (rechte Achse)
 
-    fig, ax1 = plt.subplots(figsize=(10.5, 6.8))
+    # Knie-Verlaesslichkeit = loaded-Kurven-Spread je Sektion (scharfes Knie -> gross)
+    spread = {}
+    for s in feats.index:
+        sub = df[(df.section == s) & (df.loading == "loaded")]
+        if not sub.empty:
+            spread[s] = float(sub.kWh_per_km.max() - sub.kWh_per_km.min())
+
+    x_max = max(grade_pct(s) for s in feats.index) + 0.3
+
+    fig = plt.figure(figsize=(10.5, 8.2))
+    gs = fig.add_gridspec(2, 1, height_ratios=[1, 3.2], hspace=0.09)
+    ax_top = fig.add_subplot(gs[0])
+    ax1 = fig.add_subplot(gs[1], sharex=ax_top)
     ax2 = ax1.twinx()
 
-    # --- LINKS: Verbrauchsaenderung 50->1000 m ---
+    # --- OBEN: Netz-Steigungsverteilung ---
+    share_lt1 = float((cand_grades < 1.0).mean()) * 100.0
+    ax_top.hist(cand_grades, bins=np.arange(0, cand_grades.max() + 0.2, 0.2),
+                color="#7f8c8d", alpha=0.6, edgecolor="white", linewidth=0.4)
+    ax_top.axvline(1.0, color="black", ls=":", lw=1)
+    ax_top.text(1.05, ax_top.get_ylim()[1] * 0.82,
+                f"{share_lt1:.0f} % der Routen < 1 %", fontsize=9)
+    # Rug der 20 gewaehlten Sektionen
+    for s in feats.index:
+        ax_top.axvline(grade_pct(s), ymin=0, ymax=0.14, color=COL_KNEE, lw=0.8, alpha=0.7)
+    ax_top.set_ylabel("Netz-\nrouten", fontsize=10)
+    ax_top.set_title("German long-haul network is mostly flat — sensitivity and knee "
+                     "rise only in the steep tail", fontsize=12)
+    plt.setp(ax_top.get_xticklabels(), visible=False)
+
+    # --- UNTEN LINKS: Verbrauchsaenderung 50->1000 m ---
     for loading, marker, filled in (("loaded", "o", True), ("empty", "s", False)):
         sub = sens_df[(sens_df.loading == loading) & (sens_df.section != "flat")].copy()
         if sub.empty:
             continue
         sub["grade_pct"] = sub.section.map(grade_pct)
-        sub = sub.sort_values("grade_pct")
-        ax1.scatter(sub.grade_pct, sub.span_50_1000_pct, marker=marker, s=75, zorder=4,
+        ax1.scatter(sub.grade_pct, sub.span_50_1000_pct, marker=marker, s=70, zorder=4,
                     edgecolors=COL_SENS, linewidths=1.3,
                     facecolors=(COL_SENS if filled else "none"),
                     label=f"consumption change ({loading})")
-    # Trendlinie loaded
     subL = sens_df[(sens_df.loading == "loaded") & (sens_df.section != "flat")].copy()
     subL["grade_pct"] = subL.section.map(grade_pct)
     m, b = np.polyfit(subL.grade_pct, subL.span_50_1000_pct, 1)
-    xs = np.linspace(subL.grade_pct.min(), subL.grade_pct.max(), 50)
+    xs = np.linspace(0, subL.grade_pct.max(), 50)
     ax1.plot(xs, m * xs + b, color=COL_SENS, lw=1.4, alpha=0.55, zorder=2)
-    # Flat-Anker bei Steigung 0
     flat = sens_df[(sens_df.section == "flat") & (sens_df.loading == "loaded")]
     if not flat.empty:
         ax1.scatter([0.0], [flat.span_50_1000_pct.iloc[0]], marker="^", s=70,
                     color="grey", edgecolors="black", linewidths=0.5, zorder=4,
                     label="flat control (grade-free)")
 
-    # --- RECHTS: Knie-Linklaenge (loaded = belastbar), flaches Band ---
+    # --- UNTEN RECHTS: Knie (loaded), Marker nach Verlaesslichkeit skaliert ---
     subK = knee_df[knee_df.loading == "loaded"].dropna(subset=["knee_link_length_m"]).copy()
     subK["grade_pct"] = subK.section.map(grade_pct)
-    ax2.scatter(subK.grade_pct, subK.knee_link_length_m, marker="D", s=55, zorder=4,
-                facecolors=COL_KNEE, edgecolors="black", linewidths=0.6,
-                label="knee (loaded)")
-    med = subK.knee_link_length_m.median()
-    q1, q3 = subK.knee_link_length_m.quantile([0.25, 0.75])
-    ax2.axhline(med, color=COL_KNEE, lw=1.8, zorder=3)
-    ax2.axhspan(q1, q3, color=COL_KNEE, alpha=0.10, zorder=1)
-    ax2.text(0.98, med, f" median {med:.0f} m  (IQR {q1:.0f}-{q3:.0f})",
-             transform=ax2.get_yaxis_transform(), ha="right", va="bottom",
+    subK["spread"] = subK.section.map(spread)
+    sizes = 25 + 380 * subK["spread"]
+    ax2.scatter(subK.grade_pct, subK.knee_link_length_m, marker="D", s=sizes, zorder=4,
+                facecolors=COL_KNEE, edgecolors="black", linewidths=0.6, alpha=0.85,
+                label="knee (loaded, size ∝ reliability)")
+    # gewichtete Trendlinie (Gewicht = Spread): ehrlich mild steigend
+    w = subK["spread"].values
+    xk = subK.grade_pct.values
+    yk = subK.knee_link_length_m.values
+    W = np.diag(w)
+    Xk = np.vstack([xk, np.ones_like(xk)]).T
+    bk = np.linalg.solve(Xk.T @ W @ Xk, Xk.T @ W @ yk)
+    xr = np.linspace(0, subK.grade_pct.max(), 50)
+    ax2.plot(xr, bk[0] * xr + bk[1], color=COL_KNEE, ls="--", lw=1.6, zorder=3)
+    ax2.text(0.98, 0.06, f"knee ≈ {bk[0]:.0f}·grade + {bk[1]:.0f} m  (weak, ρ=0,28 n.s.)",
+             transform=ax2.transAxes, ha="right", va="bottom",
              fontsize=9, color=COL_KNEE, fontweight="bold")
 
     ax1.set_xlabel("Mean absolute grade [%]", fontsize=12)
@@ -233,18 +276,14 @@ def plot_sensitivity_and_knee(sens_df, knee_df, feats, output_dir):
     ax2.tick_params(axis="y", colors=COL_KNEE)
     ax1.set_ylim(0, None)
     ax2.set_ylim(0, 500)
-    ax1.set_xlim(left=-0.05)
+    ax1.set_xlim(-0.1, x_max)
     ax1.grid(True, alpha=0.25)
-    ax1.set_title("Steeper routes raise the stakes, not the optimal resolution",
-                  fontsize=13)
 
     h1, l1 = ax1.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
     ax1.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=9, framealpha=0.9)
 
-    fig.tight_layout()
-    for ext in ("pdf", "png"):
-        fig.savefig(output_dir / f"sensitivity_and_knee.{ext}", dpi=300, bbox_inches="tight")
+    _savefig(fig, output_dir, "sensitivity_and_knee")
     plt.close(fig)
 
 
@@ -270,8 +309,7 @@ def plot_knee_overview(curves, sections, output_dir):
     ax.grid(True, alpha=0.3, which="both")
     ax.legend(loc="upper right", fontsize=6, ncol=3)
     fig.tight_layout()
-    for ext in ("pdf", "png"):
-        fig.savefig(output_dir / f"knee_analysis.{ext}", dpi=300, bbox_inches="tight")
+    _savefig(fig, output_dir, "knee_analysis")
     plt.close(fig)
 
 
@@ -281,6 +319,9 @@ def main():
                         help="Ordner mit energy_results_summary.csv (= variants-dir des Sweeps).")
     parser.add_argument("--features-csv", type=str, default=str(DEFAULT_FEATURES_CSV),
                         help="selected_sections_features.csv der zugehoerigen Auswahl (Hm/km, sigma_g).")
+    parser.add_argument("--candidates-csv", type=str, default=None,
+                        help="candidate_paths_features.csv fuer die Netz-Steigungsverteilung "
+                             "(Default: neben features-csv).")
     parser.add_argument("--smoothing", type=float, default=1.0,
                         help="Spline-Glaettungsmultiplikator (>1 glatter).")
     parser.add_argument("--max-link-length", type=float, default=700.0,
@@ -294,6 +335,17 @@ def main():
     print(f"Loaded {len(df)} rows from {results_dir / 'energy_results_summary.csv'}")
 
     feats = pd.read_csv(args.features_csv).set_index("section")
+
+    # Netz-Steigungsverteilung (mittlere abs. Steigung [%] ueber alle Kandidatenrouten)
+    cand_csv = Path(args.candidates_csv) if args.candidates_csv \
+        else Path(args.features_csv).parent / "candidate_paths_features.csv"
+    cand_grades = None
+    if cand_csv.exists():
+        cand_grades = (pd.read_csv(cand_csv)["g_abs_mean"] * 100.0).values
+        print(f"Netz-Steigungsverteilung aus {cand_csv.name}: n={len(cand_grades)}, "
+              f"Median {np.median(cand_grades):.2f} %, <1 %: {(cand_grades<1).mean()*100:.0f} %")
+    else:
+        print(f"WARNING: {cand_csv} fehlt — Histogramm-Panel wird uebersprungen.")
 
     # Sektionen dynamisch aus der CSV (ausser flat, sofern nicht gewuenscht)
     sections = sorted((s for s in df.section.unique() if s != "flat"), key=_quantile_number)
@@ -336,7 +388,8 @@ def main():
     sens_df = compute_sensitivity(rel_df, feats)
     sens_df.to_csv(results_dir / "sensitivity_vs_topography.csv", index=False)
 
-    plot_sensitivity_and_knee(sens_df, knee_df, feats, results_dir)
+    if cand_grades is not None:
+        plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, results_dir)
     plot_knee_overview(curves, sections, results_dir)
 
     # --- Konsolen-Zusammenfassung fuer paper_findings.md ---
