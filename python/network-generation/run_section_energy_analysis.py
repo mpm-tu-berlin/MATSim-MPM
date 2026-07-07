@@ -84,7 +84,11 @@ DEFAULT_JAR = _SCRIPT_DIR / ".." / ".." / "matsim-example-project-0.0.1-SNAPSHOT
 
 # Section input directory (Referenz-Sektionen der 20er-Auswahl im Netzgen-Worktree)
 _NETGEN_DIR = _SCRIPT_DIR.parents[2] / "MATSim-MPM-netgen" / "python" / "network-generation"
-DEFAULT_SECTIONS_DIR = str(_NETGEN_DIR / "data" / "sections_quantile_run_20260706_130433")
+# Run 182750 = kanonische Auswahl (Ketten-Export-Fix + Eindeutigkeits-Filter);
+# 130433 hatte 9 defekte Exporte -> endpoints_from_reference wuerfe dort und die
+# Sektion wuerde still uebersprungen. Endpunkte MUESSEN aus derselben Auswahl wie
+# die Varianten kommen (q15/q20/q25 haben in 182750 andere Routen).
+DEFAULT_SECTIONS_DIR = str(_NETGEN_DIR / "data" / "sections_quantile_run_20260706_182750")
 
 # Link lengths to test — reduzierte 12er-Leiter (identisch zum Generator)
 LINK_LENGTHS = [50, 100, 150, 200, 250, 300, 350, 400, 500, 600, 750, 1000]
@@ -389,6 +393,10 @@ def run_section_scenario(jar_path, network_path, output_dir, vehicle_params_list
 
     cmd = [
         "java",
+        # Heap je Sim bounden: ein 100-km/2000-Link-Netz mit wenigen Fahrzeugen
+        # braucht <1 GB; ohne -Xmx nimmt die JVM 25 % RAM (24 GB) und viele
+        # parallele Worker sprengen die freien 48 GB (User-HW 96 GB gesamt).
+        "-Xmx2g",
         f"-Dcalibration.params.file={calib_file}",
         "-cp", str(jar_path),
         "org.matsim.mpm.run.RunSectionScenario",
