@@ -61,8 +61,20 @@ def main():
     parser.add_argument("--networks-dir", type=str, required=True)
     parser.add_argument("--jar", type=str, default=None)
     parser.add_argument("--workers", type=int, default=6)
+    parser.add_argument("--link-lengths", type=str, default=None,
+                        help="Kommaliste [m], Default: 100,250,400")
+    parser.add_argument("--eta-t", type=str, default=None,
+                        help="Kommaliste tractionEfficiency-Overrides; erzeugt je "
+                             "C-Set Counterfactual-Varianten <cset>_etaNN")
+    parser.add_argument("--recup-eff", type=float, default=None,
+                        help="recupEfficiency-Override (zusaetzlich zu --eta-t)")
+    parser.add_argument("--max-recup-frac", type=float, default=None,
+                        help="maxRecupPowerFraction-Override")
+    parser.add_argument("--out-name", type=str, default="realtrip_validation_results.csv")
     args = parser.parse_args()
     net_dir = Path(args.networks_dir)
+    link_lengths = ([int(x) for x in args.link_lengths.split(",")]
+                    if args.link_lengths else LINK_LENGTHS)
 
     rsea = _import_module("rsea", "run_section_energy_analysis.py")
     jar_path = Path(args.jar) if args.jar else Path(rsea.DEFAULT_JAR).resolve()
@@ -72,6 +84,23 @@ def main():
     # C-Sets: 'empty' = lh_low (#79), 'loaded' = lh_high (#261)
     csets = {"lh_low": rsea.CALIBRATION_PER_LOADING["empty"],
              "lh_high": rsea.CALIBRATION_PER_LOADING["loaded"]}
+    # Counterfactual (2026-07-07): nur tractionEfficiency ersetzen, Rest der
+    # Kalibrierung unveraendert -> isoliert die VECTO-Deklarations-Luecke
+    # (deklariert 0,80/0,87 vs. real-world ~0,96, s. paper_findings Sec 14.5).
+    if args.eta_t:
+        base = csets
+        csets = {}
+        for eta in (float(x) for x in args.eta_t.split(",")):
+            for cname, calib in base.items():
+                cf = dict(calib)
+                cf["tractionEfficiency"] = eta
+                suffix = f"_eta{int(round(eta * 100)):02d}"
+                if args.recup_eff is not None:
+                    cf["recupEfficiency"] = args.recup_eff
+                    suffix += f"_rec{int(round(args.recup_eff * 100)):02d}"
+                if args.max_recup_frac is not None:
+                    cf["maxRecupPowerFraction"] = args.max_recup_frac
+                csets[f"{cname}{suffix}"] = cf
 
     # Mess-Ground-Truth (Aggregate aus realtrip_measured_eval.py)
     energy_csv = net_dir / "realtrip_measured_energy.csv"
@@ -99,7 +128,7 @@ def main():
     tasks = []
     for trip, vp in TRIP_VEHICLES.items():
         direction = int(align.loc[trip, "direction"]) if trip in align.index else +1
-        for L in LINK_LENGTHS:
+        for L in link_lengths:
             network = net_dir / f"section_{trip}_{L}m_realspeed.xml.gz"
             if not network.exists():
                 print(f"  WARNING: {network.name} fehlt — skip")
@@ -140,7 +169,7 @@ def main():
                 })
 
     df = pd.DataFrame(rows).sort_values(["trip", "cset", "max_link_length"])
-    out_csv = net_dir / "realtrip_validation_results.csv"
+    out_csv = net_dir / args.out_name
     df.to_csv(out_csv, index=False)
 
     print("\n=== WP4-Validierung: Sim (Fahr-Energie) vs. Messung (Batterie - Aux) ===")
