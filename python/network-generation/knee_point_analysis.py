@@ -18,11 +18,15 @@ Eingaben:
     Sektion); Default = kanonischer Run 182750 im Netzgen-Worktree.
 
 Ausgaben (alle in results-dir):
-  - energy_relative_to_250m.png/pdf   Sec-5-Hauptdarstellung
-  - knee_vs_topography.png/pdf        Hauptergebnis-Scatter
+  - sensitivity_and_knee.png/pdf      Kernfigur (3 Zeilen ueber mittlere abs.
+                                      Steigung): Netz-Steigungsverteilung /
+                                      Verbrauch [kWh/km] mit Gitter-Bandbreite /
+                                      Knie-Linklaenge
+  - energy_relative_to_250m.png/pdf   Relativdarstellung je Sektion
   - knee_analysis.png/pdf             Rohdaten + Spline + Knie (Uebersicht)
   - knee_points.csv                   je Kurve: Knie + Topografie-Merge
   - relative_to_250m.csv              volle Relativ-Tabelle fuer paper_findings
+  - sensitivity_vs_topography.csv     Spanne 50<->1000 m je Sektion
 """
 
 import argparse
@@ -203,86 +207,85 @@ def plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, output_d
         if not sub.empty:
             spread[s] = float(sub.kWh_per_km.max() - sub.kWh_per_km.min())
 
+    def cons(section, L, loading="loaded"):
+        sub = df[(df.section == section) & (df.loading == loading)]
+        v = sub.loc[sub.max_link_length == L, "kWh_per_km"]
+        return float(v.iloc[0]) if not v.empty else np.nan
+
     x_max = max(grade_pct(s) for s in feats.index) + 0.3
+    secs = sorted((s for s in feats.index), key=_quantile_number)
+    gx = np.array([grade_pct(s) for s in secs])
 
-    fig = plt.figure(figsize=(10.5, 8.2))
-    gs = fig.add_gridspec(2, 1, height_ratios=[1, 3.2], hspace=0.09)
+    fig = plt.figure(figsize=(10.5, 9.5))
+    gs = fig.add_gridspec(3, 1, height_ratios=[1.0, 3.0, 2.2], hspace=0.10)
     ax_top = fig.add_subplot(gs[0])
-    ax1 = fig.add_subplot(gs[1], sharex=ax_top)
-    ax2 = ax1.twinx()
+    ax_mid = fig.add_subplot(gs[1], sharex=ax_top)
+    ax_bot = fig.add_subplot(gs[2], sharex=ax_top)
 
-    # --- OBEN: Netz-Steigungsverteilung ---
+    # --- ZEILE 1: Netz-Steigungsverteilung ---
     share_lt1 = float((cand_grades < 1.0).mean()) * 100.0
     ax_top.hist(cand_grades, bins=np.arange(0, cand_grades.max() + 0.2, 0.2),
                 color="#7f8c8d", alpha=0.6, edgecolor="white", linewidth=0.4)
     ax_top.axvline(1.0, color="black", ls=":", lw=1)
-    ax_top.text(1.05, ax_top.get_ylim()[1] * 0.82,
+    ax_top.text(1.05, ax_top.get_ylim()[1] * 0.78,
                 f"{share_lt1:.0f} % der Routen < 1 %", fontsize=9)
-    # Rug der 20 gewaehlten Sektionen
     for s in feats.index:
         ax_top.axvline(grade_pct(s), ymin=0, ymax=0.14, color=COL_KNEE, lw=0.8, alpha=0.7)
     ax_top.set_ylabel("Netz-\nrouten", fontsize=10)
-    ax_top.set_title("German long-haul network is mostly flat — sensitivity and knee "
-                     "rise only in the steep tail", fontsize=12)
+    ax_top.set_title("German long-haul network is mostly flat — the grid only matters "
+                     "on the steep tail", fontsize=12)
     plt.setp(ax_top.get_xticklabels(), visible=False)
 
-    # --- UNTEN LINKS: Verbrauchsaenderung 50->1000 m ---
-    for loading, marker, filled in (("loaded", "o", True), ("empty", "s", False)):
-        sub = sens_df[(sens_df.loading == loading) & (sens_df.section != "flat")].copy()
-        if sub.empty:
-            continue
-        sub["grade_pct"] = sub.section.map(grade_pct)
-        ax1.scatter(sub.grade_pct, sub.span_50_1000_pct, marker=marker, s=70, zorder=4,
-                    edgecolors=COL_SENS, linewidths=1.3,
-                    facecolors=(COL_SENS if filled else "none"),
-                    label=f"consumption change ({loading})")
-    subL = sens_df[(sens_df.loading == "loaded") & (sens_df.section != "flat")].copy()
-    subL["grade_pct"] = subL.section.map(grade_pct)
-    m, b = np.polyfit(subL.grade_pct, subL.span_50_1000_pct, 1)
-    xs = np.linspace(0, subL.grade_pct.max(), 50)
-    ax1.plot(xs, m * xs + b, color=COL_SENS, lw=1.4, alpha=0.55, zorder=2)
-    flat = sens_df[(sens_df.section == "flat") & (sens_df.loading == "loaded")]
-    if not flat.empty:
-        ax1.scatter([0.0], [flat.span_50_1000_pct.iloc[0]], marker="^", s=70,
-                    color="grey", edgecolors="black", linewidths=0.5, zorder=4,
-                    label="flat control (grade-free)")
+    # --- ZEILE 2: Verbrauch [kWh/km], Punkt=250 m, Balken=Gitter-Bandbreite 50-1000 m ---
+    c250 = np.array([cons(s, 250) for s in secs])
+    c50 = np.array([cons(s, 50) for s in secs])
+    c1000 = np.array([cons(s, 1000) for s in secs])
+    yerr = np.vstack([c250 - c1000, c50 - c250])  # unten bis 1000 m, oben bis 50 m
+    ax_mid.errorbar(gx, c250, yerr=yerr, fmt="o", ms=6, color=COL_SENS, ecolor=COL_SENS,
+                    elinewidth=1.3, capsize=3, zorder=4,
+                    label="consumption @ 250 m grid  (bar: 50 m top … 1000 m bottom)")
+    cf = df[(df.section == "flat") & (df.loading == "loaded")].set_index("max_link_length").kWh_per_km
+    if not cf.empty:
+        ax_mid.errorbar([0.0], [cf.loc[250]],
+                        yerr=[[cf.loc[250] - cf.loc[1000]], [cf.loc[50] - cf.loc[250]]],
+                        fmt="^", ms=8, color="grey", ecolor="grey", capsize=3, zorder=4,
+                        label="flat control (grid-independent)")
+    ax_mid.set_ylabel("Loaded consumption\n[kWh/km]", fontsize=11)
+    ax_mid.grid(True, alpha=0.25)
+    ax_mid.legend(loc="upper left", fontsize=9, framealpha=0.9)
+    span = c50 - c1000
+    ax_mid.annotate(f"grid range (50→1000 m) grows\nfrom {span.min():.2f} to "
+                    f"{span.max():.2f} kWh/km",
+                    xy=(gx[-1], c50[-1]), xytext=(-6, -2), textcoords="offset points",
+                    ha="right", fontsize=8, color=COL_SENS, style="italic")
+    plt.setp(ax_mid.get_xticklabels(), visible=False)
 
-    # --- UNTEN RECHTS: Knie (loaded), Marker nach Verlaesslichkeit skaliert ---
+    # --- ZEILE 3: Knie (loaded), Marker ∝ Verlaesslichkeit, ehrliche schwache Trendlinie ---
     subK = knee_df[knee_df.loading == "loaded"].dropna(subset=["knee_link_length_m"]).copy()
     subK["grade_pct"] = subK.section.map(grade_pct)
     subK["spread"] = subK.section.map(spread)
     sizes = 25 + 380 * subK["spread"]
-    ax2.scatter(subK.grade_pct, subK.knee_link_length_m, marker="D", s=sizes, zorder=4,
-                facecolors=COL_KNEE, edgecolors="black", linewidths=0.6, alpha=0.85,
-                label="knee (loaded, size ∝ reliability)")
-    # gewichtete Trendlinie (Gewicht = Spread): ehrlich mild steigend
+    ax_bot.scatter(subK.grade_pct, subK.knee_link_length_m, marker="D", s=sizes, zorder=4,
+                   facecolors=COL_KNEE, edgecolors="black", linewidths=0.6, alpha=0.85,
+                   label="knee (marker size ∝ reliability)")
     w = subK["spread"].values
-    xk = subK.grade_pct.values
-    yk = subK.knee_link_length_m.values
+    xk, yk = subK.grade_pct.values, subK.knee_link_length_m.values
     W = np.diag(w)
     Xk = np.vstack([xk, np.ones_like(xk)]).T
     bk = np.linalg.solve(Xk.T @ W @ Xk, Xk.T @ W @ yk)
     xr = np.linspace(0, subK.grade_pct.max(), 50)
-    ax2.plot(xr, bk[0] * xr + bk[1], color=COL_KNEE, ls="--", lw=1.6, zorder=3)
-    ax2.text(0.98, 0.06, f"knee ≈ {bk[0]:.0f}·grade + {bk[1]:.0f} m  (weak, ρ=0,28 n.s.)",
-             transform=ax2.transAxes, ha="right", va="bottom",
-             fontsize=9, color=COL_KNEE, fontweight="bold")
+    ax_bot.plot(xr, bk[0] * xr + bk[1], color=COL_KNEE, ls="--", lw=1.6, zorder=3)
+    ax_bot.text(0.98, 0.08, f"knee ≈ {bk[0]:.0f}·grade + {bk[1]:.0f} m  (weak, ρ=0,28 n.s.)",
+                transform=ax_bot.transAxes, ha="right", va="bottom",
+                fontsize=9, color=COL_KNEE, fontweight="bold")
+    ax_bot.set_ylabel("Knee link\nlength [m]", fontsize=11, color=COL_KNEE)
+    ax_bot.tick_params(axis="y", colors=COL_KNEE)
+    ax_bot.set_ylim(0, 500)
+    ax_bot.grid(True, alpha=0.25)
+    ax_bot.legend(loc="upper left", fontsize=9, framealpha=0.9)
+    ax_bot.set_xlabel("Mean absolute grade [%]", fontsize=12)
 
-    ax1.set_xlabel("Mean absolute grade [%]", fontsize=12)
-    ax1.set_ylabel("Consumption change, 50 m → 1000 m grid [%]",
-                   fontsize=12, color=COL_SENS)
-    ax2.set_ylabel("Knee link length [m]", fontsize=12, color=COL_KNEE)
-    ax1.tick_params(axis="y", colors=COL_SENS)
-    ax2.tick_params(axis="y", colors=COL_KNEE)
-    ax1.set_ylim(0, None)
-    ax2.set_ylim(0, 500)
-    ax1.set_xlim(-0.1, x_max)
-    ax1.grid(True, alpha=0.25)
-
-    h1, l1 = ax1.get_legend_handles_labels()
-    h2, l2 = ax2.get_legend_handles_labels()
-    ax1.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=9, framealpha=0.9)
-
+    ax_top.set_xlim(-0.1, x_max)
     _savefig(fig, output_dir, "sensitivity_and_knee")
     plt.close(fig)
 
