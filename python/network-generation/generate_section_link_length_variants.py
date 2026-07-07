@@ -702,8 +702,11 @@ def main():
 
     section_files = SECTION_FILES
     if args.sections:
-        wanted = {s.strip() for s in args.sections.split(",")}
-        section_files = {k: v for k, v in SECTION_FILES.items() if k in wanted}
+        wanted = [s.strip() for s in args.sections.split(",")]
+        # Unbekannte Labels (z. B. Realfahrt-Routen 19t/24t/43t) folgen der
+        # Namenskonvention section_<label>_100km.xml.gz im sections-dir
+        section_files = {s: SECTION_FILES.get(s, f"section_{s}_100km.xml.gz")
+                         for s in wanted}
         print(f"Sektions-Filter aktiv: {sorted(section_files)}")
 
     for label, filename in section_files.items():
