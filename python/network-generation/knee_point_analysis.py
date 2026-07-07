@@ -50,14 +50,27 @@ LOADING_LINESTYLE = {"loaded": "-", "empty": "--"}
 LOADING_MARKER = {"loaded": "o", "empty": "s"}
 
 
-def _savefig(fig, output_dir, name):
-    """Speichert PNG + PDF; gesperrte Dateien (im Viewer offen) werden mit
-    Warnung uebersprungen statt den Lauf abzubrechen. PNG zuerst (seltener gelockt)."""
+def _next_version(output_dir, base="sensitivity_and_knee"):
+    """Naechste Versionsnummer: scannt <base>_V<N>.png und gibt max(N)+1 (min. 1).
+    So bleibt jede Figuren-Variante erhalten (User-Regel: nie ueberschreiben)."""
+    import re
+    mx = 0
+    for f in Path(output_dir).glob(f"{base}_V*.png"):
+        m = re.search(r"_V(\d+)\.png$", f.name)
+        if m:
+            mx = max(mx, int(m.group(1)))
+    return mx + 1
+
+
+def _savefig(fig, output_dir, name, version=None):
+    """Speichert PNG + PDF (optional mit _V<version>-Suffix); gesperrte Dateien
+    (im Viewer offen) werden mit Warnung uebersprungen statt abzubrechen."""
+    stem = f"{name}_V{version}" if version is not None else name
     for ext in ("png", "pdf"):
         try:
-            fig.savefig(output_dir / f"{name}.{ext}", dpi=300, bbox_inches="tight")
+            fig.savefig(output_dir / f"{stem}.{ext}", dpi=300, bbox_inches="tight")
         except PermissionError:
-            print(f"  WARNING: {name}.{ext} gesperrt (offen im Viewer?) — uebersprungen.")
+            print(f"  WARNING: {stem}.{ext} gesperrt (offen im Viewer?) — uebersprungen.")
 
 
 def _quantile_number(section):
@@ -127,7 +140,7 @@ def compute_relative(df, sections, loadings):
     return pd.DataFrame(rows)
 
 
-def plot_relative(rel_df, sections, output_dir):
+def plot_relative(rel_df, sections, output_dir, version=None):
     fig, axes = plt.subplots(1, 2, figsize=(15, 6), sharey=True)
     for ax, loading in zip(axes, ("empty", "loaded")):
         for section in sections:
@@ -152,7 +165,7 @@ def plot_relative(rel_df, sections, output_dir):
     fig.suptitle("Discretisation sensitivity relative to the 250 m calibration scale",
                  fontsize=13)
     fig.tight_layout()
-    _savefig(fig, output_dir, "energy_relative_to_250m")
+    _savefig(fig, output_dir, "energy_relative_to_250m", version)
     plt.close(fig)
 
 
@@ -182,7 +195,7 @@ def compute_sensitivity(rel_df, feats):
     return pd.DataFrame(rows)
 
 
-def plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, output_dir):
+def plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, output_dir, version=None):
     """Zweizeilige Kernfigur ueber x = mittlere absolute Steigung [%].
 
     OBEN: Verteilung der Streckensteigung im dt. Fernstrassennetz (1707
@@ -258,39 +271,54 @@ def plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, output_d
                     f"{span.max():.2f} kWh/km",
                     xy=(gx[-1], c50[-1]), xytext=(-6, -2), textcoords="offset points",
                     ha="right", fontsize=8, color=COL_SENS, style="italic")
+    # Begruendung loaded-only: konservativ (max Verbrauch UND max Gitter-Sensitivitaet,
+    # da Gradenergie ∝ Masse; empty-Spread ~3x kleiner)
+    ax_mid.text(0.015, 0.05, "loaded only = conservative bound\n(highest consumption & grid "
+                "sensitivity; grade energy ∝ mass)",
+                transform=ax_mid.transAxes, fontsize=7.5, style="italic", color="#555555",
+                va="bottom")
     plt.setp(ax_mid.get_xticklabels(), visible=False)
 
-    # --- ZEILE 3: Knie (loaded), Marker ∝ Verlaesslichkeit, ehrliche schwache Trendlinie ---
+    # --- ZEILE 3: Knie. empty (blass, unzuverlaessig) als Referenz + loaded (belastbar) ---
+    # empty-Knie zuerst, klein/grau: sie streuen stark (sigma~79 m), weil die
+    # empty-Kurve fast flach ist (Spread ~3x kleiner) -> Knie rauschdominiert.
+    subE = knee_df[knee_df.loading == "empty"].dropna(subset=["knee_link_length_m"]).copy()
+    subE["grade_pct"] = subE.section.map(grade_pct)
+    ax_bot.scatter(subE.grade_pct, subE.knee_link_length_m, marker="x", s=32, zorder=3,
+                   color="#9e9e9e", linewidths=1.2,
+                   label="empty knee (curve too flat → unreliable)")
+
     subK = knee_df[knee_df.loading == "loaded"].dropna(subset=["knee_link_length_m"]).copy()
     subK["grade_pct"] = subK.section.map(grade_pct)
     subK["spread"] = subK.section.map(spread)
     sizes = 25 + 380 * subK["spread"]
     ax_bot.scatter(subK.grade_pct, subK.knee_link_length_m, marker="D", s=sizes, zorder=4,
                    facecolors=COL_KNEE, edgecolors="black", linewidths=0.6, alpha=0.85,
-                   label="knee (marker size ∝ reliability)")
+                   label="loaded knee (bigger = sharper/more reliable)")
     w = subK["spread"].values
     xk, yk = subK.grade_pct.values, subK.knee_link_length_m.values
     W = np.diag(w)
     Xk = np.vstack([xk, np.ones_like(xk)]).T
     bk = np.linalg.solve(Xk.T @ W @ Xk, Xk.T @ W @ yk)
     xr = np.linspace(0, subK.grade_pct.max(), 50)
-    ax_bot.plot(xr, bk[0] * xr + bk[1], color=COL_KNEE, ls="--", lw=1.6, zorder=3)
-    ax_bot.text(0.98, 0.08, f"knee ≈ {bk[0]:.0f}·grade + {bk[1]:.0f} m  (weak, ρ=0,28 n.s.)",
+    ax_bot.plot(xr, bk[0] * xr + bk[1], color=COL_KNEE, ls="--", lw=1.6, zorder=3,
+                label="loaded knee weighted trend")
+    ax_bot.text(0.98, 0.08, f"loaded knee ≈ {bk[0]:.0f}·grade + {bk[1]:.0f} m  (weak, ρ=0,28 n.s.)",
                 transform=ax_bot.transAxes, ha="right", va="bottom",
                 fontsize=9, color=COL_KNEE, fontweight="bold")
     ax_bot.set_ylabel("Knee link\nlength [m]", fontsize=11, color=COL_KNEE)
     ax_bot.tick_params(axis="y", colors=COL_KNEE)
     ax_bot.set_ylim(0, 500)
     ax_bot.grid(True, alpha=0.25)
-    ax_bot.legend(loc="upper left", fontsize=9, framealpha=0.9)
+    ax_bot.legend(loc="upper left", fontsize=8, framealpha=0.9, ncol=1)
     ax_bot.set_xlabel("Mean absolute grade [%]", fontsize=12)
 
     ax_top.set_xlim(-0.1, x_max)
-    _savefig(fig, output_dir, "sensitivity_and_knee")
+    _savefig(fig, output_dir, "sensitivity_and_knee", version)
     plt.close(fig)
 
 
-def plot_knee_overview(curves, sections, output_dir):
+def plot_knee_overview(curves, sections, output_dir, version=None):
     link_lengths = sorted({int(x) for c in curves for x in c["x"]})
     fig, ax = plt.subplots(1, 1, figsize=(13, 7.5))
     for c in curves:
@@ -312,7 +340,7 @@ def plot_knee_overview(curves, sections, output_dir):
     ax.grid(True, alpha=0.3, which="both")
     ax.legend(loc="upper right", fontsize=6, ncol=3)
     fig.tight_layout()
-    _savefig(fig, output_dir, "knee_analysis")
+    _savefig(fig, output_dir, "knee_analysis", version)
     plt.close(fig)
 
 
@@ -359,9 +387,14 @@ def main():
     # Flat immer mitrechnen (Kontrolle fuer Sensitivitaet), aber nur bei
     # --include-flat mitplotten (sonst ueberladen).
     rel_sections = sections_for_rel if "flat" in sections_for_rel else (sections_for_rel + ["flat"])
+    # Eine Versionsnummer pro Lauf (nie ueberschreiben, User-Regel): alle Figuren
+    # dieses Laufs bekommen dasselbe _V<N>.
+    version = _next_version(results_dir)
+    print(f"Figuren-Version dieses Laufs: V{version}")
+
     rel_df = compute_relative(df, rel_sections, loadings)
     rel_df.to_csv(results_dir / "relative_to_250m.csv", index=False)
-    plot_relative(rel_df, sections_for_rel, results_dir)
+    plot_relative(rel_df, sections_for_rel, results_dir, version)
 
     # --- Knie je (Sektion, Beladung) auf gekappter Leiter ---
     df_knee = df[df.max_link_length <= args.max_link_length].copy()
@@ -392,8 +425,8 @@ def main():
     sens_df.to_csv(results_dir / "sensitivity_vs_topography.csv", index=False)
 
     if cand_grades is not None:
-        plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, results_dir)
-    plot_knee_overview(curves, sections, results_dir)
+        plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, results_dir, version)
+    plot_knee_overview(curves, sections, results_dir, version)
 
     # --- Konsolen-Zusammenfassung fuer paper_findings.md ---
     print("\n=== Relative Abweichung zur 250-m-Stufe [%] (Auszug: 50 m, 100 m, 1000 m) ===")
