@@ -246,7 +246,7 @@ def plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, output_d
     yerr = np.vstack([c250 - c1000, c50 - c250])  # unten bis 1000 m, oben bis 50 m
     ax_mid.errorbar(gx, c250, yerr=yerr, fmt="o", ms=6, color=COL_SENS, ecolor=COL_SENS,
                     elinewidth=1.3, capsize=3, zorder=4,
-                    label="loaded, 250 m grid (bar: 50–1000 m)")
+                    label="loaded, 250 m grid (bar top: 50 m, bottom: 1000 m)")
     cf = df[(df.section == "flat") & (df.loading == "loaded")].set_index("max_link_length").kWh_per_km
     if not cf.empty:
         ax_mid.errorbar([0.0], [cf.loc[250]],
@@ -259,6 +259,9 @@ def plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, output_d
     plt.setp(ax_mid.get_xticklabels(), visible=False)
 
     # --- ZEILE 3: Knie (einheitliche Markergroesse), empty als graue Referenz ---
+    # Anker: 250-m-Kalibrierskala — die Pointe "Knie ≈ Kalibrierskala" wird sichtbar
+    ax_bot.axhline(REFERENCE_LINK_LENGTH_M, color="black", ls=":", lw=1.1, zorder=2,
+                   label="250 m calibration scale")
     subE = knee_df[knee_df.loading == "empty"].dropna(subset=["knee_link_length_m"]).copy()
     subE["grade_pct"] = subE.section.map(grade_pct)
     ax_bot.scatter(subE.grade_pct, subE.knee_link_length_m, marker="x", s=36, zorder=3,
