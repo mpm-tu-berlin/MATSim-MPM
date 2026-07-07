@@ -17,16 +17,20 @@ Eingaben:
   - selected_sections_features.csv der ZUGEHOERIGEN Auswahl (Hm/km, sigma_g je
     Sektion); Default = kanonischer Run 182750 im Netzgen-Worktree.
 
-Ausgaben (alle in results-dir):
-  - sensitivity_and_knee.png/pdf      Kernfigur (3 Zeilen ueber mittlere abs.
-                                      Steigung): Netz-Steigungsverteilung /
-                                      Verbrauch [kWh/km] mit Gitter-Bandbreite /
-                                      Knie-Linklaenge
-  - energy_relative_to_250m.png/pdf   Relativdarstellung je Sektion
-  - knee_analysis.png/pdf             Rohdaten + Spline + Knie (Uebersicht)
-  - knee_points.csv                   je Kurve: Knie + Topografie-Merge
-  - relative_to_250m.csv              volle Relativ-Tabelle fuer paper_findings
-  - sensitivity_vs_topography.csv     Spanne 50<->1000 m je Sektion
+Figuren werden versioniert (_V1, _V2, … — nie ueberschreiben) und bewusst OHNE
+In-Grafik-Beschriftungen erzeugt (nur Achsen/Legende), damit sie leicht in
+TikZ/LaTeX uebernommen werden koennen; Erlaeuterungen gehoeren in den Text.
+
+Ausgaben (alle in results-dir, <N> = Laufversion):
+  - sensitivity_and_knee_V<N>.png/pdf  Kernfigur (3 Zeilen ueber mittlere abs.
+                                       Steigung): Netz-Steigungsverteilung /
+                                       Verbrauch [kWh/km] mit Gitter-Bandbreite /
+                                       Knie-Linklaenge
+  - energy_relative_to_250m_V<N>.png/pdf  Relativdarstellung je Sektion
+  - knee_analysis_V<N>.png/pdf          Rohdaten + Spline + Knie (Uebersicht)
+  - knee_points.csv                    je Kurve: Knie + Topografie-Merge
+  - relative_to_250m.csv               volle Relativ-Tabelle fuer paper_findings
+  - sensitivity_vs_topography.csv      Spanne 50<->1000 m je Sektion
 """
 
 import argparse
@@ -162,8 +166,6 @@ def plot_relative(rel_df, sections, output_dir, version=None):
         ax.grid(True, alpha=0.3, which="both")
     axes[0].set_ylabel("Energy relative to 250 m step [%]", fontsize=12)
     axes[1].legend(loc="upper right", fontsize=7, ncol=2, title="section")
-    fig.suptitle("Discretisation sensitivity relative to the 250 m calibration scale",
-                 fontsize=13)
     fig.tight_layout()
     _savefig(fig, output_dir, "energy_relative_to_250m", version)
     plt.close(fig)
@@ -210,15 +212,8 @@ def plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, output_d
     def grade_pct(section):
         return 100.0 * float(feats.loc[section, "g_abs_mean"])
 
-    COL_SENS = "#C0392B"   # crimson — Sensitivitaet (linke Achse)
-    COL_KNEE = "#21618C"   # blau    — Knie (rechte Achse)
-
-    # Knie-Verlaesslichkeit = loaded-Kurven-Spread je Sektion (scharfes Knie -> gross)
-    spread = {}
-    for s in feats.index:
-        sub = df[(df.section == s) & (df.loading == "loaded")]
-        if not sub.empty:
-            spread[s] = float(sub.kWh_per_km.max() - sub.kWh_per_km.min())
+    COL_SENS = "#C0392B"   # crimson — Verbrauch
+    COL_KNEE = "#21618C"   # blau    — Knie
 
     def cons(section, L, loading="loaded"):
         sub = df[(df.section == section) & (df.loading == loading)]
@@ -235,18 +230,13 @@ def plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, output_d
     ax_mid = fig.add_subplot(gs[1], sharex=ax_top)
     ax_bot = fig.add_subplot(gs[2], sharex=ax_top)
 
-    # --- ZEILE 1: Netz-Steigungsverteilung ---
-    share_lt1 = float((cand_grades < 1.0).mean()) * 100.0
+    # --- ZEILE 1: Netz-Steigungsverteilung (Rug = 20 Sektionen) ---
     ax_top.hist(cand_grades, bins=np.arange(0, cand_grades.max() + 0.2, 0.2),
                 color="#7f8c8d", alpha=0.6, edgecolor="white", linewidth=0.4)
     ax_top.axvline(1.0, color="black", ls=":", lw=1)
-    ax_top.text(1.05, ax_top.get_ylim()[1] * 0.78,
-                f"{share_lt1:.0f} % der Routen < 1 %", fontsize=9)
     for s in feats.index:
         ax_top.axvline(grade_pct(s), ymin=0, ymax=0.14, color=COL_KNEE, lw=0.8, alpha=0.7)
-    ax_top.set_ylabel("Netz-\nrouten", fontsize=10)
-    ax_top.set_title("German long-haul network is mostly flat — the grid only matters "
-                     "on the steep tail", fontsize=12)
+    ax_top.set_ylabel("Route count", fontsize=10)
     plt.setp(ax_top.get_xticklabels(), visible=False)
 
     # --- ZEILE 2: Verbrauch [kWh/km], Punkt=250 m, Balken=Gitter-Bandbreite 50-1000 m ---
@@ -256,61 +246,34 @@ def plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, output_d
     yerr = np.vstack([c250 - c1000, c50 - c250])  # unten bis 1000 m, oben bis 50 m
     ax_mid.errorbar(gx, c250, yerr=yerr, fmt="o", ms=6, color=COL_SENS, ecolor=COL_SENS,
                     elinewidth=1.3, capsize=3, zorder=4,
-                    label="consumption @ 250 m grid  (bar: 50 m top … 1000 m bottom)")
+                    label="loaded, 250 m grid (bar: 50–1000 m)")
     cf = df[(df.section == "flat") & (df.loading == "loaded")].set_index("max_link_length").kWh_per_km
     if not cf.empty:
         ax_mid.errorbar([0.0], [cf.loc[250]],
                         yerr=[[cf.loc[250] - cf.loc[1000]], [cf.loc[50] - cf.loc[250]]],
                         fmt="^", ms=8, color="grey", ecolor="grey", capsize=3, zorder=4,
-                        label="flat control (grid-independent)")
+                        label="flat control")
     ax_mid.set_ylabel("Loaded consumption\n[kWh/km]", fontsize=11)
     ax_mid.grid(True, alpha=0.25)
     ax_mid.legend(loc="upper left", fontsize=9, framealpha=0.9)
-    span = c50 - c1000
-    ax_mid.annotate(f"grid range (50→1000 m) grows\nfrom {span.min():.2f} to "
-                    f"{span.max():.2f} kWh/km",
-                    xy=(gx[-1], c50[-1]), xytext=(-6, -2), textcoords="offset points",
-                    ha="right", fontsize=8, color=COL_SENS, style="italic")
-    # Begruendung loaded-only: konservativ (max Verbrauch UND max Gitter-Sensitivitaet,
-    # da Gradenergie ∝ Masse; empty-Spread ~3x kleiner)
-    ax_mid.text(0.015, 0.05, "loaded only = conservative bound\n(highest consumption & grid "
-                "sensitivity; grade energy ∝ mass)",
-                transform=ax_mid.transAxes, fontsize=7.5, style="italic", color="#555555",
-                va="bottom")
     plt.setp(ax_mid.get_xticklabels(), visible=False)
 
-    # --- ZEILE 3: Knie. empty (blass, unzuverlaessig) als Referenz + loaded (belastbar) ---
-    # empty-Knie zuerst, klein/grau: sie streuen stark (sigma~79 m), weil die
-    # empty-Kurve fast flach ist (Spread ~3x kleiner) -> Knie rauschdominiert.
+    # --- ZEILE 3: Knie (einheitliche Markergroesse), empty als graue Referenz ---
     subE = knee_df[knee_df.loading == "empty"].dropna(subset=["knee_link_length_m"]).copy()
     subE["grade_pct"] = subE.section.map(grade_pct)
-    ax_bot.scatter(subE.grade_pct, subE.knee_link_length_m, marker="x", s=32, zorder=3,
-                   color="#9e9e9e", linewidths=1.2,
-                   label="empty knee (curve too flat → unreliable)")
+    ax_bot.scatter(subE.grade_pct, subE.knee_link_length_m, marker="x", s=36, zorder=3,
+                   color="#9e9e9e", linewidths=1.2, label="empty knee")
 
     subK = knee_df[knee_df.loading == "loaded"].dropna(subset=["knee_link_length_m"]).copy()
     subK["grade_pct"] = subK.section.map(grade_pct)
-    subK["spread"] = subK.section.map(spread)
-    sizes = 25 + 380 * subK["spread"]
-    ax_bot.scatter(subK.grade_pct, subK.knee_link_length_m, marker="D", s=sizes, zorder=4,
-                   facecolors=COL_KNEE, edgecolors="black", linewidths=0.6, alpha=0.85,
-                   label="loaded knee (bigger = sharper/more reliable)")
-    w = subK["spread"].values
-    xk, yk = subK.grade_pct.values, subK.knee_link_length_m.values
-    W = np.diag(w)
-    Xk = np.vstack([xk, np.ones_like(xk)]).T
-    bk = np.linalg.solve(Xk.T @ W @ Xk, Xk.T @ W @ yk)
-    xr = np.linspace(0, subK.grade_pct.max(), 50)
-    ax_bot.plot(xr, bk[0] * xr + bk[1], color=COL_KNEE, ls="--", lw=1.6, zorder=3,
-                label="loaded knee weighted trend")
-    ax_bot.text(0.98, 0.08, f"loaded knee ≈ {bk[0]:.0f}·grade + {bk[1]:.0f} m  (weak, ρ=0,28 n.s.)",
-                transform=ax_bot.transAxes, ha="right", va="bottom",
-                fontsize=9, color=COL_KNEE, fontweight="bold")
+    ax_bot.scatter(subK.grade_pct, subK.knee_link_length_m, marker="D", s=55, zorder=4,
+                   facecolors=COL_KNEE, edgecolors="black", linewidths=0.6, alpha=0.9,
+                   label="loaded knee")
     ax_bot.set_ylabel("Knee link\nlength [m]", fontsize=11, color=COL_KNEE)
     ax_bot.tick_params(axis="y", colors=COL_KNEE)
     ax_bot.set_ylim(0, 500)
     ax_bot.grid(True, alpha=0.25)
-    ax_bot.legend(loc="upper left", fontsize=8, framealpha=0.9, ncol=1)
+    ax_bot.legend(loc="upper left", fontsize=8, framealpha=0.9)
     ax_bot.set_xlabel("Mean absolute grade [%]", fontsize=12)
 
     ax_top.set_xlim(-0.1, x_max)
@@ -336,7 +299,6 @@ def plot_knee_overview(curves, sections, output_dir, version=None):
     ax.set_xticklabels([str(x) for x in link_lengths], rotation=45, fontsize=8)
     ax.set_xlabel("Max. allowed link length [m]", fontsize=12)
     ax.set_ylabel("Energy consumption [kWh/km]", fontsize=12)
-    ax.set_title("Raw + spline-smoothed curves with Kneedle knees (20 sections)", fontsize=13)
     ax.grid(True, alpha=0.3, which="both")
     ax.legend(loc="upper right", fontsize=6, ncol=3)
     fig.tight_layout()
