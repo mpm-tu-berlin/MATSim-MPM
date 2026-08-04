@@ -36,26 +36,51 @@ def paare(xs, ys, dx=2, dy=2, je_zeile=5):
 
 
 def schreibe_fig3(df, knee, cand, pfad):
-    """Dreizeilige Kernfigur als groupplot (Histogramm/Verbrauch/Knie)."""
+    """Dreizeilige Kernfigur, Variante A (2026-08-04): Histogramm /
+    relative Verbrauchs-Aufloesungs-Kurven (log-x, Knie-IQR-Band) /
+    Spanne vs. Steigung mit Fit-Gerade. Empty-Knees (Kneedle auf fast
+    flacher Kurve = Rauschen) sind bewusst nicht mehr enthalten."""
     kl = knee[knee.loading == "loaded"].dropna(
         subset=["knee_link_length_m"]).sort_values("g_abs_mean")
-    ke = knee[knee.loading == "empty"].dropna(
-        subset=["knee_link_length_m"]).sort_values("g_abs_mean")
     gx = kl.g_abs_mean.values * 100.0
-    secs = kl.section.values
+    secs = list(kl.section.values)
     x_max = gx.max() + 0.3
+    laengen = sorted(df.max_link_length.unique())
 
-    def cons(sec, L):
-        v = df[(df.section == sec) & (df.loading == "loaded") &
+    def cons(sec, loading, L):
+        v = df[(df.section == sec) & (df.loading == loading) &
                (df.max_link_length == L)].kWh_per_km
         return float(v.iloc[0])
 
-    c250 = np.array([cons(s, 250) for s in secs])
-    c50 = np.array([cons(s, 50) for s in secs])
-    c1000 = np.array([cons(s, 1000) for s in secs])
-    f250, f50, f1000 = (cons("flat", L) for L in (250, 50, 1000))
-    y2min = min(c1000.min(), f1000) - 0.06
-    y2max = max(c50.max(), f50) + 0.06
+    def rel_kurve(sec):
+        e250 = cons(sec, "loaded", 250)
+        return [(L, (cons(sec, "loaded", L) / e250 - 1.0) * 100.0)
+                for L in laengen]
+
+    def spanne(sec, loading):
+        return ((cons(sec, loading, 50) - cons(sec, loading, 1000))
+                / cons(sec, loading, 250) * 100.0)
+
+    kq1, kq3 = kl.knee_link_length_m.quantile([0.25, 0.75])
+    alle_rel = [v for s in secs for _, v in rel_kurve(s)]
+    y2min, y2max = min(alle_rel) - 1.5, max(alle_rel) + 1.5
+
+    # Highlights: flachste / mediane / steilste Sektion
+    hi = {secs[0]: ("fighia", "flattest"),
+          secs[len(secs) // 2]: ("fighib", "median"),
+          secs[-1]: ("figsens", "steepest")}
+
+    def kurve_tex(sec, stil, forget=False):
+        pts = paare(*zip(*rel_kurve(sec)), dx=0, dy=2, je_zeile=6)
+        f = ", forget plot" if forget else ""
+        return f"\\addplot[{stil}, no marks{f}] coordinates {{\n{pts}\n}};"
+
+    grau = "\n".join(kurve_tex(s, "black!35, line width=0.5pt", True)
+                     for s in secs if s not in hi)
+    bunt = "\n".join(
+        kurve_tex(s, f"{hi[s][0]}, line width=1.1pt") +
+        f"\n\\addlegendentry{{{hi[s][1]} ({g:.1f}\\,\\%)}}"
+        for s, g in zip(secs, gx) if s in hi)
 
     # Histogramm wie matplotlib: Binbreite 0,2 %
     kanten = np.arange(0, cand.max() + 0.2, 0.2)
@@ -68,20 +93,20 @@ def schreibe_fig3(df, knee, cand, pfad):
         f"(axis cs:{g:.2f},0) -- (axis cs:{g:.2f},{0.14 * hmax:.1f});"
         for g in gx)
 
-    tab = "\n".join(
-        f"{g:.2f} {c:.3f} {cp:.3f} {cm:.3f}"
-        for g, c, cp, cm in zip(gx, c250, c50 - c250, c250 - c1000))
+    sp_l = paare(gx, [spanne(s, "loaded") for s in secs], dy=1)
+    sp_e = paare(gx, [spanne(s, "empty") for s in secs], dy=1)
 
     tex = f"""% Auto-generiert von plot_tikz_fig34.py aus
 % energy_results_summary.csv / knee_points.csv /
 % candidate_paths_features.csv (Run 182750). Nicht von Hand editieren.
+% Variante A (2026-08-04): Kurven-Panel + Spannen-Panel, Empty-Knees raus.
 \\begin{{tikzpicture}}
 \\definecolor{{figsens}}{{HTML}}{{{COL_SENS}}}
 \\definecolor{{figknee}}{{HTML}}{{{COL_KNEE}}}
-\\begin{{groupplot}}[group style={{group size=1 by 3,
-    x descriptions at=edge bottom, vertical sep=5pt}},
+\\definecolor{{fighia}}{{HTML}}{{1E8449}}
+\\definecolor{{fighib}}{{HTML}}{{B7950B}}
+\\begin{{groupplot}}[group style={{group size=1 by 3, vertical sep=26pt}},
   width=0.84\\columnwidth, scale only axis,
-  xmin=-0.15, xmax={x_max:.2f},
   tick label style={{font=\\scriptsize}},
   label style={{font=\\footnotesize}},
   legend style={{font=\\scriptsize, draw=none, fill=white,
@@ -90,6 +115,7 @@ def schreibe_fig3(df, knee, cand, pfad):
 ]
 % --- Zeile 1: Netz-Steigungsverteilung (1707 Kandidaten) + Sektions-Rug
 \\nextgroupplot[height=1.5cm, ylabel={{Route count}},
+  xmin=-0.15, xmax={x_max:.2f}, xlabel={{Mean absolute grade [\\%]}},
   ymin=0, ymax={hmax:.0f}, ytick={{0,400,800}}, grid=none]
 \\addplot[ybar interval, fill=black!30, draw=white, line width=0.2pt]
   coordinates {{
@@ -97,48 +123,44 @@ def schreibe_fig3(df, knee, cand, pfad):
 }};
 \\draw[densely dotted, black] (axis cs:1,0) -- (axis cs:1,{hmax:.0f});
 {rug}
-% --- Zeile 2: Verbrauch, Punkt = 250-m-Gitter, Balken = 50/1000 m
-\\nextgroupplot[height=3.4cm, ylabel={{Loaded consumption [kWh/km]}},
-  ymin={y2min:.2f}, ymax={y2max:.2f},
-  legend style={{at={{(0.02,0.97)}}, anchor=north west}}]
-\\addplot[only marks, mark=*, mark size=1.8pt, color=figsens,
-  error bars/.cd, y dir=both, y explicit,
-  error bar style={{line width=0.8pt}}, error mark options={{
-    rotate=90, mark size=1.6pt, line width=0.8pt}}]
-  table[x=x, y=y, y error plus=eyp, y error minus=eym, row sep=newline]{{
-x y eyp eym
-{tab}
-}};
-\\addlegendentry{{loaded, 250\\,m grid (bar top: 50\\,m, bottom: 1000\\,m)}}
-\\addplot[only marks, mark=triangle*, mark size=2.4pt, color=black!45,
-  error bars/.cd, y dir=both, y explicit,
-  error bar style={{line width=0.8pt}}, error mark options={{
-    rotate=90, mark size=1.6pt, line width=0.8pt}}]
-  table[x=x, y=y, y error plus=eyp, y error minus=eym, row sep=newline]{{
-x y eyp eym
-0.00 {f250:.3f} {f50 - f250:.3f} {f250 - f1000:.3f}
+% --- Zeile 2: relative Verbrauchs-Aufloesungs-Kurven (loaded)
+\\nextgroupplot[height=3.3cm, xmode=log, xmin=47, xmax=1060,
+  xtick={{50,100,250,500,1000}}, xticklabels={{50,100,250,500,1000}},
+  minor xtick={{}}, xlabel={{Maximum link length [m]}},
+  ylabel={{Deviation from 250\\,m grid [\\%]}},
+  ymin={y2min:.1f}, ymax={y2max:.1f},
+  legend style={{at={{(0.02,0.03)}}, anchor=south west}}]
+\\fill[figknee, fill opacity=0.12]
+  (axis cs:{kq1:.0f},{y2min:.1f}) rectangle (axis cs:{kq3:.0f},{y2max:.1f});
+\\addlegendimage{{area legend, fill=figknee!25, draw=none}}
+\\addlegendentry{{loaded knee IQR ({kq1:.0f}--{kq3:.0f}\\,m)}}
+\\addplot[densely dotted, black, no marks, line width=0.7pt]
+  coordinates {{(250,{y2min:.1f}) (250,{y2max:.1f})}};
+\\addlegendentry{{250\\,m calibration scale}}
+{grau}
+{bunt}
+\\addplot[black, densely dashed, line width=0.8pt, no marks] coordinates {{
+{paare(*zip(*[(L, (cons("flat", "loaded", L) / cons("flat", "loaded", 250) - 1.0) * 100.0) for L in laengen]), dx=0, dy=2, je_zeile=6)}
 }};
 \\addlegendentry{{flat control}}
-% --- Zeile 3: Knie-Linklaenge
-\\nextgroupplot[height=2.6cm, ylabel={{Knee link length [m]}},
-  ymin=0, ymax=500, xlabel={{Mean absolute grade [\\%]}},
-  ylabel style={{color=figknee, font=\\footnotesize}},
-  yticklabel style={{color=figknee}},
-  legend columns=3,
-  legend style={{at={{(0.98,0.06)}}, anchor=south east}}]
-\\addplot[densely dotted, black, no marks, line width=0.7pt]
-  coordinates {{(-0.15,250) ({x_max:.2f},250)}};
-\\addlegendentry{{250\\,m calibration scale}}
+% --- Zeile 3: Spanne 50-1000 m vs. Steigung, Fit 4.0*g+9.8
+\\nextgroupplot[height=2.4cm, xmin=-0.15, xmax={x_max:.2f},
+  ymin=0, ymax=36, xlabel={{Mean absolute grade [\\%]}},
+  ylabel={{50--1000\\,m span [\\%]}},
+  legend style={{at={{(0.02,0.97)}}, anchor=north west}}]
+\\addplot[figsens, densely dashed, line width=0.7pt, no marks]
+  coordinates {{(0,9.8) ({x_max:.2f},{4.0 * x_max + 9.8:.1f})}};
+\\addlegendentry{{fit $4.0\\cdot\\overline{{|g|}}+9.8$}}
+\\addplot[only marks, mark=diamond*, mark size=2.2pt, color=black,
+  fill=figsens] coordinates {{
+{sp_l}
+}};
+\\addlegendentry{{loaded}}
 \\addplot[only marks, mark=x, mark size=2.2pt, color=black!45,
   line width=0.8pt] coordinates {{
-{paare(ke.g_abs_mean.values * 100.0, ke.knee_link_length_m.values, dy=0)}
+{sp_e}
 }};
-\\addlegendentry{{empty knee}}
-\\addplot[only marks, mark=diamond*, mark size=2.4pt, color=black,
-  fill=figknee] coordinates {{
-{paare(gx, kl.knee_link_length_m.values, dy=0)}
-}};
-\\addlegendentry{{loaded knee}}
+\\addlegendentry{{empty}}
 \\end{{groupplot}}
 \\end{{tikzpicture}}
 """
