@@ -61,22 +61,20 @@ def schreibe_fig3(df, knee, cand, pfad):
         return ((cons(sec, loading, 50) - cons(sec, loading, 1000))
                 / cons(sec, loading, 250) * 100.0)
 
-    kq1, kq3 = kl.knee_link_length_m.quantile([0.25, 0.75])
-    alle_rel = [v for s in secs for _, v in rel_kurve(s)]
-    y2min, y2max = min(alle_rel) - 1.5, max(alle_rel) + 1.5
-
-    # Highlights: flachste / mediane / steilste Sektion
+    # Nur drei repraesentative Kurven (User-Entscheid 2026-08-04):
+    # flachste/mediane/steilste Sektion; kein Grau-Spaghetti, kein
+    # Flat-Control, kein IQR-Band (250-m-Linie genuegt).
     hi = {secs[0]: ("fighia", "flattest"),
           secs[len(secs) // 2]: ("fighib", "median"),
           secs[-1]: ("figsens", "steepest")}
+    alle_rel = [v for s in hi for _, v in rel_kurve(s)]
+    y2min, y2max = min(alle_rel) - 1.5, max(alle_rel) + 1.5
 
     def kurve_tex(sec, stil, forget=False):
         pts = paare(*zip(*rel_kurve(sec)), dx=0, dy=2, je_zeile=6)
         f = ", forget plot" if forget else ""
         return f"\\addplot[{stil}, no marks{f}] coordinates {{\n{pts}\n}};"
 
-    grau = "\n".join(kurve_tex(s, "black!35, line width=0.5pt", True)
-                     for s in secs if s not in hi)
     bunt = "\n".join(
         kurve_tex(s, f"{hi[s][0]}, line width=1.1pt") +
         f"\n\\addlegendentry{{{hi[s][1]} ({g:.1f}\\,\\%)}}"
@@ -130,19 +128,10 @@ def schreibe_fig3(df, knee, cand, pfad):
   ylabel={{Deviation from 250\\,m grid [\\%]}},
   ymin={y2min:.1f}, ymax={y2max:.1f},
   legend style={{at={{(0.02,0.03)}}, anchor=south west}}]
-\\fill[figknee, fill opacity=0.12]
-  (axis cs:{kq1:.0f},{y2min:.1f}) rectangle (axis cs:{kq3:.0f},{y2max:.1f});
-\\addlegendimage{{area legend, fill=figknee!25, draw=none}}
-\\addlegendentry{{loaded knee IQR ({kq1:.0f}--{kq3:.0f}\\,m)}}
 \\addplot[densely dotted, black, no marks, line width=0.7pt]
   coordinates {{(250,{y2min:.1f}) (250,{y2max:.1f})}};
 \\addlegendentry{{250\\,m calibration scale}}
-{grau}
 {bunt}
-\\addplot[black, densely dashed, line width=0.8pt, no marks] coordinates {{
-{paare(*zip(*[(L, (cons("flat", "loaded", L) / cons("flat", "loaded", 250) - 1.0) * 100.0) for L in laengen]), dx=0, dy=2, je_zeile=6)}
-}};
-\\addlegendentry{{flat control}}
 % --- Zeile 3: Spanne 50-1000 m vs. Steigung, Fit 4.0*g+9.8
 \\nextgroupplot[height=2.4cm, xmin=-0.15, xmax={x_max:.2f},
   ymin=0, ymax=36, xlabel={{Mean absolute grade [\\%]}},
