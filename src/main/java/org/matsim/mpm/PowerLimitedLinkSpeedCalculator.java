@@ -21,7 +21,7 @@ import org.matsim.utils.objectattributes.attributable.Attributes;
  * Gleichgewichtsbedingung bei konstanter Geschwindigkeit v auf einem Link
  * mit Laengsneigung g = (z_to - z_from) / L:
  *
- *   P_mech_max = fa * v^3  +  m * g * (cr + grade) * v
+ *   P_mech_max = fa * v^3  +  m * g * (cr * cos(theta) + grade) * v
  *
  * wobei:
  *   fa          = 0.5 * rho_Luft * CdA   [kg/m]
@@ -71,7 +71,12 @@ public final class PowerLimitedLinkSpeedCalculator implements LinkSpeedCalculato
 
         // --- Steigung: sin(α) ≈ Δh / L (Kleinwinkelnaeherung, wie im Verbrauchsmodell) ---
         double grade         = computeGrade(link);
-        double totalResistC  = rollingC + grade;  // effektiver Gesamtwiderstandsbeiwert
+        // Rollwiderstand wirkt mit der Normalkraft m*g*cos(theta); grade = sin(theta)
+        // => cos(theta) = sqrt(1 - grade^2). Identisch zum Verbrauchsmodell
+        // (MpmDynamicBetDriveEnergyConsumption), damit beide Klassen dieselbe
+        // Gleichgewichtsgeschwindigkeit liefern.
+        double cosGrade      = Math.sqrt(1.0 - grade * grade);
+        double totalResistC  = rollingC * cosGrade + grade;  // effektiver Gesamtwiderstandsbeiwert
 
         // Bergab ohne positiven Kraftbedarf: Motorleistung ist nicht limitierend
         if (totalResistC <= 0.0) {
