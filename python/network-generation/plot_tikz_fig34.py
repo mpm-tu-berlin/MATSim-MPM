@@ -150,7 +150,7 @@ def schreibe_fig3(df, knee, cand, pfad):
   legend style={{at={{(0.02,0.97)}}, anchor=north west}}]
 \\addplot[figsens, densely dashed, line width=0.7pt, no marks]
   coordinates {{(0,9.8) ({x_max:.2f},{4.0 * x_max + 9.8:.1f})}};
-\\addlegendentry{{fit $4.0\\cdot\\overline{{|g|}}+9.8$}}
+\\addlegendentry{{fit $4\\cdot\\overline{{|g|}}+9.8$}}
 \\addplot[only marks, mark=diamond*, mark size=2.2pt, color=black,
   fill=figsens] coordinates {{
 {sp_l}
