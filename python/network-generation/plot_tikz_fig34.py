@@ -75,13 +75,13 @@ def schreibe_fig3(df, knee, cand, pfad):
     def kurve_tex(sec, stil, forget=False):
         pts = paare(*zip(*rel_kurve(sec)), dx=0, dy=2, je_zeile=6)
         f = ", forget plot" if forget else ""
-        return f"\\addplot[{stil}, no marks{f}] coordinates {{\n{pts}\n}};"
+        return f"\\addplot[{stil}{f}] coordinates {{\n{pts}\n}};"
 
-    # Legende: relative Kurve + absoluter 250-m-Verbrauch (Anwender-Anker)
+    # Marker zeigen die zwoelf diskreten Aufloesungsstufen
     bunt = "\n".join(
-        kurve_tex(s, f"{hi[s][0]}, line width=1.1pt") +
-        f"\n\\addlegendentry{{{hi[s][1]} ({g:.1f}\\,\\%, "
-        f"{cons(s, 'loaded', 250):.2f}\\,kWh/km)}}"
+        kurve_tex(s, f"{hi[s][0]}, line width=1.1pt, mark=*, "
+                     f"mark size=0.9pt") +
+        f"\n\\addlegendentry{{{hi[s][1]} ({g:.1f}\\,\\%)}}"
         for s, g in zip(secs, gx) if s in hi)
 
     # Horizontaler Boxplot der 20 Loaded-Knees auf der Linklaengen-Achse
