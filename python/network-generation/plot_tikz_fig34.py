@@ -36,10 +36,12 @@ def paare(xs, ys, dx=2, dy=2, je_zeile=5):
 
 
 def schreibe_fig3(df, knee, cand, pfad):
-    """Dreizeilige Kernfigur, Variante A (2026-08-04): Histogramm /
-    relative Verbrauchs-Aufloesungs-Kurven (log-x, Knie-IQR-Band) /
-    Spanne vs. Steigung mit Fit-Gerade. Empty-Knees (Kneedle auf fast
-    flacher Kurve = Rauschen) sind bewusst nicht mehr enthalten."""
+    """Zweizeilige Kernfigur, Variante A2 (2026-08-04): relative
+    Verbrauchs-Aufloesungs-Kurven (3 Sektionen, log-x, horizontaler
+    Knie-Boxplot auf der Linklaengen-Achse) / Spanne vs. Steigung mit
+    Fit-Gerade. Histogramm entfernt (Zahlen im Text); Empty-Knees
+    (Kneedle auf fast flacher Kurve = Rauschen) bewusst nicht enthalten.
+    cand wird nicht mehr genutzt (Signatur wegen main() beibehalten)."""
     kl = knee[knee.loading == "loaded"].dropna(
         subset=["knee_link_length_m"]).sort_values("g_abs_mean")
     gx = kl.g_abs_mean.values * 100.0
@@ -80,16 +82,30 @@ def schreibe_fig3(df, knee, cand, pfad):
         f"\n\\addlegendentry{{{hi[s][1]} ({g:.1f}\\,\\%)}}"
         for s, g in zip(secs, gx) if s in hi)
 
-    # Histogramm wie matplotlib: Binbreite 0,2 %
-    kanten = np.arange(0, cand.max() + 0.2, 0.2)
-    zaehl, _ = np.histogram(cand, bins=kanten)
-    hmax = float(zaehl.max()) * 1.08
-    hist = paare(kanten[:-1], zaehl, dx=1, dy=0, je_zeile=6)
-    hist += f"\n({kanten[-1]:.1f},{zaehl[-1]:.0f})"  # ybar interval: Endkante
-    rug = "\n".join(
-        f"\\draw[figknee, line width=0.5pt, opacity=0.7] "
-        f"(axis cs:{g:.2f},0) -- (axis cs:{g:.2f},{0.14 * hmax:.1f});"
-        for g in gx)
+    # Horizontaler Boxplot der 20 Loaded-Knees auf der Linklaengen-Achse
+    # (ersetzt das fruehere Knie-Scatter-Panel; User-Entscheid 2026-08-04)
+    kn = kl.knee_link_length_m
+    kq1, kmed, kq3 = kn.quantile([0.25, 0.5, 0.75])
+    kmin, kmax = kn.min(), kn.max()
+    ym = y2max - 3.0   # Box-Mitte im kurvenfreien oberen Bereich
+    bh, wh = 1.2, 0.6  # halbe Boxhoehe / halbe Whisker-Kappenhoehe
+    box = "\n".join([
+        f"\\draw[figknee, fill=figknee!15, line width=0.6pt] "
+        f"(axis cs:{kq1:.0f},{ym - bh:.1f}) rectangle "
+        f"(axis cs:{kq3:.0f},{ym + bh:.1f});",
+        f"\\draw[figknee, line width=0.9pt] "
+        f"(axis cs:{kmed:.0f},{ym - bh:.1f}) -- (axis cs:{kmed:.0f},{ym + bh:.1f});",
+        f"\\draw[figknee, line width=0.6pt] "
+        f"(axis cs:{kmin:.0f},{ym:.1f}) -- (axis cs:{kq1:.0f},{ym:.1f});",
+        f"\\draw[figknee, line width=0.6pt] "
+        f"(axis cs:{kq3:.0f},{ym:.1f}) -- (axis cs:{kmax:.0f},{ym:.1f});",
+        f"\\draw[figknee, line width=0.6pt] "
+        f"(axis cs:{kmin:.0f},{ym - wh:.1f}) -- (axis cs:{kmin:.0f},{ym + wh:.1f});",
+        f"\\draw[figknee, line width=0.6pt] "
+        f"(axis cs:{kmax:.0f},{ym - wh:.1f}) -- (axis cs:{kmax:.0f},{ym + wh:.1f});",
+        f"\\node[figknee, font=\\scriptsize, anchor=west] "
+        f"at (axis cs:{kmax + 10:.0f},{ym:.1f}) {{loaded knees}};",
+    ])
 
     sp_l = paare(gx, [spanne(s, "loaded") for s in secs], dy=1)
     sp_e = paare(gx, [spanne(s, "empty") for s in secs], dy=1)
@@ -97,13 +113,15 @@ def schreibe_fig3(df, knee, cand, pfad):
     tex = f"""% Auto-generiert von plot_tikz_fig34.py aus
 % energy_results_summary.csv / knee_points.csv /
 % candidate_paths_features.csv (Run 182750). Nicht von Hand editieren.
-% Variante A (2026-08-04): Kurven-Panel + Spannen-Panel, Empty-Knees raus.
+% Variante A2 (2026-08-04): Kurven-Panel (3 Sektionen + Knie-Boxplot)
+% + Spannen-Panel; Histogramm entfernt (Zahlen im Text, Schiefe steckt
+% in der Punktdichte des Spannen-Panels).
 \\begin{{tikzpicture}}
 \\definecolor{{figsens}}{{HTML}}{{{COL_SENS}}}
 \\definecolor{{figknee}}{{HTML}}{{{COL_KNEE}}}
 \\definecolor{{fighia}}{{HTML}}{{1E8449}}
 \\definecolor{{fighib}}{{HTML}}{{B7950B}}
-\\begin{{groupplot}}[group style={{group size=1 by 3, vertical sep=26pt}},
+\\begin{{groupplot}}[group style={{group size=1 by 2, vertical sep=26pt}},
   width=0.84\\columnwidth, scale only axis,
   tick label style={{font=\\scriptsize}},
   label style={{font=\\footnotesize}},
@@ -111,17 +129,7 @@ def schreibe_fig3(df, knee, cand, pfad):
     fill opacity=0.85, text opacity=1}},
   legend cell align=left, grid=major, grid style={{black!12}},
 ]
-% --- Zeile 1: Netz-Steigungsverteilung (1707 Kandidaten) + Sektions-Rug
-\\nextgroupplot[height=1.5cm, ylabel={{Route count}},
-  xmin=-0.15, xmax={x_max:.2f}, xlabel={{Mean absolute grade [\\%]}},
-  ymin=0, ymax={hmax:.0f}, ytick={{0,400,800}}, grid=none]
-\\addplot[ybar interval, fill=black!30, draw=white, line width=0.2pt]
-  coordinates {{
-{hist}
-}};
-\\draw[densely dotted, black] (axis cs:1,0) -- (axis cs:1,{hmax:.0f});
-{rug}
-% --- Zeile 2: relative Verbrauchs-Aufloesungs-Kurven (loaded)
+% --- Zeile 1: relative Verbrauchs-Aufloesungs-Kurven (loaded)
 \\nextgroupplot[height=3.3cm, xmode=log, xmin=47, xmax=1060,
   xtick={{50,100,250,500,1000}}, xticklabels={{50,100,250,500,1000}},
   minor xtick={{}}, xlabel={{Maximum link length [m]}},
@@ -132,7 +140,8 @@ def schreibe_fig3(df, knee, cand, pfad):
   coordinates {{(250,{y2min:.1f}) (250,{y2max:.1f})}};
 \\addlegendentry{{250\\,m calibration scale}}
 {bunt}
-% --- Zeile 3: Spanne 50-1000 m vs. Steigung, Fit 4.0*g+9.8
+{box}
+% --- Zeile 2: Spanne 50-1000 m vs. Steigung, Fit 4.0*g+9.8
 \\nextgroupplot[height=2.4cm, xmin=-0.15, xmax={x_max:.2f},
   ymin=0, ymax=36, xlabel={{Mean absolute grade [\\%]}},
   ylabel={{50--1000\\,m span [\\%]}},
