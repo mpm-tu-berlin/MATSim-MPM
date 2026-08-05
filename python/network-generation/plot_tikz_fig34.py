@@ -167,15 +167,21 @@ def schreibe_fig3(df, knee, cand, pfad):
 
 
 def schreibe_fig4(dec, pfad):
-    """Validitaets-Scatter dE_sim vs. dE_stat mit 45-Grad-Linie."""
+    """Validitaets-Scatter dE_sim vs. dE_stat mit 45-Grad-Linie.
+    Achsen fest bei +-15 % (User-Entscheid 2026-08-05); die wenigen
+    Punkte ausserhalb entfallen mit Caption-Hinweis im Paper."""
     ne = dec[dec.max_link_length != 250]
-    lim = max(ne.dE_sim_rel250_pct.abs().max(),
-              ne.dE_stat_rel250_pct.abs().max()) * 1.08
-    ld = ne[ne.loading == "loaded"]
-    em = ne[ne.loading == "empty"]
+    lim = 15.0
+    innen = ne[(ne.dE_sim_rel250_pct.abs() <= lim) &
+               (ne.dE_stat_rel250_pct.abs() <= lim)]
+    n_aussen = len(ne) - len(innen)
+    ld = innen[innen.loading == "loaded"]
+    em = innen[innen.loading == "empty"]
     tex = f"""% Auto-generiert von plot_tikz_fig34.py aus
 % grade_decomposition.csv. Nicht von Hand editieren.
 % Monochrom (User-Entscheid 2026-08-05, konsistent zu Fig. 3).
+% Achsen fest +-15 %; {n_aussen} von {len(ne)} Punkten ausserhalb
+% weggelassen (Caption-Hinweis im Paper).
 \\begin{{tikzpicture}}
 \\begin{{axis}}[
   width=0.86\\columnwidth, scale only axis, axis equal image,
