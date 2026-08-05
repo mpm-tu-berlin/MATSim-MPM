@@ -66,9 +66,13 @@ def schreibe_fig3(df, knee, cand, pfad):
     # Nur drei repraesentative Kurven (User-Entscheid 2026-08-04):
     # flachste/mediane/steilste Sektion; kein Grau-Spaghetti, kein
     # Flat-Control, kein IQR-Band (250-m-Linie genuegt).
-    hi = {secs[0]: ("fighia", "flattest"),
-          secs[len(secs) // 2]: ("fighib", "median"),
-          secs[-1]: ("figsens", "steepest")}
+    # Monochrom + Marker-Formen statt Farben (User-Entscheid 2026-08-05,
+    # IEEE-Stil): steepest schwarz/Quadrat, median grau/Dreieck,
+    # flattest hellgrau/Kreis.
+    hi = {secs[0]: ("black!35, mark=*, mark size=0.9pt", "flattest"),
+          secs[len(secs) // 2]:
+              ("black!60, mark=triangle*, mark size=1.3pt", "median"),
+          secs[-1]: ("black, mark=square*, mark size=1.0pt", "steepest")}
     alle_rel = [v for s in hi for _, v in rel_kurve(s)]
     y2min, y2max = min(alle_rel) - 1.5, max(alle_rel) + 1.5
 
@@ -79,8 +83,7 @@ def schreibe_fig3(df, knee, cand, pfad):
 
     # Marker zeigen die zwoelf diskreten Aufloesungsstufen
     bunt = "\n".join(
-        kurve_tex(s, f"{hi[s][0]}, line width=1.1pt, mark=*, "
-                     f"mark size=0.9pt") +
+        kurve_tex(s, f"{hi[s][0]}, line width=1.1pt") +
         f"\n\\addlegendentry{{{hi[s][1]} ({g:.1f}\\,\\%)}}"
         for s, g in zip(secs, gx) if s in hi)
 
@@ -91,21 +94,22 @@ def schreibe_fig3(df, knee, cand, pfad):
     kmin, kmax = kn.min(), kn.max()
     ym = y2max - 3.0   # Box-Mitte im kurvenfreien oberen Bereich
     bh, wh = 1.2, 0.6  # halbe Boxhoehe / halbe Whisker-Kappenhoehe
+    fb = "black!75"    # Boxplot monochrom, leicht abgesetzt von Kurven
     box = "\n".join([
-        f"\\draw[figknee, fill=figknee!15, line width=0.6pt] "
+        f"\\draw[{fb}, fill=black!8, line width=0.6pt] "
         f"(axis cs:{kq1:.0f},{ym - bh:.1f}) rectangle "
         f"(axis cs:{kq3:.0f},{ym + bh:.1f});",
-        f"\\draw[figknee, line width=0.9pt] "
+        f"\\draw[{fb}, line width=0.9pt] "
         f"(axis cs:{kmed:.0f},{ym - bh:.1f}) -- (axis cs:{kmed:.0f},{ym + bh:.1f});",
-        f"\\draw[figknee, line width=0.6pt] "
+        f"\\draw[{fb}, line width=0.6pt] "
         f"(axis cs:{kmin:.0f},{ym:.1f}) -- (axis cs:{kq1:.0f},{ym:.1f});",
-        f"\\draw[figknee, line width=0.6pt] "
+        f"\\draw[{fb}, line width=0.6pt] "
         f"(axis cs:{kq3:.0f},{ym:.1f}) -- (axis cs:{kmax:.0f},{ym:.1f});",
-        f"\\draw[figknee, line width=0.6pt] "
+        f"\\draw[{fb}, line width=0.6pt] "
         f"(axis cs:{kmin:.0f},{ym - wh:.1f}) -- (axis cs:{kmin:.0f},{ym + wh:.1f});",
-        f"\\draw[figknee, line width=0.6pt] "
+        f"\\draw[{fb}, line width=0.6pt] "
         f"(axis cs:{kmax:.0f},{ym - wh:.1f}) -- (axis cs:{kmax:.0f},{ym + wh:.1f});",
-        f"\\node[figknee, font=\\scriptsize, anchor=west] "
+        f"\\node[{fb}, font=\\scriptsize, anchor=west] "
         f"at (axis cs:{kmax + 10:.0f},{ym:.1f}) {{loaded knees}};",
     ])
 
@@ -117,12 +121,9 @@ def schreibe_fig3(df, knee, cand, pfad):
 % candidate_paths_features.csv (Run 182750). Nicht von Hand editieren.
 % Variante A2 (2026-08-04): Kurven-Panel (3 Sektionen + Knie-Boxplot)
 % + Spannen-Panel; Histogramm entfernt (Zahlen im Text, Schiefe steckt
-% in der Punktdichte des Spannen-Panels).
+% in der Punktdichte des Spannen-Panels). Seit V11 monochrom
+% (Graustufen + Marker-Formen, User-Entscheid 2026-08-05).
 \\begin{{tikzpicture}}
-\\definecolor{{figsens}}{{HTML}}{{{COL_SENS}}}
-\\definecolor{{figknee}}{{HTML}}{{{COL_KNEE}}}
-\\definecolor{{fighia}}{{HTML}}{{1E8449}}
-\\definecolor{{fighib}}{{HTML}}{{B7950B}}
 \\begin{{groupplot}}[group style={{group size=1 by 2, vertical sep=26pt}},
   width=0.84\\columnwidth, scale only axis,
   tick label style={{font=\\scriptsize}},
@@ -148,15 +149,15 @@ def schreibe_fig3(df, knee, cand, pfad):
   ymin=0, ymax=36, xlabel={{Mean absolute grade [\\%]}},
   ylabel={{50--1000\\,m span [\\%]}},
   legend style={{at={{(0.02,0.97)}}, anchor=north west}}]
-\\addplot[figsens, densely dashed, line width=0.7pt, no marks]
+\\addplot[black, densely dashed, line width=0.7pt, no marks]
   coordinates {{(0,9.8) ({x_max:.2f},{4.0 * x_max + 9.8:.1f})}};
 \\addlegendentry{{fit $4\\cdot\\overline{{|g|}}+9.8$}}
 \\addplot[only marks, mark=diamond*, mark size=2.2pt, color=black,
-  fill=figsens] coordinates {{
+  fill=black] coordinates {{
 {sp_l}
 }};
 \\addlegendentry{{loaded}}
-\\addplot[only marks, mark=x, mark size=2.2pt, color=black!45,
+\\addplot[only marks, mark=x, mark size=2.2pt, color=black!50,
   line width=0.8pt] coordinates {{
 {sp_e}
 }};
