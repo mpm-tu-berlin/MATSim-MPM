@@ -197,12 +197,12 @@ def schreibe_fig4(dec, pfad):
 ]
 \\addplot[dotted, black, no marks, line width=0.4pt, forget plot]
   coordinates {{({-lim:.1f},{-lim:.1f}) ({lim:.1f},{lim:.1f})}};
-\\addplot[only marks, mark=o, mark size=1.1pt, color=black,
+\\addplot[only marks, mark=triangle, mark size=1.4pt, color=black,
   line width=0.5pt] coordinates {{
 {paare(ld.dE_sim_rel250_pct.values, ld.dE_stat_rel250_pct.values)}
 }};
 \\addlegendentry{{loaded}}
-\\addplot[only marks, mark=square, mark size=1.0pt, color=black!50,
+\\addplot[only marks, mark=o, mark size=1.0pt, color=black!50,
   line width=0.5pt] coordinates {{
 {paare(em.dE_sim_rel250_pct.values, em.dE_stat_rel250_pct.values)}
 }};
