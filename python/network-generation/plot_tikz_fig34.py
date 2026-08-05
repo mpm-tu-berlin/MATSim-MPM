@@ -144,14 +144,12 @@ def schreibe_fig3(df, knee, cand, pfad):
 \\addlegendentry{{250\\,m calibration scale}}
 {bunt}
 {box}
-% --- Zeile 2: Spanne 50-1000 m vs. Steigung, Fit 4.0*g+9.8
+% --- Zeile 2: Spanne 50-1000 m vs. Steigung (Fit-Gerade seit V12
+% entfernt, User-Entscheid 2026-08-05: Trend steckt in den Punkten)
 \\nextgroupplot[height=2.4cm, xmin=-0.15, xmax={x_max:.2f},
   ymin=0, ymax=36, xlabel={{Mean absolute grade [\\%]}},
   ylabel={{50--1000\\,m span [\\%]}},
   legend style={{at={{(0.02,0.97)}}, anchor=north west}}]
-\\addplot[black, densely dashed, line width=0.7pt, no marks]
-  coordinates {{(0,9.8) ({x_max:.2f},{4.0 * x_max + 9.8:.1f})}};
-\\addlegendentry{{fit $4\\cdot\\overline{{|g|}}+9.8$}}
 \\addplot[only marks, mark=diamond*, mark size=2.2pt, color=black,
   fill=black] coordinates {{
 {sp_l}
@@ -177,9 +175,8 @@ def schreibe_fig4(dec, pfad):
     em = ne[ne.loading == "empty"]
     tex = f"""% Auto-generiert von plot_tikz_fig34.py aus
 % grade_decomposition.csv. Nicht von Hand editieren.
+% Monochrom (User-Entscheid 2026-08-05, konsistent zu Fig. 3).
 \\begin{{tikzpicture}}
-\\definecolor{{figsens}}{{HTML}}{{{COL_SENS}}}
-\\definecolor{{figknee}}{{HTML}}{{{COL_KNEE}}}
 \\begin{{axis}}[
   width=0.86\\columnwidth, scale only axis, axis equal image,
   xmin={-lim:.1f}, xmax={lim:.1f}, ymin={-lim:.1f}, ymax={lim:.1f},
@@ -194,12 +191,12 @@ def schreibe_fig4(dec, pfad):
 ]
 \\addplot[dotted, black, no marks, line width=0.4pt, forget plot]
   coordinates {{({-lim:.1f},{-lim:.1f}) ({lim:.1f},{lim:.1f})}};
-\\addplot[only marks, mark=o, mark size=1.1pt, color=figsens,
+\\addplot[only marks, mark=o, mark size=1.1pt, color=black,
   line width=0.5pt] coordinates {{
 {paare(ld.dE_sim_rel250_pct.values, ld.dE_stat_rel250_pct.values)}
 }};
 \\addlegendentry{{loaded}}
-\\addplot[only marks, mark=square, mark size=1.0pt, color=figknee,
+\\addplot[only marks, mark=square, mark size=1.0pt, color=black!50,
   line width=0.5pt] coordinates {{
 {paare(em.dE_sim_rel250_pct.values, em.dE_stat_rel250_pct.values)}
 }};
