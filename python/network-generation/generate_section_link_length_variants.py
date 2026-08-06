@@ -96,6 +96,10 @@ WAYPOINT_SPACING_M = 2000.0  # Fuehrungs-Waypoints entlang der Referenzroute
 # nahm bei 250/400 m einen +4,2-km-Umweg ueber eine Parallelstrasse, weil ein
 # Waypoint dorthin snappte); Richtungsfahrbahnen (<50 m) bleiben drin.
 ROUTE_TUBE_M = 150.0
+# CLI-Override (--route-tube-m): GPS-basierte Referenzen (WP4-Telemetrie-Trips)
+# liegen lateral versetzt und grobe Stufen haben sparse Knoten — 150 m ist dort
+# zu eng (Schlauch bricht, Waypoint-Fallback baut Umwege). None = Default.
+TUBE_OVERRIDE = None
 
 
 # ==============================
@@ -639,7 +643,8 @@ def generate_variants_for_section(
 
         # Gefuehrter Pfad (Dijkstra durch Referenz-Waypoints, Schlauch um Referenzlinie)
         path = find_guided_path(full_nodes, full_links, new_start, new_end, ref_waypoints,
-                                ref_coords=ref_coords)
+                                ref_coords=ref_coords,
+                                tube_m=(TUBE_OVERRIDE or ROUTE_TUBE_M))
         if path is None:
             print(f"    WARNING: No path found between start and end. Skipping.")
             tmp_network_path.unlink(missing_ok=True)
@@ -708,11 +713,19 @@ def main():
     parser.add_argument("--link-lengths", type=str, default=None,
                         help="Comma-separated link lengths in meters "
                              "(Default: knie-orientierte Leiter 50..1000, s. LINK_LENGTHS)")
+    parser.add_argument("--route-tube-m", type=float, default=None,
+                        help="Schlauchradius [m] um die Referenzlinie "
+                             "(Default: ROUTE_TUBE_M=150)")
     parser.add_argument("--sections", type=str, default=None,
                         help="Nur diese Sektions-Labels (kommagetrennt, z.B. 'q5,q10'); "
                              "erlaubt parallele Instanzen mit disjunkten Teilmengen "
                              "(bereits existierende Varianten werden ohnehin uebersprungen)")
     args = parser.parse_args()
+
+    if args.route_tube_m:
+        global TUBE_OVERRIDE
+        TUBE_OVERRIDE = args.route_tube_m
+        print(f"Schlauchradius-Override: {TUBE_OVERRIDE:.0f} m")
 
     sections_dir = Path(args.sections_dir)
     if not sections_dir.is_absolute():

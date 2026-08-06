@@ -22,7 +22,6 @@ import pandas as pd
 
 _SCRIPT_DIR = Path(__file__).parent
 PROFILES_DIR = _SCRIPT_DIR / "data" / "realtrip_telemetry_profiles"
-LABELS = ["f22", "w24", "w43", "h27", "h19", "h30"]
 TARE_KG = 19000
 LINK_LENGTHS = [100, 250, 400]
 
@@ -37,7 +36,7 @@ def _import_module(name, filename):
 def trip_vehicles():
     meta = pd.read_csv(PROFILES_DIR / "trips_meta.csv").set_index("label")
     vehicles = {}
-    for label in LABELS:
+    for label in meta.index:
         total = int(round(meta.loc[label, "mass_t"] * 1000))
         mass = min(total, TARE_KG)
         vehicles[label] = {
@@ -57,6 +56,8 @@ def main():
     parser.add_argument("--eta-t", type=str, default=None)
     parser.add_argument("--recup-eff", type=float, default=None)
     parser.add_argument("--max-recup-frac", type=float, default=None)
+    parser.add_argument("--trips", type=str, default=None,
+                        help="Nur diese Labels (kommagetrennt)")
     parser.add_argument("--out-name", type=str,
                         default="realtrip_validation_results.csv")
     args = parser.parse_args()
@@ -95,11 +96,16 @@ def main():
     sim_dir = net_dir / "validation_sims"
     sim_dir.mkdir(exist_ok=True)
 
-    rme = _import_module("rme", "realtrip_measured_eval.py")
+    # robuster Loader (Eulerpfad) aus der Telemetrie-Eval — Fallback-geroutete
+    # Netze koennen Knoten doppelt besuchen
+    rme = _import_module("rmet", "realtrip_measured_eval_telemetry.py")
     align = pd.read_csv(net_dir / "realtrip_profile_validation.csv") \
         .drop_duplicates("trip").set_index("trip")
 
     vehicles = trip_vehicles()
+    if args.trips:
+        wanted = args.trips.split(",")
+        vehicles = {k: v for k, v in vehicles.items() if k in wanted}
     tasks = []
     for trip, vp in vehicles.items():
         direction = int(align.loc[trip, "direction"]) if trip in align.index else +1

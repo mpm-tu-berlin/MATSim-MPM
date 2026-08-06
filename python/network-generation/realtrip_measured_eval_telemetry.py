@@ -29,7 +29,6 @@ import matplotlib.pyplot as plt
 
 _SCRIPT_DIR = Path(__file__).parent
 PROFILES_DIR = _SCRIPT_DIR / "data" / "realtrip_telemetry_profiles"
-LABELS = ["f22", "w24", "w43", "h27", "h19", "h30"]
 
 
 def _import_module(name, filename):
@@ -39,23 +38,111 @@ def _import_module(name, filename):
     return mod
 
 
+def load_chain_profile(path):
+    """Robustes Ketten-Profil: wie rme.load_chain_profile, aber als
+    Eulerpfad (Hierholzer). Fallback-geroutete Netze koennen einen Knoten
+    zweimal besuchen (Selbstberuehrung) — der naive Kettenlauf oszilliert
+    dort endlos. Der Eulerpfad nutzt jede ungerichtete Kante genau einmal
+    und laeuft Mehrfachbesuche korrekt ab."""
+    with gzip.open(path, "rb") as f:
+        tree = ET.parse(f)
+    root = tree.getroot()
+    nodes = {n.get("id"): (float(n.get("x")), float(n.get("y")),
+                           float(n.get("z")) if n.get("z") else np.nan)
+             for n in root.find("nodes").findall("node")}
+    pair_link = {}
+    adj = {}
+    for l in root.find("links").findall("link"):
+        u, v = l.get("from"), l.get("to")
+        pair = frozenset((u, v))
+        if pair not in pair_link:
+            pair_link[pair] = l
+            adj.setdefault(u, []).append(v)
+            adj.setdefault(v, []).append(u)
+    # Endpunkte: Grad-1-Knoten mit maximalem Euklid-Abstand (doppelt
+    # befahrene Links wurden beim Export dedupliziert -> kurze Sackgassen-
+    # Stiche mit eigenen Grad-1-Spitzen sind moeglich; die echten Routen-
+    # Enden liegen raeumlich am weitesten auseinander)
+    deg1 = [n for n, nb in adj.items() if len(nb) == 1]
+    if len(deg1) < 2:
+        deg1 = sorted(adj, key=lambda n: len(adj[n]))[:4]
+    best_pair, best_d = None, -1.0
+    for i in range(len(deg1)):
+        for j in range(i + 1, len(deg1)):
+            a, b = deg1[i], deg1[j]
+            d = ((nodes[a][0] - nodes[b][0]) ** 2
+                 + (nodes[a][1] - nodes[b][1]) ** 2)
+            if d > best_d:
+                best_pair, best_d = (a, b), d
+    start, end = best_pair
+    # Kette = kuerzester Pfad Start->Ende (das faehrt auch die Sim);
+    # Stichkanten bleiben ausserhalb der s-Achse
+    import heapq
+    dist = {start: 0.0}
+    parent = {start: None}
+    heap = [(0.0, start)]
+    while heap:
+        d, v = heapq.heappop(heap)
+        if v == end:
+            break
+        if d > dist.get(v, float("inf")):
+            continue
+        for w in adj[v]:
+            nd = d + float(pair_link[frozenset((v, w))].get("length"))
+            if nd < dist.get(w, float("inf")):
+                dist[w] = nd
+                parent[w] = v
+                heapq.heappush(heap, (nd, w))
+    if end not in parent:
+        raise ValueError(f"{path}: kein Pfad zwischen den Endpunkten")
+    order = []
+    n = end
+    while n is not None:
+        order.append(n)
+        n = parent[n]
+    order.reverse()
+    n_off = len(pair_link) - (len(order) - 1)
+    if n_off:
+        print(f"    Hinweis: {n_off} Kanten ausserhalb der Hauptkette "
+              f"(deduplizierte Stichfahrten) — nicht in der s-Achse")
+    s = [0.0]
+    chain_links = []
+    for a, b in zip(order[:-1], order[1:]):
+        l = pair_link[frozenset((a, b))]
+        length = float(l.get("length"))
+        chain_links.append({"id": l.get("id"), "s0": s[-1], "s1": s[-1] + length,
+                            "elem_from": a, "elem_to": b})
+        s.append(s[-1] + length)
+    z = [nodes[n][2] for n in order]
+    return {"s": np.array(s), "z": np.array(z), "chain": chain_links,
+            "tree": tree, "root": root, "order": order,
+            "node_xy": {n: (nodes[n][0], nodes[n][1])
+                        for n in (order[0], order[-1])}}
+
+
 def main():
     parser = argparse.ArgumentParser(description="telemetry-Trips vs. Routen-Netze.")
     parser.add_argument("--networks-dir", type=str, required=True)
     parser.add_argument("--link-lengths", type=str, default="100,250,400")
+    parser.add_argument("--trips", type=str, default=None,
+                        help="Nur diese Labels (kommagetrennt); CSVs werden "
+                             "gemerged statt ueberschrieben")
     args = parser.parse_args()
 
     net_dir = Path(args.networks_dir)
     link_lengths = [int(x) for x in args.link_lengths.split(",")]
     rme = _import_module("rme", "realtrip_measured_eval.py")
     kpa = _import_module("kpa", "knee_point_analysis.py")
-    version = kpa._next_version(net_dir, base=f"profile_{LABELS[0]}_250m")
 
     # Energie-Ground-Truth aus dem Export-Meta (1-Hz-direkt) ins Format der
     # Bestands-Kette bringen (validation_sims liest *_kWh_per_km-Spalten)
     meta = pd.read_csv(PROFILES_DIR / "trips_meta.csv").set_index("label")
+    LABELS = list(meta.index)
+    if args.trips:
+        LABELS = [l for l in LABELS if l in args.trips.split(",")]
+    version = kpa._next_version(net_dir, base=f"profile_{LABELS[0]}_250m")
     energy_rows = []
-    for label in LABELS:
+    for label in meta.index:  # immer alle (auch bei --trips-Filter)
         m = meta.loc[label]
         energy_rows.append({
             "trip": label, "dist_km": m["dist_odo_km"],
@@ -82,7 +169,7 @@ def main():
             if not net_path.exists():
                 print(f"  WARNING: {net_path.name} fehlt — skip")
                 continue
-            prof = rme.load_chain_profile(net_path)
+            prof = load_chain_profile(net_path)
             if alignment is None:
                 alignment = rme.align_profiles(prof["s"], prof["z"], s_meas, z_meas)
             direction, offset, scale, corr = alignment
@@ -158,7 +245,11 @@ def main():
         print(f"{label}: fertig")
 
     df = pd.DataFrame(rows)
-    df.to_csv(net_dir / "realtrip_profile_validation.csv", index=False)
+    out_csv = net_dir / "realtrip_profile_validation.csv"
+    if args.trips and out_csv.exists():
+        old = pd.read_csv(out_csv)
+        df = pd.concat([old[~old["trip"].isin(LABELS)], df], ignore_index=True)
+    df.to_csv(out_csv, index=False)
     print("\n=== Hoehen-/Steigungs-Validierung (Netz vs. Telemetrie) ===")
     cols = ["trip", "max_link_length", "direction", "offset_m", "scale", "corr",
             "elev_bias_m", "elev_mae_debiased_m", "elev_rmse_debiased_m"] + \
