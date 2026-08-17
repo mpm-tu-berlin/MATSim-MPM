@@ -89,6 +89,16 @@ def sample_heights(dtm_path: str, lons, lats) -> np.ndarray:
         transformer = Transformer.from_crs(_DTM_QUERY_CRS, ds.crs, always_xy=True)
         xs, ys = transformer.transform(lons, lats)
         cols, rows = (~ds.transform) * (np.asarray(xs, float), np.asarray(ys, float))
+        # HALBPIXEL-KORREKTUR (Befund 2026-08-17): (~transform) zaehlt Pixel ab der
+        # ECKE, das Zentrum von Pixel 0 liegt bei 0,5. Die bilineare Interpolation
+        # unten mischt aber PIXELWERTE, die am Zentrum gemessen sind (das Raster
+        # traegt zudem AREA_OR_POINT=Point). Ohne diese Verschiebung wird die
+        # Hoehe systematisch ein halbes Pixel (10 m bei 20 m Raster) daneben
+        # abgetastet. Empirisch gegen 115.754 km Telemetrie bestaetigt: das
+        # Fehleroptimum lag bei dx -10 m / dy +5..10 m, genau der Halbpixel-Versatz;
+        # MAE 2,841 -> 2,399 m (-15,6 %), Median 1,361 -> 1,048 m (-23 %).
+        cols = cols - 0.5
+        rows = rows - 0.5
         cols = np.where(np.isfinite(cols), cols, -1e9)
         rows = np.where(np.isfinite(rows), rows, -1e9)
         c0 = np.floor(cols).astype("int64")
