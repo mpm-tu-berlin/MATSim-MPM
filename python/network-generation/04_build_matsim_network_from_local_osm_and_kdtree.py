@@ -197,10 +197,414 @@ def _edge_struct_ivals(row):
     return iv if isinstance(iv, list) else None
 
 
+# --- Korridoruebergreifende Bauwerksbehandlung -------------------------------
+# Befund 2026-08-17 (Telemetrie-Ground-Truth, 115.754 km): Die alte, rein
+# korridorlokale Linearisierung scheitert dort, wo das Bauwerk an einer Kreuzung
+# liegt. Bruecken sitzen typischerweise an Anschlussstellen; der Korridor
+# zwischen zwei Rampenknoten ist dann median nur 165 m lang und endet GENAU am
+# Bauwerk (59 % der Faelle: Span beginnt bei s=0, 58 %: endet am Korridorende).
+# Damit greift `z_a = zdense[i-1]` nicht mehr, der Fallback nimmt einen Punkt
+# AUF dem Bauwerk, und die Linearisierung wird zum Nulloperator (gemessen:
+# Spline-Abweichung 0,00 m an den schlimmsten Stellen, Netz median 6,3 m zu tief,
+# 91 % der Durchfahrten zu tief; Tunnel spiegelbildlich bis +38 m zu hoch).
+# Gilt fuer Bruecken UND Tunnel gleichermassen.
+
+STRUCT_GUARD_M = 25.0     # Zone neben dem Bauwerk, die als kontaminiert gilt
+                          # (Widerlager, Damm, Voreinschnitt) -> nicht anfitten
+STRUCT_FIT_M = 60.0       # Laenge der Zufahrt, ueber die der Anker robust
+                          # geschaetzt wird (Median-Steigung, extrapoliert)
+STRUCT_MIN_FIT_PTS = 4
+# Schutzmechanismen (Diagnose 2026-08-17): ohne sie erzeugt die Extrapolation auf
+# Kleinstbauwerken Unsinn (4,9-m-Region mit -142 % Deckenneigung) und blaeht den
+# Anstiegsueberschuss auf.
+STRUCT_MIN_LEN_M = 20.0        # darunter: lokal zwischen den Nachbarpunkten
+                               # interpolieren statt zwei Anker zu extrapolieren
+STRUCT_MAX_LIFT_M = 3.0        # max. Abweichung des extrapolierten Ankers vom
+                               # naechsten echten Nicht-Bauwerkspunkt
+STRUCT_MAX_GRADE_PCT = 8.0     # darueber gilt die Deckenlinie als unplausibel
+
+
+def _theil_sen(s, z):
+    """Robuste Ausgleichsgerade (Median der Paarsteigungen). Rueckgabe (m, b)."""
+    s = np.asarray(s, float); z = np.asarray(z, float)
+    ok = np.isfinite(s) & np.isfinite(z)
+    s, z = s[ok], z[ok]
+    n = s.size
+    if n < 2:
+        return (0.0, float(z[0])) if n else (0.0, float('nan'))
+    if n > 60:                      # Rechenzeit deckeln, Genauigkeit reicht
+        sel = np.linspace(0, n - 1, 60).astype(int)
+        s, z = s[sel], z[sel]
+        n = s.size
+    i, j = np.triu_indices(n, k=1)
+    ds = s[j] - s[i]
+    good = np.abs(ds) > 1e-9
+    if not good.any():
+        return 0.0, float(np.median(z))
+    slope = float(np.median((z[j] - z[i])[good] / ds[good]))
+    return slope, float(np.median(z - slope * s))
+
+
+class _CorridorIndex:
+    """Nachbarschaft der Korridore an ihren Endknoten (fuer Spruenge ueber
+    Kreuzungen hinweg)."""
+
+    def __init__(self, slices, all_lon, all_lat):
+        self.slices = slices
+        self.lon = np.asarray(all_lon, float)
+        self.lat = np.asarray(all_lat, float)
+        self.at_node = {}
+        for ci, sl in enumerate(slices):
+            path_nodes = sl[0]
+            self.at_node.setdefault(path_nodes[0], []).append((ci, 0))
+            self.at_node.setdefault(path_nodes[-1], []).append((ci, 1))
+
+    def n(self, ci):
+        return self.slices[ci][3]
+
+    def z_index(self, ci, k):
+        """globaler Index des k-ten Samples von Korridor ci."""
+        return self.slices[ci][2] + k
+
+    def bearing(self, ci, k0, k1):
+        i0, i1 = self.z_index(ci, k0), self.z_index(ci, k1)
+        dx = (self.lon[i1] - self.lon[i0]) * math.cos(
+            math.radians(0.5 * (self.lat[i0] + self.lat[i1])))
+        dy = self.lat[i1] - self.lat[i0]
+        return math.degrees(math.atan2(dy, dx))
+
+    def neighbours(self, ci, side):
+        """(cj, side_j) aller anderen Korridore am Endknoten `side` von ci."""
+        node = self.slices[ci][0][0 if side == 0 else -1]
+        return [(cj, sj) for (cj, sj) in self.at_node.get(node, [])
+                if not (cj == ci and sj == side)]
+
+
+def _structure_decks(slices, all_lon, all_lat, zall, junctions,
+                     guard_m=STRUCT_GUARD_M, fit_m=STRUCT_FIT_M,
+                     debug_rows=None):
+    """Bauwerke ueber Korridorgrenzen hinweg aufloesen und Deckenlinien setzen.
+
+    Rueckgabe:
+      forced   Liste je Korridor: (bool-Maske, z-Array) mit den Deckenhoehen
+      jz       dict Knoten-ID -> Hoehe fuer Kreuzungsknoten IM Bauwerk
+      stats    dict mit Zaehlern fuer die Log-Ausgabe
+    """
+    idx = _CorridorIndex(slices, all_lon, all_lat)
+    nC = len(slices)
+    is_st, runs = [], []
+    for ci, (path_nodes, node_s, start, n_samp, ss, spans) in enumerate(slices):
+        m = np.zeros(n_samp, bool)
+        for (a, b) in [(sp[0], sp[1]) for sp in spans]:
+            m[(ss >= a) & (ss <= b)] = True
+        is_st.append(m)
+        rr, k = [], 0
+        while k < n_samp:
+            if m[k]:
+                j = k
+                while j < n_samp and m[j]:
+                    j += 1
+                rr.append((k, j))
+                k = j
+            else:
+                k += 1
+        runs.append(rr)
+
+    forced = [(np.zeros(idx.n(ci), bool), np.full(idx.n(ci), np.nan))
+              for ci in range(nC)]
+    jz = {}
+    stats = dict(regions=0, multi_corridor=0, anchors_crossed=0,
+                 anchor_failed=0, junction_nodes=0, samples=0,
+                 short_local=0, lift_capped=0, grade_rejected=0,
+                 local_fallback=0)
+
+    def struct_at_end(ci, side):
+        """Run, der am Ende `side` von Korridor ci anliegt (oder None)."""
+        n = idx.n(ci)
+        for (a, b) in runs[ci]:
+            if side == 0 and a == 0:
+                return (a, b)
+            if side == 1 and b == n:
+                return (a, b)
+        return None
+
+    last_turn = [float('nan')]      # Richtungsaenderung der letzten Auswahl
+
+    def pick_continuation(ci, side, want_struct=None):
+        """Nachbarkorridor mit der kleinsten Richtungsaenderung. want_struct=True
+        verlangt, dass sein angrenzender Abschnitt Bauwerk ist, False das
+        Gegenteil, None laesst beides zu (fuer den Anker-Walk)."""
+        last_turn[0] = float('nan')
+        n = idx.n(ci)
+        if n < 2:
+            return None
+        b_ref = (idx.bearing(ci, min(3, n - 1), 0) if side == 0
+                 else idx.bearing(ci, max(0, n - 4), n - 1))
+        best, best_turn = None, 1e9
+        for (cj, sj) in idx.neighbours(ci, side):
+            nj = idx.n(cj)
+            if nj < 2:
+                continue
+            if want_struct is not None:
+                has = struct_at_end(cj, sj) is not None
+                if has != want_struct:
+                    continue
+            b_new = (idx.bearing(cj, 0, min(3, nj - 1)) if sj == 0
+                     else idx.bearing(cj, nj - 1, max(0, nj - 4)))
+            turn = abs((b_new - b_ref + 180.0) % 360.0 - 180.0)
+            if turn < best_turn:
+                best, best_turn = (cj, sj), turn
+        if best is not None and best_turn <= 70.0:
+            last_turn[0] = best_turn
+            return best
+        return None
+
+    def walk_outward(ci, side, start_k, max_dist, max_hops=4):
+        """Laeuft vom Bauwerksrand nach aussen und liefert (Abstand, Hoehe,
+        ist_Bauwerk, Kreuzungen_ueberschritten). Laeuft ueber Kreuzungen hinweg
+        UND ueber zwischenliegende Bauwerksabschnitte (die werden nur als
+        ist_Bauwerk=True markiert, nicht abgebrochen). Genau das fehlte:
+        bei Bauwerken direkt an der Kreuzung gibt es im eigenen Korridor gar
+        keinen bauwerksfreien Punkt."""
+        cur_c, cur_side, cur_k = ci, side, start_k
+        base, hops = 0.0, 0
+        while True:
+            ss = slices[cur_c][4]
+            s_ref = ss[cur_k]
+            ks = (range(cur_k - 1, -1, -1) if cur_side == 0
+                  else range(cur_k + 1, idx.n(cur_c)))
+            last_d = base
+            for k in ks:
+                d = base + abs(ss[k] - s_ref)
+                if d > max_dist:
+                    return
+                last_d = d
+                yield d, float(zall[idx.z_index(cur_c, k)]), bool(is_st[cur_c][k]), hops
+            hops += 1
+            if hops > max_hops:
+                return
+            nb = pick_continuation(cur_c, cur_side, want_struct=None)
+            if nb is None:
+                return
+            cj, sj = nb
+            base = last_d
+            cur_c = cj
+            # den Nachbarkorridor VOM gemeinsamen Knoten weg durchlaufen
+            cur_side = 1 if sj == 0 else 0
+            cur_k = 0 if sj == 0 else idx.n(cj) - 1
+
+    def collect_outward(ci, side, start_k):
+        """Zufahrt fuer den Ankerfit: bauwerksfreie Punkte zwischen guard_m und
+        guard_m + fit_m Abstand vom Bauwerksrand, ueber Kreuzungen hinweg."""
+        out_d, out_z, crossed = [], [], False
+        for d, z, on, hops in walk_outward(ci, side, start_k,
+                                           guard_m + fit_m + 200.0):
+            if on:
+                continue
+            if d < guard_m:
+                continue
+            if d > guard_m + fit_m and len(out_d) >= STRUCT_MIN_FIT_PTS:
+                break
+            if d > guard_m + fit_m + 200.0:
+                break
+            out_d.append(d); out_z.append(z)
+            if hops > 0:
+                crossed = True
+        return np.asarray(out_d, float), np.asarray(out_z, float), crossed
+
+    def nearest_free(ci, side, k_edge):
+        """Naechster bauwerksfreier Punkt nach aussen, notfalls ueber Kreuzungen
+        hinweg (NaN nur, wenn im Umkreis von 400 m keiner existiert)."""
+        for d, z, on, hops in walk_outward(ci, side, k_edge, 400.0):
+            if (not on) and np.isfinite(z):
+                return float(z)
+        return float('nan')
+
+    def anchor(ci, side, k_edge, allow_fit=True):
+        """Ankerhoehe am Bauwerksrand: robuste Gerade der Zufahrt, auf den Rand
+        extrapoliert. Die Extrapolation wird verworfen, wenn sie mehr als
+        STRUCT_MAX_LIFT_M vom naechsten echten Nicht-Bauwerkspunkt abweicht
+        (Schutz gegen instabile Extrapolation ueber die Schutzzone hinweg).
+        Rueckgabe: (z, ok, info-dict fuer die Diagnose)."""
+        z_near = nearest_free(ci, side, k_edge)
+        if allow_fit:
+            d, z, crossed = collect_outward(ci, side, k_edge)
+            ok = np.isfinite(z)
+            if ok.sum() >= STRUCT_MIN_FIT_PTS:
+                m, b = _theil_sen(d[ok], z[ok])
+                if (not np.isfinite(z_near)) or abs(b - z_near) <= STRUCT_MAX_LIFT_M:
+                    if crossed:
+                        stats['anchors_crossed'] += 1
+                    return float(b), True, dict(mode='fit', n=int(ok.sum()),
+                                                crossed=bool(crossed),
+                                                slope_pct=100.0 * m)
+                stats['lift_capped'] += 1
+        if np.isfinite(z_near):
+            return float(z_near), True, dict(mode='nearest', n=0,
+                                             crossed=False,
+                                             slope_pct=float('nan'))
+        stats['anchor_failed'] += 1
+        v = zall[idx.z_index(ci, k_edge)]
+        return ((float(v) if np.isfinite(v) else float('nan')), False,
+                dict(mode='on_structure', n=0, crossed=False,
+                     slope_pct=float('nan')))
+
+    visited = set()
+    for ci in range(nC):
+        for ri, (a, b) in enumerate(runs[ci]):
+            if (ci, ri) in visited:
+                continue
+            # --- Region ueber Korridorgrenzen hinweg aufsammeln ---
+            chain = [(ci, a, b)]
+            turns = []
+            visited.add((ci, ri))
+            # nach links
+            cur_c, cur_a = ci, a
+            while cur_a == 0:
+                nb = pick_continuation(cur_c, 0, want_struct=True)
+                if nb is None:
+                    break
+                turns.append(last_turn[0])
+                cj, sj = nb
+                run_j = struct_at_end(cj, sj)
+                if run_j is None:
+                    break
+                rj = runs[cj].index(run_j)
+                if (cj, rj) in visited:
+                    break
+                visited.add((cj, rj))
+                chain.insert(0, (cj, run_j[0], run_j[1]))
+                cur_c, cur_a = cj, (run_j[0] if sj == 0 else 0)
+                if sj == 1 and run_j[1] != idx.n(cj):
+                    break
+                if sj == 0 and run_j[0] != 0:
+                    break
+            # nach rechts
+            cur_c, cur_b = ci, b
+            while cur_b == idx.n(cur_c):
+                nb = pick_continuation(cur_c, 1, want_struct=True)
+                if nb is None:
+                    break
+                turns.append(last_turn[0])
+                cj, sj = nb
+                run_j = struct_at_end(cj, sj)
+                if run_j is None:
+                    break
+                rj = runs[cj].index(run_j)
+                if (cj, rj) in visited:
+                    break
+                visited.add((cj, rj))
+                chain.append((cj, run_j[0], run_j[1]))
+                cur_c = cj
+                cur_b = idx.n(cj) if (sj == 0 and run_j[1] == idx.n(cj)) else -1
+                if cur_b == -1:
+                    break
+
+            stats['regions'] += 1
+            if len(chain) > 1:
+                stats['multi_corridor'] += 1
+
+            # --- Ausdehnung der Region (bestimmt, wie geankert wird) ---
+            seg_len = []
+            for (cc, aa, bb) in chain:
+                sc = slices[cc][4]
+                seg_len.append(float(sc[bb - 1] - sc[aa]) if bb - aa > 1 else 0.0)
+            total = float(sum(seg_len))
+
+            # --- Anker an den beiden Aussenenden ---
+            c0, a0, _b0 = chain[0]
+            cN, _aN, bN = chain[-1]
+            # Kleinstbauwerke: keine Extrapolation ueber die Schutzzone hinweg,
+            # sondern lokal zwischen den Nachbarpunkten interpolieren. Bei 5-20 m
+            # Spannweite ist der Bare-Earth-Einbruch ohnehin vernachlaessigbar,
+            # zwei unabhaengige Extrapolationen erzeugen dagegen Stufen.
+            short = total < STRUCT_MIN_LEN_M
+            if short:
+                stats['short_local'] += 1
+            z_a, ok_a, info_a = anchor(c0, 0, a0, allow_fit=not short)
+            z_b, ok_b, info_b = anchor(cN, 1, bN - 1, allow_fit=not short)
+            # Plausibilitaet der Deckenlinie; sonst auf die Nachbarpunkte zurueck
+            def _grade(za, zb):
+                return (abs(100.0 * (zb - za) / total) if total > 0
+                        else float('inf'))
+            if (total > 0 and np.isfinite(z_a) and np.isfinite(z_b)
+                    and _grade(z_a, z_b) > STRUCT_MAX_GRADE_PCT):
+                za2, ok2, ia2 = anchor(c0, 0, a0, allow_fit=False)
+                zb2, ok3, ib2 = anchor(cN, 1, bN - 1, allow_fit=False)
+                if (np.isfinite(za2) and np.isfinite(zb2)
+                        and _grade(za2, zb2) < _grade(z_a, z_b)):
+                    stats['grade_rejected'] += 1
+                    z_a, ok_a, info_a = za2, ok2, ia2
+                    z_b, ok_b, info_b = zb2, ok3, ib2
+
+            # Letzter Rueckfall: bleibt die Deckenlinie unplausibel, wird die
+            # Region NICHT global behandelt, sondern wie frueher lokal zwischen
+            # den unmittelbaren Nachbarpunkten interpoliert. Ohne das ueberlebten
+            # Faelle wie 7.09/51.23 (39,9 m Spannweite, -36,6 % Deckenneigung).
+            if (not (np.isfinite(z_a) and np.isfinite(z_b))
+                    or _grade(z_a, z_b) > STRUCT_MAX_GRADE_PCT):
+                stats['local_fallback'] += 1
+                for (cc, aa, bb) in chain:
+                    n_cc = idx.n(cc)
+                    raw = zall[slices[cc][2]:slices[cc][2] + n_cc]
+                    la = raw[aa - 1] if (aa > 0 and np.isfinite(raw[aa - 1])) else raw[aa]
+                    lb = raw[bb] if (bb < n_cc and np.isfinite(raw[bb])) else raw[bb - 1]
+                    if not (np.isfinite(la) and np.isfinite(lb)):
+                        continue
+                    forced[cc][0][aa:bb] = True
+                    forced[cc][1][aa:bb] = np.linspace(float(la), float(lb), bb - aa)
+                continue
+            if debug_rows is not None:
+                ss0, ssN = slices[c0][4], slices[cN][4]
+                L_reg = total
+                raw_a = float(zall[idx.z_index(c0, a0)])
+                raw_b = float(zall[idx.z_index(cN, bN - 1)])
+                debug_rows.append(dict(
+                    parts=len(chain), corridors=[c[0] for c in chain],
+                    len_m=L_reg, max_turn_deg=(max(turns) if turns else 0.0),
+                    z_a=z_a, z_b=z_b, ok_a=ok_a, ok_b=ok_b,
+                    mode_a=info_a['mode'], mode_b=info_b['mode'],
+                    nfit_a=info_a['n'], nfit_b=info_b['n'],
+                    crossed_a=info_a['crossed'], crossed_b=info_b['crossed'],
+                    lift_a=z_a - raw_a, lift_b=z_b - raw_b,
+                    deck_grade_pct=(100.0 * (z_b - z_a) / L_reg
+                                    if L_reg > 0 else float('nan')),
+                    lon=float(all_lon[idx.z_index(c0, a0)]),
+                    lat=float(all_lat[idx.z_index(c0, a0)])))
+            if not (np.isfinite(z_a) and np.isfinite(z_b)):
+                continue
+
+            # --- Deckenlinie linear ueber die GESAMTE Region ---
+            run_off = 0.0
+            for (cc, aa, bb), L in zip(chain, seg_len):
+                ss = slices[cc][4]
+                if bb - aa > 1 and total > 0:
+                    t = (run_off + (ss[aa:bb] - ss[aa])) / total
+                elif total > 0:
+                    t = np.array([run_off / total])
+                else:
+                    t = np.zeros(bb - aa)
+                zline = z_a + (z_b - z_a) * np.clip(t, 0.0, 1.0)
+                forced[cc][0][aa:bb] = True
+                forced[cc][1][aa:bb] = zline
+                stats['samples'] += bb - aa
+                # Kreuzungsknoten IM Bauwerk aus der Deckenlinie bedienen
+                path_nodes, node_s = slices[cc][0], slices[cc][1]
+                s_lo, s_hi = ss[aa], ss[bb - 1]
+                for nd in path_nodes:
+                    if nd in junctions and s_lo <= node_s.get(nd, -1e18) <= s_hi:
+                        jz[nd] = float(np.interp(node_s[nd], ss[aa:bb], zline))
+                        stats['junction_nodes'] += 1
+                run_off += L
+    return forced, jz, stats
+
+
 def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
                                    target_epsg=4839, sample_step_m=5.0,
                                    smooth_rms_m=1.0, debug=False,
-                                   collect_dense=False):
+                                   collect_dense=False,
+                                   global_structures=False,
+                                   struct_debug=None):
     """Aufloesungsunabhaengige, sanfte Hoehenzuweisung ueber ein Master-Profil.
 
     Statt das DTM nur an den (Post-Split-)Knoten zu sampeln, wird pro Korridor
@@ -217,6 +621,22 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
 
     Es faellt genau EIN DTM-Zugriff an (alle Punkte gebuendelt). Ersetzt Skript 05
     fuer die DTM-Pipeline. Rueckgabe: dict node_id(str) -> Hoehe [m] (NaN wo DTM fehlt).
+
+    global_structures: NOCH NICHT DEFAULT (Stand 2026-08-17). Der Ansatz senkt den
+    gemessenen Bauwerksfehler in der Pfalz-Testregion deutlich (max|dev| p50
+    10,05 -> 5,41 m), liefert in Koeln-Sued und im Ruhrgebiet aber nur beim Median
+    einen Gewinn und verschlechtert dort einzelne Faelle (Ruhr paarweise: 30
+    Durchfahrten besser, 37 schlechter, netto +31,8 m; die Verschlechterung haengt
+    fast vollstaendig an EINER Stelle, 7.09/51.23). Bis das geklaert ist, bleibt
+    der Default auf False, damit sich die Produktion nicht unbemerkt aendert.
+    Auf True gesetzt gilt: Bruecken UND Tunnel werden
+    korridoruebergreifend aufgeloest. Anker der Deckenlinie kommen aus der
+    Zufahrt jenseits der Kreuzung (robuste Gerade ueber STRUCT_FIT_M, mit
+    STRUCT_GUARD_M Schutzzone gegen Widerlager/Damm/Voreinschnitt), das Bauwerk
+    wird von der Spline-Glaettung ausgenommen, und Kreuzungsknoten IM Bauwerk
+    bekommen die Deckenhoehe statt eines Bare-Earth-Direktsamples.
+    global_structures=False reproduziert exakt das alte, korridorlokale
+    Verhalten (fuer A/B-Vergleiche gegen die Telemetrie-Referenz).
 
     collect_dense=True: zusaetzlich wird das DICHTE, geglaettete Fahrbahnprofil
     (alle Sample-Punkte, nicht nur Knoten) als Nx3-Array [lon, lat, z] geliefert
@@ -353,22 +773,48 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
     # --- EIN DTM-Zugriff fuer alle Punkte ---
     zall = sample_heights(dtm_path, np.asarray(all_lon), np.asarray(all_lat))
 
+    # --- Bauwerke korridoruebergreifend aufloesen (Bruecken UND Tunnel) ---
+    forced, jz = None, {}
+    if global_structures:
+        forced, jz, _st = _structure_decks(slices, all_lon, all_lat, zall,
+                                           junctions, debug_rows=struct_debug)
+        if _st['regions']:
+            print(f"  Bauwerke: {_st['regions']} Regionen "
+                  f"({_st['multi_corridor']} korridoruebergreifend), "
+                  f"{_st['anchors_crossed']} Anker jenseits einer Kreuzung, "
+                  f"{_st['junction_nodes']} Kreuzungsknoten im Bauwerk korrigiert; "
+                  f"{_st['short_local']} kurz (lokal), {_st['lift_capped']} Anker "
+                  f"verworfen (Hub), {_st['grade_rejected']} Deckenlinie verworfen "
+                  f"(Neigung)"
+                  + (f", {_st['anchor_failed']} ohne Anker" if _st['anchor_failed'] else ""))
+
     z = {}
     dbg = {}
     dense_rows = []      # Nx3 [lon, lat, z] fuer collect_dense
     for j, n in enumerate(direct_nodes):
         z[n] = float(zall[direct_start + j])
+        if n in jz and np.isfinite(jz[n]):
+            z[n] = float(jz[n])          # Kreuzung IM Bauwerk -> Deckenhoehe
         if debug:
             dbg[n] = (float("nan"), float("nan"), False)
         if collect_dense:
             lo, la = node_lonlat[n]
-            dense_rows.append((float(lo), float(la), float(zall[direct_start + j])))
+            dense_rows.append((float(lo), float(la), float(z[n])))
 
-    for (path_nodes, node_s, start, n_samp, ss, struct_spans) in slices:
+    for ci, (path_nodes, node_s, start, n_samp, ss, struct_spans) in enumerate(slices):
         zdense = zall[start:start + n_samp].astype(float).copy()
+        st_mask = None
+        if forced is not None:
+            st_mask, zdeck = forced[ci]
+            if st_mask.any():
+                # Deckenlinie aus der korridoruebergreifenden Aufloesung setzen;
+                # diese Punkte gehen NICHT in den Spline-Fit ein und werden auch
+                # nicht mehr von ihm verbogen.
+                good = st_mask & np.isfinite(zdeck)
+                zdense[good] = zdeck[good]
         # Bruecken/Tunnel: Bare-Earth-DTM durch lineare Interpolation zwischen den
         # An-Grade-Hoehen an den Bauwerksenden ersetzen (wie Skript 02).
-        if struct_spans:
+        if struct_spans and forced is None:
             is_st = np.zeros(len(ss), dtype=bool)
             for (a, b) in struct_spans:
                 is_st[(ss >= a) & (ss <= b)] = True
@@ -391,7 +837,14 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
             for n in interior:
                 z.setdefault(n, float("nan"))
             continue
-        s_fit, z_fit = ss[fin], zdense[fin]
+        # Bauwerkspunkte NICHT mitfitten: sonst verbiegt der Spline die exakte
+        # Deckenlinie wieder (gemessen bis 4,5 m, Median 0,74 m).
+        fit_sel = fin
+        if st_mask is not None and st_mask.any():
+            alt = fin & ~st_mask
+            if alt.sum() >= max(4, int(0.2 * fin.sum())):
+                fit_sel = alt
+        s_fit, z_fit = ss[fit_sel], zdense[fit_sel]
         if smooth_rms_m and smooth_rms_m > 0 and UnivariateSpline is not None and s_fit.size >= 4:
             w = np.clip(np.abs(np.gradient(s_fit)), 1e-6, None)
             k = min(3, s_fit.size - 1)
@@ -404,6 +857,13 @@ def assign_heights_along_corridors(gdf_edges, node_lonlat, dtm_path,
                 zfun = lambda q, a=s_fit, b=z_fit: float(np.interp(q, a, b))
         else:
             zfun = lambda q, a=s_fit, b=z_fit: float(np.interp(q, a, b))
+        if st_mask is not None and st_mask.any():
+            # ausserhalb der Bauwerke der geglaettete Spline, im Bauwerk exakt
+            # die Deckenlinie (auch fuer collect_dense und alle Knoten)
+            z_grid = np.fromiter((zfun(q) for q in ss), float, count=n_samp)
+            put = st_mask & np.isfinite(zdense)
+            z_grid[put] = zdense[put]
+            zfun = lambda q, _a=ss, _b=z_grid: float(np.interp(q, _a, _b))
         st = bool(struct_spans); Lc = float(ss[-1])
         for n in interior:
             z[n] = zfun(node_s[n])
