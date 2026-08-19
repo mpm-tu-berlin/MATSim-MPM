@@ -21,6 +21,15 @@ Usage:
     python generate_section_link_length_variants.py [--sections-dir <path>] [--output-dir <path>]
 """
 
+import os
+import sys as _sys
+# Deterministische Korridorzerlegung (Befund 2026-07/08: hash-abhaengige
+# Set-Iteration liess identische Aufrufe minimal verschiedene Routen finden,
+# z. B. 19t bei 250 m +-664 m). Ohne gesetzten Hash-Seed einmal neu starten.
+if os.environ.get("PYTHONHASHSEED") is None:
+    os.environ["PYTHONHASHSEED"] = "0"
+    os.execv(_sys.executable, [_sys.executable] + _sys.argv)
+
 import argparse
 import copy
 import gzip
@@ -96,6 +105,14 @@ WAYPOINT_SPACING_M = 2000.0  # Fuehrungs-Waypoints entlang der Referenzroute
 # nahm bei 250/400 m einen +4,2-km-Umweg ueber eine Parallelstrasse, weil ein
 # Waypoint dorthin snappte); Richtungsfahrbahnen (<50 m) bleiben drin.
 ROUTE_TUBE_M = 150.0
+# Richtungstreue Routensuche (CLI: --direction-aware). Aus historischen Gruenden
+# Default AUS, damit bestehende Sektions-Sweeps bitgleich reproduzierbar bleiben;
+# fuer Realfahrt-Routen gehoert sie eingeschaltet, sonst sind Geisterfahrten auf
+# der Gegenfahrbahn moeglich (Befund 2026-08-18, 19t-Fahrt).
+DIRECTION_AWARE = False
+# Suchradius und Winkeltoleranz fuer die richtungstreue Endpunktwahl
+ENDPOINT_RADIUS_M = 120.0
+ENDPOINT_MAX_ANGLE_DEG = 75.0
 # CLI-Override (--route-tube-m): GPS-basierte Referenzen (WP4-Telemetrie-Trips)
 # liegen lateral versetzt und grobe Stufen haben sparse Knoten — 150 m ist dort
 # zu eng (Schlauch bricht, Waypoint-Fallback baut Umwege). None = Default.
@@ -161,13 +178,35 @@ def build_route_corridor(section_nodes, section_links, buffer_m=CORRIDOR_BUFFER_
 
 
 def find_endpoints(nodes, links):
-    """Find the two endpoint nodes (degree=1 in undirected view) of a section network."""
+    """Anfang und Ende einer Sektions-/Referenzkette, in FAHRTRICHTUNG.
+
+    Die Referenzketten der Realfahrten werden aus dem zeitlich geordneten Trace
+    gebaut und speichern die Fahrtrichtung in der Linkrichtung (from -> to,
+    build_realtrip_reference_telemetry.py). Genau eine Quelle (nur ausgehend) und
+    genau eine Senke (nur eingehend) markieren damit Start und Ziel eindeutig.
+    Die frueher benutzte ungerichtete Gradbetrachtung hat diese Information
+    weggeworfen und die Kette zufaellig orientiert; richtungstreu fuehrte das zu
+    Routen gegen den Verkehr und damit zu 'kein Weg gefunden' (h27/h42a,
+    2026-08-18). Nur wenn die Kette nicht eindeutig gerichtet ist, greift die
+    alte Heuristik.
+    """
+    indeg, outdeg = {}, {}
     adj = {}
     for lid, lk in links.items():
         u, v = lk["from"], lk["to"]
+        outdeg[u] = outdeg.get(u, 0) + 1
+        indeg[v] = indeg.get(v, 0) + 1
         adj.setdefault(u, set()).add(v)
         adj.setdefault(v, set()).add(u)
 
+    sources = [n for n in outdeg if indeg.get(n, 0) == 0]
+    sinks = [n for n in indeg if outdeg.get(n, 0) == 0]
+    if len(sources) == 1 and len(sinks) == 1:
+        return sources[0], sinks[0]
+
+    print(f"    WARNUNG: Referenzkette nicht eindeutig gerichtet "
+          f"({len(sources)} Quellen, {len(sinks)} Senken) — Orientierung wird "
+          f"heuristisch bestimmt, Fahrtrichtung damit UNBEKANNT.")
     endpoints = [nid for nid, neighbors in adj.items() if len(neighbors) == 1]
     if len(endpoints) < 2:
         # Fallback: use nodes with lowest degree
@@ -263,7 +302,13 @@ def find_guided_path(nodes, links, start, end, ref_waypoints_xy, ref_coords=None
         u, v, ln = lk["from"], lk["to"], lk["length"]
         if allowed is not None and (u not in allowed or v not in allowed):
             continue
-        for a, b in ((u, v), (v, u)):
+        # DIRECTION_AWARE: nur die tatsaechliche Linkrichtung befahrbar. Ohne das
+        # ist der Graph ungerichtet, und der kuerzeste Weg darf die GEGENFAHRBAHN
+        # benutzen (Befund 2026-08-18 an der 19t-Fahrt: die gefundene Route lag
+        # durchgehend rund 15 m seitlich versetzt = Geisterfahrt, mit einer
+        # scheinbaren Ausfahrt dort, wo sie die Fahrbahn wechselte).
+        pairs = ((u, v),) if DIRECTION_AWARE else ((u, v), (v, u))
+        for a, b in pairs:
             cur = adj.setdefault(a, {})
             if ln < cur.get(b, float("inf")):
                 cur[b] = ln
@@ -346,6 +391,80 @@ def find_nearest_node(target_x, target_y, candidate_nodes):
             best_dist = d
             best_nid = nid
     return best_nid, best_dist
+
+
+def _ref_bearing(ref_coords, at_start, span_m=300.0):
+    """Fahrtrichtung der Referenzroute am Anfang bzw. Ende als Einheitsvektor."""
+    pts = np.asarray(ref_coords, dtype=float)
+    if len(pts) < 2:
+        return None
+    if at_start:
+        base = pts[0]
+        rest = pts[1:]
+    else:
+        base = pts[-1]
+        rest = pts[:-1][::-1]
+    d = np.hypot(rest[:, 0] - base[0], rest[:, 1] - base[1])
+    idx = int(np.argmax(d >= span_m)) if (d >= span_m).any() else len(d) - 1
+    vec = (rest[idx] - base) if at_start else (base - rest[idx])
+    n = float(np.hypot(*vec))
+    return None if n < 1e-6 else vec / n
+
+
+def find_directed_endpoint(target_x, target_y, nodes, links, ref_dir, is_start,
+                           radius_m=ENDPOINT_RADIUS_M,
+                           max_angle_deg=ENDPOINT_MAX_ANGLE_DEG):
+    """Naechster Knoten, dessen Fahrbahnrichtung zur Referenz passt.
+
+    Bei getrennten Richtungsfahrbahnen liegen beide Fahrbahnen wenige Meter
+    auseinander; die reine Abstandswahl trifft dann zufaellig die Gegenrichtung
+    und der richtungstreue Dijkstra findet danach nur noch grosse Umwege oder
+    gar keinen Weg. Gewertet wird deshalb die abgehende (Start) bzw. ankommende
+    (Ende) Linkrichtung gegen die Fahrtrichtung der Referenz.
+
+    Rueckgabe: (bester Knoten, Abstand, nach Abstand sortierte Kandidatenliste).
+    Die Liste erlaubt dem Aufrufer, bei fehlgeschlagener Wegsuche den naechsten
+    passenden Knoten zu probieren (grobe Stufen haben duennere Knotenmengen).
+    """
+    if ref_dir is None:
+        nid, d = find_nearest_node(target_x, target_y, nodes)
+        return nid, d, [(nid, d)]
+    cos_min = math.cos(math.radians(max_angle_deg))
+    incident = {}
+    for lk in links.values():
+        u, v = lk["from"], lk["to"]
+        if u not in nodes or v not in nodes:
+            continue
+        incident.setdefault(u if is_start else v, []).append((u, v))
+    def scan(limit):
+        found = []
+        for nid, nd in nodes.items():
+            d = math.hypot(nd["x"] - target_x, nd["y"] - target_y)
+            if d > limit:
+                continue
+            for u, v in incident.get(nid, ()):
+                vx = nodes[v]["x"] - nodes[u]["x"]
+                vy = nodes[v]["y"] - nodes[u]["y"]
+                n = math.hypot(vx, vy)
+                if n < 1e-6:
+                    continue
+                if (vx / n) * ref_dir[0] + (vy / n) * ref_dir[1] >= cos_min:
+                    found.append((nid, d))
+                    break
+        return found
+
+    cands = scan(radius_m)
+    if not cands:
+        # Startpunkte koennen weit ab vom Netz liegen (Betriebshof am Trip-Anfang,
+        # f22a: 1,1 km). Dann ohne Radiusgrenze suchen — aber weiter nur Knoten
+        # MIT passend gerichteter Kante, sonst landet man auf einer Senke des
+        # bbox-Randes, von der aus es im gerichteten Graphen keinen Weg gibt.
+        cands = scan(float("inf"))
+    if not cands:
+        nid, d = find_nearest_node(target_x, target_y, nodes)
+        return nid, d, [(nid, d)]
+    cands.sort(key=lambda t: t[1])
+    return cands[0][0], cands[0][1], cands
 
 
 def export_path_subnetwork(nodes, links, link_elems_root, ordered_path, output_path):
@@ -631,8 +750,17 @@ def generate_variants_for_section(
             full_links[lid] = {"id": lid, "from": u, "to": v, "length": length}
 
         # Find nearest nodes to section start/end in the new network
-        new_start, dist_s = find_nearest_node(start_xy[0], start_xy[1], full_nodes)
-        new_end, dist_e = find_nearest_node(end_xy[0], end_xy[1], full_nodes)
+        start_cands = end_cands = None
+        if DIRECTION_AWARE and ref_coords is not None:
+            new_start, dist_s, start_cands = find_directed_endpoint(
+                start_xy[0], start_xy[1], full_nodes, full_links,
+                _ref_bearing(ref_coords, at_start=True), is_start=True)
+            new_end, dist_e, end_cands = find_directed_endpoint(
+                end_xy[0], end_xy[1], full_nodes, full_links,
+                _ref_bearing(ref_coords, at_start=False), is_start=False)
+        else:
+            new_start, dist_s = find_nearest_node(start_xy[0], start_xy[1], full_nodes)
+            new_end, dist_e = find_nearest_node(end_xy[0], end_xy[1], full_nodes)
 
         if new_start is None or new_end is None:
             print(f"    WARNING: Could not find start/end nodes. Skipping.")
@@ -645,6 +773,43 @@ def generate_variants_for_section(
         path = find_guided_path(full_nodes, full_links, new_start, new_end, ref_waypoints,
                                 ref_coords=ref_coords,
                                 tube_m=(TUBE_OVERRIDE or ROUTE_TUBE_M))
+        # Richtungstreu kann der erstbeste Endknoten in einer Sackgasse der
+        # richtigen Fahrbahn liegen (grobe Stufen). Dann die naechsten
+        # richtungsvertraeglichen Kandidaten durchprobieren, statt aufzugeben.
+        if path is None and start_cands and end_cands:
+            for s_nid, s_d in start_cands[:4]:
+                for e_nid, e_d in end_cands[:4]:
+                    if (s_nid, e_nid) == (new_start, new_end):
+                        continue
+                    path = find_guided_path(full_nodes, full_links, s_nid, e_nid,
+                                            ref_waypoints, ref_coords=ref_coords,
+                                            tube_m=(TUBE_OVERRIDE or ROUTE_TUBE_M))
+                    if path is not None:
+                        new_start, dist_s, new_end, dist_e = s_nid, s_d, e_nid, e_d
+                        print(f"    Endpunkt-Retry erfolgreich: {s_nid} -> {e_nid}")
+                        break
+                if path is not None:
+                    break
+        # Die Referenzkette ist nicht orientiert: ihre Knotenreihenfolge kann der
+        # tatsaechlichen Fahrtrichtung entgegenlaufen (h27/h42a, Befund 2026-08-18).
+        # Ungerichtet war das egal, richtungstreu existiert dann gar kein Weg.
+        # Deshalb einmal die Gegenrichtung annehmen und den Pfad zurueckdrehen;
+        # das exportierte Teilnetz ist ohnehin beidseitig.
+        if path is None and DIRECTION_AWARE and ref_coords is not None:
+            rs, ds, rs_c = find_directed_endpoint(
+                end_xy[0], end_xy[1], full_nodes, full_links,
+                _ref_bearing(ref_coords[::-1], at_start=True), is_start=True)
+            re_, de, re_c = find_directed_endpoint(
+                start_xy[0], start_xy[1], full_nodes, full_links,
+                _ref_bearing(ref_coords[::-1], at_start=False), is_start=False)
+            rev = find_guided_path(full_nodes, full_links, rs, re_, ref_waypoints[::-1],
+                                   ref_coords=ref_coords,
+                                   tube_m=(TUBE_OVERRIDE or ROUTE_TUBE_M))
+            if rev is not None:
+                path = rev[::-1]
+                new_start, dist_s, new_end, dist_e = re_, de, rs, ds
+                print("    Referenzkette laeuft gegen die Fahrtrichtung — "
+                      "Pfad in Gegenrichtung gefunden und zurueckgedreht.")
         if path is None:
             print(f"    WARNING: No path found between start and end. Skipping.")
             tmp_network_path.unlink(missing_ok=True)
@@ -716,16 +881,24 @@ def main():
     parser.add_argument("--route-tube-m", type=float, default=None,
                         help="Schlauchradius [m] um die Referenzlinie "
                              "(Default: ROUTE_TUBE_M=150)")
+    parser.add_argument("--direction-aware", action="store_true",
+                        help="Routensuche richtungstreu (nur die tatsaechliche "
+                             "Linkrichtung befahrbar) und Endpunktwahl nach "
+                             "Fahrbahnrichtung. Verhindert Routen auf der "
+                             "Gegenfahrbahn; fuer Realfahrt-Routen empfohlen.")
     parser.add_argument("--sections", type=str, default=None,
                         help="Nur diese Sektions-Labels (kommagetrennt, z.B. 'q5,q10'); "
                              "erlaubt parallele Instanzen mit disjunkten Teilmengen "
                              "(bereits existierende Varianten werden ohnehin uebersprungen)")
     args = parser.parse_args()
 
+    global TUBE_OVERRIDE, DIRECTION_AWARE
     if args.route_tube_m:
-        global TUBE_OVERRIDE
         TUBE_OVERRIDE = args.route_tube_m
         print(f"Schlauchradius-Override: {TUBE_OVERRIDE:.0f} m")
+    if args.direction_aware:
+        DIRECTION_AWARE = True
+        print("Richtungstreue Routensuche aktiv (keine Gegenfahrbahn).")
 
     sections_dir = Path(args.sections_dir)
     if not sections_dir.is_absolute():

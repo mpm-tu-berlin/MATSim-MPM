@@ -23,7 +23,10 @@ PROFILES_DIR = _SCRIPT_DIR / "data" / "realtrip_telemetry_profiles"
 REFS_DIR = _SCRIPT_DIR / "data" / "realtrip_refs_telemetry"
 NODE_SPACING_M = 50.0  # wie die feinen 50-m-Sektionsreferenzen
 
-LABELS = ["f22", "w24", "w43", "h27", "h19", "h30"]
+
+def labels():
+    """Trip-/Teilstueck-Labels aus dem Export-Meta (Single Source of Truth)."""
+    return list(pd.read_csv(PROFILES_DIR / "trips_meta.csv")["label"])
 
 
 def build_chain(lon, lat):
@@ -64,7 +67,7 @@ def write_reference(label, x, y, out_path):
 def main():
     REFS_DIR.mkdir(parents=True, exist_ok=True)
     rows = []
-    for label in LABELS:
+    for label in labels():
         df = pd.read_csv(PROFILES_DIR / f"trip_{label}.csv")
         ok = np.isfinite(df["lat"]) & np.isfinite(df["lon"])
         x, y = build_chain(df.loc[ok, "lon"].to_numpy(),

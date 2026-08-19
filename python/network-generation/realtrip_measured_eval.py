@@ -153,7 +153,7 @@ def main():
     parser.add_argument("--measurements", type=str,
                         default=str(_SCRIPT_DIR.parent / "calibration" / "data"
                                     / "Geschwindigkeitsprofile.xlsx"))
-    parser.add_argument("--link-lengths", type=str, default="100,250,400")
+    parser.add_argument("--link-lengths", type=str, default="250")
     args = parser.parse_args()
 
     net_dir = Path(args.networks_dir)

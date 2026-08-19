@@ -123,7 +123,7 @@ def load_chain_profile(path):
 def main():
     parser = argparse.ArgumentParser(description="telemetry-Trips vs. Routen-Netze.")
     parser.add_argument("--networks-dir", type=str, required=True)
-    parser.add_argument("--link-lengths", type=str, default="100,250,400")
+    parser.add_argument("--link-lengths", type=str, default="250")
     parser.add_argument("--trips", type=str, default=None,
                         help="Nur diese Labels (kommagetrennt); CSVs werden "
                              "gemerged statt ueberschrieben")
