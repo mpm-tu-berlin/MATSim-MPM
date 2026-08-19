@@ -46,7 +46,8 @@ TRIP_VEHICLES = {
             "cdXA": 5.79, "rollingC": 0.0048,
             "maxMotorPower": 600000, "maxSpeed": 27.778},
 }
-LINK_LENGTHS = [100, 250, 400]
+LINK_LENGTHS = [250]  # nur die Kalibrierskala (User 2026-08-18); 100/400 waren
+                      # eine Robustheitsleiter, die in keiner Paper-Zahl vorkommt
 
 
 def _import_module(name, filename):
@@ -70,6 +71,8 @@ def main():
                         help="recupEfficiency-Override (zusaetzlich zu --eta-t)")
     parser.add_argument("--max-recup-frac", type=float, default=None,
                         help="maxRecupPowerFraction-Override")
+    parser.add_argument("--extra-params", type=str, default=None,
+                        help="Kommaliste key=value, wird in JEDES C-Set gemerged (z. B. rollingLoadExponent=0.9,rollingRefMassKg=35500 fuer die Lastabhaengigkeits-Sensitivitaet ohne Rekalibrierung)")
     parser.add_argument("--out-name", type=str, default="realtrip_validation_results.csv")
     args = parser.parse_args()
     net_dir = Path(args.networks_dir)
@@ -101,6 +104,13 @@ def main():
                 if args.max_recup_frac is not None:
                     cf["maxRecupPowerFraction"] = args.max_recup_frac
                 csets[f"{cname}{suffix}"] = cf
+
+    if args.extra_params:
+        extra = dict(kv.split("=") for kv in args.extra_params.split(","))
+        extra = {k.strip(): float(v) for k, v in extra.items()}
+        # Eigene Laufnamen: Extra-Laeufe duerfen die Basis-Laufordner nicht teilen
+        csets = {f"{name}_x": {**calib, **extra} for name, calib in csets.items()}
+        print(f"Extra-Parameter in allen C-Sets: {extra}")
 
     # Mess-Ground-Truth (Aggregate aus realtrip_measured_eval.py)
     energy_csv = net_dir / "realtrip_measured_energy.csv"

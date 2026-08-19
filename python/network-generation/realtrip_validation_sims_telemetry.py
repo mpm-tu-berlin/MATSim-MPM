@@ -23,7 +23,8 @@ import pandas as pd
 _SCRIPT_DIR = Path(__file__).parent
 PROFILES_DIR = _SCRIPT_DIR / "data" / "realtrip_telemetry_profiles"
 TARE_KG = 19000
-LINK_LENGTHS = [100, 250, 400]
+LINK_LENGTHS = [250]  # nur die Kalibrierskala (User 2026-08-18); 100/400 waren
+                      # eine Robustheitsleiter, die in keiner Paper-Zahl vorkommt
 
 
 def _import_module(name, filename):
@@ -58,6 +59,9 @@ def main():
     parser.add_argument("--max-recup-frac", type=float, default=None)
     parser.add_argument("--trips", type=str, default=None,
                         help="Nur diese Labels (kommagetrennt)")
+    parser.add_argument("--extra-params", type=str, default=None,
+                        help="Kommaliste key=value, wird in JEDES C-Set gemerged "
+                             "(z. B. rollingLoadExponent=0.9,rollingRefMassKg=35500)")
     parser.add_argument("--out-name", type=str,
                         default="realtrip_validation_results.csv")
     args = parser.parse_args()
@@ -86,6 +90,13 @@ def main():
                 if args.max_recup_frac is not None:
                     cf["maxRecupPowerFraction"] = args.max_recup_frac
                 csets[f"{cname}{suffix}"] = cf
+
+    if args.extra_params:
+        extra = dict(kv.split("=") for kv in args.extra_params.split(","))
+        extra = {k.strip(): float(v) for k, v in extra.items()}
+        # Eigene Laufnamen: Extra-Laeufe duerfen die Basis-Laufordner nicht teilen
+        csets = {f"{name}_x": {**calib, **extra} for name, calib in csets.items()}
+        print(f"Extra-Parameter in allen C-Sets: {extra}")
 
     edf = pd.read_csv(net_dir / "realtrip_measured_energy.csv").set_index("trip")
     targets = {t: (abs(edf.loc[t, "BatteryPower_kWh_per_km"])
