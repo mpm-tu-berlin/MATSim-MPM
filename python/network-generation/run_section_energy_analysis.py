@@ -172,28 +172,34 @@ FLAT_LANES = 2.0
 # QSim timestep [seconds] — passed to RunSectionScenario via --qsim-timestep
 QSIM_TIMESTEP = 0.5
 
-# Calibration parameters per loading — Kandidat C aus B2v2
-# (Run 20260702_135312_250m, 500 Trials, stop-Boundary-KE-Korrektur, C1/C2 aktiv):
-# empty -> lh_low Trial #79 (RMSE 0,55 %), loaded -> lh_high Trial #261 (RMSE 0,87 %).
-# auxPowerW war in der Kalibrierung fix bei 4000 W.
+# Calibration parameters per loading — Kandidat RB (beta=0.9-Modellselektion,
+# Run 20260818_120442_250m, je 500 Trials, f_rec=1.0 FIX, rho=1.188):
+# empty -> RB/lh_low (RMSE 0,55 %), loaded -> RB/lh_high (RMSE 0,87 %).
+# User-Entscheid Option 1 (2026-08-18); auxPowerW war fix bei 4000 W.
 CALIBRATION_PER_LOADING = {
     "empty": {
-        "tractionEfficiency": 0.80218,
-        "inertiaC": 1.02691,
-        "recupEfficiency": 0.75633,
-        "maxRecupPowerFraction": 0.62015,
+        "tractionEfficiency": 0.8046992668164625,
+        "inertiaC": 1.0188754610733795,
+        "recupEfficiency": 0.5383179587931889,
+        "maxRecupPowerFraction": 1.0,
         "auxPowerW": 4000.0,
-        "cdXA": 5.85643,
-        "rollingC": 0.00460,
+        "cdXA": 5.686050717123754,
+        "rollingC": 0.004664536015249529,
+        "rollingLoadExponent": 0.9,
+        "rollingRefMassKg": 35500.0,
+        "airDensity": 1.188,
     },
     "loaded": {
-        "tractionEfficiency": 0.86981,
-        "inertiaC": 1.02980,
-        "recupEfficiency": 0.61631,
-        "maxRecupPowerFraction": 0.86073,
+        "tractionEfficiency": 0.8484617852034014,
+        "inertiaC": 1.0139332490424946,
+        "recupEfficiency": 0.4892728695571761,
+        "maxRecupPowerFraction": 1.0,
         "auxPowerW": 4000.0,
-        "cdXA": 5.76244,
-        "rollingC": 0.00539,
+        "cdXA": 5.797243132601137,
+        "rollingC": 0.004922872982934466,
+        "rollingLoadExponent": 0.9,
+        "rollingRefMassKg": 35500.0,
+        "airDensity": 1.188,
     },
 }
 # Backwards-compatible default (used only if a caller still wants a single set).
@@ -205,7 +211,19 @@ def _params_cache_path(run_dir):
     return Path(run_dir) / ".sim_params.json"
 
 
-def _is_cache_valid(run_dir, vehicle_params_list, calibration_params=None, qsim_timestep=None):
+def _jar_fingerprint(jar_path):
+    """Groesse+mtime des Simulations-JARs: Modellaenderungen invalidieren den Cache.
+    (Befund 2026-08-18: ein Lauf vor dem JAR-Rebuild cachte neue Parameter mit
+    ALTEN Ergebnissen; der Folgelauf traf den Cache und rechnete nie.)"""
+    try:
+        st = Path(jar_path).stat()
+        return [st.st_size, int(st.st_mtime)]
+    except OSError:
+        return None
+
+
+def _is_cache_valid(run_dir, vehicle_params_list, calibration_params=None, qsim_timestep=None,
+                    jar_path=None):
     """Check whether cached results match the current parameters."""
     cache_file = _params_cache_path(run_dir)
     debug_csv = Path(run_dir) / "resistance_debug.csv"
@@ -219,12 +237,15 @@ def _is_cache_valid(run_dir, vehicle_params_list, calibration_params=None, qsim_
             "calibration": calibration_params or CALIBRATION_DEFAULTS,
             "qsim_timestep": qsim_timestep if qsim_timestep is not None else QSIM_TIMESTEP,
         }
+        if jar_path is not None:
+            current["jar"] = _jar_fingerprint(jar_path)
         return cached == current
     except Exception:
         return False
 
 
-def _write_params_cache(run_dir, vehicle_params_list, calibration_params=None, qsim_timestep=None):
+def _write_params_cache(run_dir, vehicle_params_list, calibration_params=None, qsim_timestep=None,
+                        jar_path=None):
     """Write current parameters as a cache key."""
     cache_file = _params_cache_path(run_dir)
     current = {
@@ -232,6 +253,8 @@ def _write_params_cache(run_dir, vehicle_params_list, calibration_params=None, q
         "calibration": calibration_params or CALIBRATION_DEFAULTS,
         "qsim_timestep": qsim_timestep if qsim_timestep is not None else QSIM_TIMESTEP,
     }
+    if jar_path is not None:
+        current["jar"] = _jar_fingerprint(jar_path)
     with open(cache_file, "w") as f:
         json.dump(current, f, indent=2)
 
@@ -533,7 +556,8 @@ def _run_one_simulation(task):
 
     run_dir = Path(run_dir)
 
-    if _is_cache_valid(run_dir, vehicle_params_list, calibration_params, qsim_timestep):
+    if _is_cache_valid(run_dir, vehicle_params_list, calibration_params, qsim_timestep,
+                       jar_path=jar_path):
         log.append(f"  Cached:     {section} / {max_len}m / {loading}")
         results = parse_resistance_debug(run_dir, network_path=network_path, section=section)
     else:
@@ -544,7 +568,8 @@ def _run_one_simulation(task):
             section=section,
         )
         if results:
-            _write_params_cache(run_dir, vehicle_params_list, calibration_params, qsim_timestep)
+            _write_params_cache(run_dir, vehicle_params_list, calibration_params, qsim_timestep,
+                                jar_path=jar_path)
         else:
             log.append(f"  FAILED: {section} / {max_len}m / {loading}" + (f" ({err})" if err else ""))
 
