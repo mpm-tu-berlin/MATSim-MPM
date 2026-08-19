@@ -217,6 +217,17 @@ STRUCT_MIN_FIT_PTS = 4
 # Schutzmechanismen (Diagnose 2026-08-17): ohne sie erzeugt die Extrapolation auf
 # Kleinstbauwerken Unsinn (4,9-m-Region mit -142 % Deckenneigung) und blaeht den
 # Anstiegsueberschuss auf.
+# Adaptive Ankerzone (User-Einwand 2026-08-18: feste 25 m sind bei steilen
+# Bauwerkskanten zu kurz und bei flachen irrelevant): die Zufahrt wird bis
+# STRUCT_ADAPT_MAX_M gesammelt, eine robuste Kerngerade (ab STRUCT_GUARD_M)
+# geschaetzt und dann per Inlier-Test (|Residuum| <= STRUCT_INLIER_TOL_M)
+# entschieden, welche Punkte wirklich Fahrbahnniveau tragen. Kontaminierte
+# Boeschungspunkte fliegen dadurch DATENGETRIEBEN raus, egal wie lang die
+# Kontamination ist; auf flachen Zufahrten duerfen auch portalnahe Punkte
+# mitfitten.
+STRUCT_ADAPT_MAX_M = 250.0
+STRUCT_INLIER_TOL_M = 1.5
+
 STRUCT_MIN_LEN_M = 20.0        # darunter: lokal zwischen den Nachbarpunkten
                                # interpolieren statt zwei Anker zu extrapolieren
 STRUCT_MAX_LIFT_M = 3.0        # max. Abweichung des extrapolierten Ankers vom
@@ -394,18 +405,16 @@ def _structure_decks(slices, all_lon, all_lat, zall, junctions,
             cur_k = 0 if sj == 0 else idx.n(cj) - 1
 
     def collect_outward(ci, side, start_k):
-        """Zufahrt fuer den Ankerfit: bauwerksfreie Punkte zwischen guard_m und
-        guard_m + fit_m Abstand vom Bauwerksrand, ueber Kreuzungen hinweg."""
+        """Zufahrt fuer den Ankerfit: ALLE bauwerksfreien Punkte bis
+        STRUCT_ADAPT_MAX_M vom Bauwerksrand, ueber Kreuzungen hinweg. Die
+        Trennung Fahrbahn/Boeschung uebernimmt der Inlier-Test in anchor()
+        (adaptiv statt fester Schutzzone)."""
         out_d, out_z, crossed = [], [], False
         for d, z, on, hops in walk_outward(ci, side, start_k,
-                                           guard_m + fit_m + 200.0):
+                                           STRUCT_ADAPT_MAX_M):
             if on:
                 continue
-            if d < guard_m:
-                continue
-            if d > guard_m + fit_m and len(out_d) >= STRUCT_MIN_FIT_PTS:
-                break
-            if d > guard_m + fit_m + 200.0:
+            if d > STRUCT_ADAPT_MAX_M:
                 break
             out_d.append(d); out_z.append(z)
             if hops > 0:
@@ -430,14 +439,33 @@ def _structure_decks(slices, all_lon, all_lat, zall, junctions,
         if allow_fit:
             d, z, crossed = collect_outward(ci, side, k_edge)
             ok = np.isfinite(z)
-            if ok.sum() >= STRUCT_MIN_FIT_PTS:
-                m, b = _theil_sen(d[ok], z[ok])
+            d, z = d[ok], z[ok]
+            if d.size >= STRUCT_MIN_FIT_PTS:
+                # Kernfit auf der a priori sauberen Aussenzone (>= guard_m),
+                # dann Inlier-Refit ueber ALLE Zufahrtspunkte: portalnahe
+                # Punkte zaehlen nur, wenn sie auf der Fahrbahngeraden liegen.
+                core = d >= guard_m
+                if core.sum() >= STRUCT_MIN_FIT_PTS:
+                    m0, b0 = _theil_sen(d[core], z[core])
+                else:
+                    m0, b0 = _theil_sen(d, z)
+                inl = np.abs(z - (m0 * d + b0)) <= STRUCT_INLIER_TOL_M
+                if inl.sum() >= STRUCT_MIN_FIT_PTS:
+                    m, b = _theil_sen(d[inl], z[inl])
+                    guard_eff = float(d[inl].min())
+                    n_fit = int(inl.sum())
+                else:
+                    m, b = m0, b0
+                    guard_eff = float(guard_m)
+                    n_fit = int(core.sum() if core.sum() >= STRUCT_MIN_FIT_PTS
+                                else d.size)
                 if (not np.isfinite(z_near)) or abs(b - z_near) <= STRUCT_MAX_LIFT_M:
                     if crossed:
                         stats['anchors_crossed'] += 1
-                    return float(b), True, dict(mode='fit', n=int(ok.sum()),
+                    return float(b), True, dict(mode='fit', n=n_fit,
                                                 crossed=bool(crossed),
-                                                slope_pct=100.0 * m)
+                                                slope_pct=100.0 * m,
+                                                guard_eff_m=guard_eff)
                 stats['lift_capped'] += 1
         if np.isfinite(z_near):
             return float(z_near), True, dict(mode='nearest', n=0,
