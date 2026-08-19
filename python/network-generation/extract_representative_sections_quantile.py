@@ -785,10 +785,27 @@ legend.addTo(map);
 # ==============================================================================
 if __name__ == "__main__":
 
+    # Netz per CLI ueberschreibbar (2026-08-17): nach dem Halbpixel-Fix im
+    # DTM-Sampling muessen die Korridor-Merkmale auf der neuen Hoehenbasis
+    # neu bestimmt werden. Die Korridor-Zerlegung ist pro Iteration geseedet,
+    # die Kandidatenmenge bleibt daher bei identischer Topologie dieselbe.
+    import argparse as _argparse
+    _ap = _argparse.ArgumentParser()
+    _ap.add_argument("--network", default=None,
+                     help="MATSim-Netz fuer Pfadsuche UND Export "
+                          "(Default: germany_network_250m_V2.xml.gz)")
+    _ap.add_argument("--run-dir", default=None,
+                     help="Ausgabeordner (Default: zeitgestempelt unter data/)")
+    _cli = _ap.parse_args()
+    if _cli.network:
+        COARSE_NETWORK = FINE_NETWORK = _cli.network
+
     # --- Create timestamped output directory ---
-    run_dir = Path(f"data/sections_quantile_run_{datetime.now():%Y%m%d_%H%M%S}")
+    run_dir = Path(_cli.run_dir) if _cli.run_dir else Path(
+        f"data/sections_quantile_run_{datetime.now():%Y%m%d_%H%M%S}")
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {run_dir}")
+    print(f"Netz: {COARSE_NETWORK}")
 
     # --- Step 1: Load coarse network (once) ---
     coarse_nodes, coarse_links, _ = load_network(COARSE_NETWORK)
