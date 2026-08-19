@@ -67,6 +67,11 @@ def sample_dtm_bilinear(ds, xs_utm, ys_utm):
 
     for i, (x, y) in enumerate(zip(xs_utm, ys_utm)):
         col_f, row_f = inv * (x, y)         # affine: (x,y)->(col,row)
+        # HALBPIXEL-KORREKTUR (Befund 2026-08-17, wie in Skript 04): (~transform)
+        # zaehlt Pixel ab der ECKE, das Zentrum von Pixel 0 liegt bei 0,5. Ohne
+        # die Verschiebung interpoliert das Sampling um ein halbes Pixel (10 m)
+        # versetzt und misst gegen ein anderes Gelaende als die Netz-Hoehen.
+        col_f, row_f = col_f - 0.5, row_f - 0.5
         col0, row0 = int(math.floor(col_f)), int(math.floor(row_f))
         if col0 < 0 or row0 < 0 or col0 + 1 >= ds.width or row0 + 1 >= ds.height:
             continue

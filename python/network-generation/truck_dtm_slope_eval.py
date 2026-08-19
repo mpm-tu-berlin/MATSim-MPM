@@ -240,7 +240,21 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit-files", type=int, default=None,
                     help="nur die ersten N Dateien (Smoke-Test)")
+    ap.add_argument("--out-dir", type=str, default=None,
+                    help="Ausgabeordner (Default: data/truck_dtm_slope_eval). Fuer "
+                         "Wiederholungslaeufe auf neuer Hoehenbasis einen eigenen "
+                         "Ordner setzen, damit die alte Messung erhalten bleibt.")
+    ap.add_argument("--road-profile-csv", type=str, default=None,
+                    help="dichtes Fahrbahnprofil (lon,lat,z) fuer die ROAD-Spalten; "
+                         "Default germany_dense_heights.csv. Nach einem Netz-Rebuild "
+                         "auf die neue Profildatei zeigen.")
     args = ap.parse_args()
+
+    global OUT_DIR, ROAD_PROFILE_CSV
+    if args.out_dir:
+        OUT_DIR = Path(args.out_dir)
+    if args.road_profile_csv:
+        ROAD_PROFILE_CSV = Path(args.road_profile_csv)
 
     from pyproj import Transformer
     s04 = _import_script04()
