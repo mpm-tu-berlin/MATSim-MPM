@@ -214,10 +214,15 @@ def schreibe_fig4(dec, pfad):
 
 
 def main():
+    global DATA
     ap = argparse.ArgumentParser()
     ap.add_argument("--selection-dir", default=str(SELEKTION))
+    ap.add_argument("--data-dir", default=str(DATA),
+                    help="Sweep-Ordner mit energy_results_summary.csv, "
+                         "knee_points.csv und grade_decomposition.csv")
     args = ap.parse_args()
     sel = Path(args.selection_dir)
+    DATA = Path(args.data_dir)
 
     df = pd.read_csv(DATA / "energy_results_summary.csv")
     knee = pd.read_csv(DATA / "knee_points.csv")
