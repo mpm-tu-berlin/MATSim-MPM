@@ -57,6 +57,12 @@ REFERENCE_CONSUMPTION_FILE = DATA_DIR / "reference_consumption.csv"
 # === Optuna ===
 STUDY_NAME = "matsim-vecto-calibration"
 N_TRIALS = 200
+
+# Feste Zusatzparameter, die UNVERAENDERT in jede Trial-.properties geschrieben
+# werden (nicht optimiert). Gesetzt via run_optimization.py --fixed-params,
+# z. B. lastabhaengiger Rollwiderstand + VECTO-Luftdichte (2026-08-18):
+#   rollingLoadExponent=0.9,rollingRefMassKg=35500,airDensity=1.188
+FIXED_PARAMS: dict[str, float] = {}
 STORAGE = f"sqlite:///{RESULTS_DIR / 'optuna_study.db'}"
 
 # === Netzauflösung (für Optuna + Sweep) ===

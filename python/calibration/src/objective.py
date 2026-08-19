@@ -3,6 +3,7 @@ from datetime import datetime
 
 import optuna
 
+from src import config as _cfg
 from src.config import PARAM_BOUNDS
 from src.matsim_runner import run_all_scenarios
 from src.error_computation import compute_combined_errors
@@ -14,8 +15,14 @@ def objective(trial: optuna.Trial) -> float:
     den kombinierten RMSE in % gegenueber Referenzdaten."""
 
     # Kalibrierungsparameter samplen (alle 5 in PARAM_BOUNDS, inkl. maxRecupPowerFraction)
-    params = {}
+    params = dict(_cfg.FIXED_PARAMS)
     for name, (low, high) in PARAM_BOUNDS.items():
+        # Fest gesetzte Parameter NICHT vorschlagen lassen — sonst wuerde der
+        # Suggest den Fixwert stillschweigend ueberschreiben und --fixed-params
+        # auf optimierten Parametern (z. B. maxRecupPowerFraction=1.0) waere
+        # wirkungslos (Befund 2026-08-18).
+        if name in _cfg.FIXED_PARAMS:
+            continue
         params[name] = trial.suggest_float(name, low, high)
 
     # Start-Heartbeat: bei parallelen Trials sieht man so live, dass gerade

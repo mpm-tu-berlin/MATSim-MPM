@@ -61,8 +61,20 @@ _parser.add_argument(
           "(Smoke-Test) oder 'lh_low,lh_high,rd_low,rd_high' (alle 4 Einzel-"
           "szenarien in EINEM Run-Ordner -> direkt vom Sweep nutzbar)."),
 )
+_parser.add_argument(
+    "--fixed-params",
+    type=str,
+    default=None,
+    help=("Kommaliste key=value fester Zusatzparameter (werden in jede Trial-"
+          ".properties uebernommen, nicht optimiert), z. B. "
+          "rollingLoadExponent=0.9,rollingRefMassKg=35500,airDensity=1.188"),
+)
 _args = _parser.parse_args()
 
+if _args.fixed_params:
+    _cfg.FIXED_PARAMS = {k.strip(): float(v) for k, v in
+                         (kv.split("=") for kv in _args.fixed_params.split(","))}
+    print(f"Feste Zusatzparameter: {_cfg.FIXED_PARAMS}")
 _cfg.ACTIVE_RESOLUTION_M = _args.resolution
 _cfg.MATSIM_MEMORY, _cfg.N_JOBS = _cfg.resource_profile_for(_args.resolution)
 if _args.n_trials is not None:
