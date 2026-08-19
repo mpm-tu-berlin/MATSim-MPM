@@ -41,7 +41,6 @@ import org.matsim.utils.objectattributes.attributable.Attributes;
 public final class PowerLimitedLinkSpeedCalculator implements LinkSpeedCalculator {
 
     private static final double G = 9.81;          // Erdbeschleunigung [m/s²]
-    private static final double RHO_AIR = 1.225;   // Luftdichte bei 15 °C, 1013 hPa [kg/m³]
     private static final double MAX_GRADE = 0.15;  // Maximale beruecksichtigte Steigung [-]
 
     private final CalibrationParams calib;
@@ -66,7 +65,12 @@ public final class PowerLimitedLinkSpeedCalculator implements LinkSpeedCalculato
         double maxMotorPowerW = attrOrDefault(attrs, "maxMotorPowerW", 400_000.0);
 
         double mSum     = mass + payload;
-        double fa       = 0.5 * RHO_AIR * cdXA;                         // aerodyn. Koeffizient [kg/m]
+        // Lastabhaengiges c_r und Luftdichte identisch zum Verbrauchsmodell
+        // (MpmDischargingModule), damit beide dieselbe Gleichgewichts-
+        // geschwindigkeit liefern; beta=1.0 (Default) = bisheriges Verhalten.
+        rollingC = org.matsim.mpm.discharging.MpmDynamicBetDriveEnergyConsumption
+                .effectiveRollingC(rollingC, mSum, calib.rollingRefMassKg, calib.rollingLoadExponent);
+        double fa       = 0.5 * calib.airDensity * cdXA;                // aerodyn. Koeffizient [kg/m]
         double pMechMax = maxMotorPowerW * calib.tractionEfficiency;   // max. mech. Leistung [W]
 
         // --- Steigung: sin(α) ≈ Δh / L (Kleinwinkelnaeherung, wie im Verbrauchsmodell) ---

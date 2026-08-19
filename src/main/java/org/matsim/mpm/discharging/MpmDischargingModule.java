@@ -143,9 +143,19 @@ public final class MpmDischargingModule extends AbstractModule {
                     ? calib.rollingC : attrOrDefault(attrs, "rollingC", 0.01);
             double maxMotorPowerW = attrOrDefault(attrs, "maxMotorPowerW", 400_000.0);
 
+            // Lastabhaengiger Rollwiderstand (VECTO-Form, Default beta=1.0 = wie bisher);
+            // je Fahrzeug konstant -> einmalige Berechnung hier, Hot-Path unberuehrt.
+            double rollingCEff = MpmDynamicBetDriveEnergyConsumption.effectiveRollingC(
+                    rollingC, mass + payload, calib.rollingRefMassKg, calib.rollingLoadExponent);
+            logRollingSummaryOnce(calib, rollingC, mass, payload);
+
             // CdxA (m^2) -> aerodynamischer Kraftbeiwert: F_aero = fa * v^2
-            // fa = 0.5 * rho_Luft * CdxA   (rho = 1.225 kg/m^3 bei 15 C, 1013 hPa)
-            double aeroFa = 0.5 * 1.225 * cdXA;
+            // fa = 0.5 * rho * CdxA; rho aus CalibrationParams (Default 1.225 = 15 C,
+            // 1013 hPa; VECTO-Deklarationsbedingung waere 1.188 bei +20 C, 100 kPa).
+            // Bewusst NICHT modelliert (in kalibriertem cdXA absorbiert): VECTOs
+            // Seitenwind-Korrektur (3 m/s in 4 m Hoehe, gleichverteilt) und die
+            // Temperaturabhaengigkeit des RRC (ISO-Deklaration bei 25 C).
+            double aeroFa = 0.5 * calib.airDensity * cdXA;
 
             // Max. Rekuperationsleistung: fahrzeugspezifische RatedPower * kalibrierter Anteil
             double maxRecupPowerW = calib.maxRecupPowerFraction * maxMotorPowerW;
@@ -158,7 +168,7 @@ public final class MpmDischargingModule extends AbstractModule {
             }
 
             return new MpmDynamicBetDriveEnergyConsumption(
-                    mass, payload, calib.tractionEfficiency, rollingC, aeroFa,
+                    mass, payload, calib.tractionEfficiency, rollingCEff, aeroFa,
                     calib.inertiaC,
                     calib.recupEfficiency, maxRecupPowerW, 0.15,
                     maxMotorPowerW,
@@ -166,6 +176,26 @@ public final class MpmDischargingModule extends AbstractModule {
                     debugCsvPath, ev.getId().toString()
             );
         };
+    }
+
+    /** Einmalige Plausibilitaets-Zeile: effektives c_r leer/halb/voll (erste Fahrzeugklasse). */
+    private static final java.util.concurrent.atomic.AtomicBoolean ROLLING_LOGGED =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    private static void logRollingSummaryOnce(CalibrationParams calib, double rollingC,
+                                              double mass, double payload) {
+        if (calib.rollingLoadExponent == 1.0 || !ROLLING_LOGGED.compareAndSet(false, true)) return;
+        double leer = MpmDynamicBetDriveEnergyConsumption.effectiveRollingC(
+                rollingC, mass, calib.rollingRefMassKg, calib.rollingLoadExponent);
+        double halb = MpmDynamicBetDriveEnergyConsumption.effectiveRollingC(
+                rollingC, mass + 0.5 * payload, calib.rollingRefMassKg, calib.rollingLoadExponent);
+        double voll = MpmDynamicBetDriveEnergyConsumption.effectiveRollingC(
+                rollingC, mass + payload, calib.rollingRefMassKg, calib.rollingLoadExponent);
+        System.out.printf(
+                "[MpmDischargingModule] c_r lastabhaengig (beta=%.2f, mRef=%.0f kg, c_r_ref=%.5f): "
+                        + "leer %.0f kg -> %.5f | halb %.0f kg -> %.5f | voll %.0f kg -> %.5f%n",
+                calib.rollingLoadExponent, calib.rollingRefMassKg, rollingC,
+                mass, leer, mass + 0.5 * payload, halb, mass + payload, voll);
     }
 
     /** Liest ein Double-Attribut oder gibt den Standardwert zurueck. */

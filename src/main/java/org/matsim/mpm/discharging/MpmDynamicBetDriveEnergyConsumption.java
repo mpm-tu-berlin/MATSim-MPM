@@ -274,6 +274,40 @@ public final class MpmDynamicBetDriveEnergyConsumption implements DriveEnergyCon
         return Math.max(v, 0.0);
     }
 
+    /**
+     * Lastabhaengiger effektiver Rollwiderstandsbeiwert (VECTO-Form).
+     *
+     * VECTO korrigiert den deklarierten RRC je Achse fuer die tatsaechliche
+     * Radlast relativ zur ISO-Pruflast:
+     *   RRC_eff = RRC_decl * (Fz / Fz_ISO)^(beta - 1),  beta = 0.9
+     * (Reg. (EU) 2017/2400 Annex X / VECTO-Doku Gl. 7; Fz_ISO nach ISO 28580 =
+     * 85 % der maximalen Reifentragfaehigkeit; verifiziert ueber KTH-Thesis
+     * diva2:1218050, S. 23 f., die die VECTO-Gleichung samt beta=0.9 zitiert.
+     * Physikbasis: Michelin-Patent US 9,481,415 (Crr ~ z^-0.1); SAE J2452
+     * (F_RR = P^alpha * Z^beta * (a + bV + cV^2)).)
+     *
+     * Hier die Fahrzeug-Ebene mit gebuendelter Gesamtlast (eine "Achse"):
+     * die Last geht als Gesamtmasse ein, der Exponent wirkt auf m/m_ref
+     * (g kuerzt sich; VECTO wendet die Korrektur auf m*g an, NICHT auf die
+     * Normalkraft m*g*cos(theta) — cos kommt erst in der Kraftgleichung dazu).
+     * Dadurch ist das Ergebnis je Fahrzeug konstant und wird einmal im
+     * Factory-Aufbau berechnet: kein Mehraufwand im Link-Hot-Path.
+     * Fuer eine spaetere achsaufgeloeste Erweiterung dieselbe Funktion je
+     * Achse mit deren Last/Referenzlast aufrufen und lastgewichtet summieren.
+     *
+     * @param rollingCRef  Beiwert bei Referenzmasse [-]
+     * @param totalMassKg  aktuelle Gesamtmasse (Leermasse + Zuladung) [kg]
+     * @param refMassKg    Masse, bei der rollingCRef gilt [kg]
+     * @param loadExponent beta; 1.0 reproduziert konstantes c_r bitidentisch
+     */
+    public static double effectiveRollingC(double rollingCRef, double totalMassKg,
+                                           double refMassKg, double loadExponent) {
+        if (loadExponent == 1.0 || !(refMassKg > 0.0) || !(totalMassKg > 0.0)) {
+            return rollingCRef;
+        }
+        return rollingCRef * Math.pow(totalMassKg / refMassKg, loadExponent - 1.0);
+    }
+
     /** Berechnet die Steigung des Links */
     private double computeGrade(Link link) {
         double len = link.getLength();
