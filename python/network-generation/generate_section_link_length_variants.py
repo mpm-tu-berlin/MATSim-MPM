@@ -201,19 +201,45 @@ def find_endpoints(nodes, links):
 
     sources = [n for n in outdeg if indeg.get(n, 0) == 0]
     sinks = [n for n in indeg if outdeg.get(n, 0) == 0]
-    if len(sources) == 1 and len(sinks) == 1:
-        return sources[0], sinks[0]
+    directed = (sources[0], sinks[0]) if (len(sources) == 1 and len(sinks) == 1) else None
 
-    print(f"    WARNUNG: Referenzkette nicht eindeutig gerichtet "
-          f"({len(sources)} Quellen, {len(sinks)} Senken) — Orientierung wird "
-          f"heuristisch bestimmt, Fahrtrichtung damit UNBEKANNT.")
     endpoints = [nid for nid, neighbors in adj.items() if len(neighbors) == 1]
     if len(endpoints) < 2:
         # Fallback: use nodes with lowest degree
         by_degree = sorted(adj.items(), key=lambda x: len(x[1]))
         endpoints = [by_degree[0][0], by_degree[-1][0]]
+    heuristic = (endpoints[0], endpoints[1])
 
-    return endpoints[0], endpoints[1]
+    if directed is not None:
+        if set(directed) == set(heuristic):
+            return directed
+        # Plausibilisierung: in bidirektional geschriebenen Sektionsnetzen
+        # koennen vereinzelte Quelle/Senke mitten in der Route liegen (q5/q20
+        # geo2-Lauf 2026-08-25: 50-m-Referenzpfad trotz 100-km-Sektion, und
+        # die 5-%-Laengenpruefung vergleicht gegen dieselbe degenerierte
+        # Referenz). Der gerichtete Kandidat zaehlt nur, wenn sein Pfad nicht
+        # wesentlich kuerzer ist als der der Grad-1-Endpunkte.
+        def _pathlen(pair):
+            path = find_ordered_path(nodes, links, pair[0], pair[1])
+            if not path:
+                return 0.0
+            return sum(math.hypot(nodes[a]["x"] - nodes[b]["x"],
+                                  nodes[a]["y"] - nodes[b]["y"])
+                       for a, b in zip(path, path[1:]))
+        d_len = _pathlen(directed)
+        h_len = _pathlen(heuristic)
+        if d_len >= 0.9 * h_len:
+            return directed
+        print(f"    WARNUNG: gerichtete Endpunkte verworfen (Pfad "
+              f"{d_len / 1000:.1f} km vs. {h_len / 1000:.1f} km ueber "
+              f"Grad-1-Endpunkte), nutze Grad-1-Endpunkte, Fahrtrichtung "
+              f"damit UNBEKANNT.")
+        return heuristic
+
+    print(f"    WARNUNG: Referenzkette nicht eindeutig gerichtet "
+          f"({len(sources)} Quellen, {len(sinks)} Senken), Orientierung wird "
+          f"heuristisch bestimmt, Fahrtrichtung damit UNBEKANNT.")
+    return heuristic
 
 
 def find_ordered_path(nodes, links, start, end):
