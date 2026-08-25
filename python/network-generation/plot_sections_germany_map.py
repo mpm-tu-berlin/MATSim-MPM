@@ -52,7 +52,7 @@ CITIES = {  # Orientierungspunkte (lon, lat)
 
 # Manuelle Versatzvektoren (Grad lon/lat) fuer Nummern-Badges, um
 # Ueberdeckungen zu vermeiden; Default ist (0.28, 0.18).
-LABEL_OFFSETS = {
+LABEL_OFFSETS = {  # Variante "orig" (Lauf 20260817_V3)
     2:  (-0.09, -0.26),
     3:  (-0.16, 0.57),
     4:  (0.42, -0.18),
@@ -71,6 +71,10 @@ LABEL_OFFSETS = {
 # Sektionen 11 (q55) und 12 (q60) liegen auf demselben Korridor
 # (560 von 561 Knoten gemeinsam): eine Linie, ein Badge "11/12".
 LABEL_TEXT = {11: None, 12: "11/12"}
+
+# Variante "geo" (geo-diverse Auswahl): eigene Offsets, keine Label-Sonderfaelle
+GEO_LABEL_OFFSETS = {}
+GEO_LABEL_TEXT = {}
 
 CITY_LABEL_OFFSETS = {  # Punkte relativ zum Stadtpunkt (dx, dy, ha)
     "Hamburg":   (-4.0, -2.5, "right"),
@@ -142,7 +146,7 @@ def load_dem(dem_tif: Path):
 
 
 def make_map(routes, rings, clip_path, dem=None, dem_extent=None, dx=None, dy=None,
-             out_stem=None):
+             out_stem=None, label_offsets=LABEL_OFFSETS, label_text=LABEL_TEXT):
     lon_min, lon_max = 5.6, 15.35
     lat_min, lat_max = 47.1, 55.25
     lat_mid = 0.5 * (lat_min + lat_max)
@@ -209,11 +213,11 @@ def make_map(routes, rings, clip_path, dem=None, dem_extent=None, dx=None, dy=No
                 zorder=5,
                 path_effects=[pe.Stroke(linewidth=2.4, foreground="white"),
                               pe.Normal()])
-        text = LABEL_TEXT.get(nr, str(nr))
+        text = label_text.get(nr, str(nr))
         if text is None:
             continue
         mid = len(lon) // 2
-        off = LABEL_OFFSETS.get(nr, (0.28, 0.18))
+        off = label_offsets.get(nr, (0.28, 0.18))
         bx, by = lon[mid] + off[0], lat[mid] + off[1]
         # Anker = nahester Routenpunkt zum Badge; Leaderlinie nur bei Distanz
         cosl = math.cos(math.radians(by))
@@ -258,16 +262,26 @@ def main():
     ap.add_argument("--cache-dir", type=Path, required=True,
                     help="Ordner mit germany_dem_gmrt.tif + germany_border.geojson")
     ap.add_argument("--version", default="V1")
+    ap.add_argument("--variant", choices=["orig", "geo"], default="orig",
+                    help="orig = Lauf 20260817_V3; geo = geo-diverse Auswahl "
+                         "(eigene Label-Offsets, Suffix _geo)")
     args = ap.parse_args()
+
+    if args.variant == "geo":
+        offsets, texts, suffix = GEO_LABEL_OFFSETS, GEO_LABEL_TEXT, "geo_"
+    else:
+        offsets, texts, suffix = LABEL_OFFSETS, LABEL_TEXT, ""
 
     routes = load_routes(args.run_dir)
     rings, clip_path = germany_paths(args.cache_dir / "germany_border.geojson")
     dem, extent, dx, dy = load_dem(args.cache_dir / "germany_dem_gmrt.tif")
 
     make_map(routes, rings, clip_path, dem, extent, dx, dy,
-             out_stem=str(args.out_dir / f"fig_route_map_topo_{args.version}"))
+             out_stem=str(args.out_dir / f"fig_route_map_topo_{suffix}{args.version}"),
+             label_offsets=offsets, label_text=texts)
     make_map(routes, rings, MplPath(clip_path.vertices, clip_path.codes),
-             out_stem=str(args.out_dir / f"fig_route_map_plain_{args.version}"))
+             out_stem=str(args.out_dir / f"fig_route_map_plain_{suffix}{args.version}"),
+             label_offsets=offsets, label_text=texts)
 
 
 if __name__ == "__main__":
