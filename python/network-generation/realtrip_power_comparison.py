@@ -208,7 +208,7 @@ def main():
                          label="measured (battery - aux)")
             axes[0].plot(centers / 1000.0, p_sim, color="#C0392B", lw=0.8,
                          label=f"simulated ({cset})")
-            axes[0].set_ylabel("Battery drive power [kW]")
+            axes[0].set_ylabel("Battery drive power (kW)")
             axes[0].legend(loc="best", fontsize=9)
             axes[0].grid(True, alpha=0.25)
             # kWh-Drift: gemeinsame Zeitbasis = Messgeschwindigkeit je Bin
@@ -219,8 +219,8 @@ def main():
             e_meas = np.nancumsum(np.where(np.isfinite(p_meas_bin * dt_h),
                                            p_meas_bin * dt_h, 0))
             axes[1].plot(centers / 1000.0, e_sim - e_meas, color="#21618C", lw=1.2)
-            axes[1].set_ylabel("Cumulative energy drift\nsim - measured [kWh]")
-            axes[1].set_xlabel("Distance [km]")
+            axes[1].set_ylabel("Cumulative energy drift\nsim - measured (kWh)")
+            axes[1].set_xlabel("Distance (km)")
             axes[1].grid(True, alpha=0.25)
             fig.tight_layout()
             kpa._savefig(fig, net_dir, f"power_profile_{trip}_{cset}", version)

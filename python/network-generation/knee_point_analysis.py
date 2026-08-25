@@ -161,10 +161,10 @@ def plot_relative(rel_df, sections, output_dir, version=None):
         xs = sorted(rel_df.max_link_length.unique())
         ax.set_xticks(xs)
         ax.set_xticklabels([str(x) for x in xs], rotation=45, fontsize=8)
-        ax.set_xlabel("Max. allowed link length [m]", fontsize=12)
+        ax.set_xlabel("Max. allowed link length (m)", fontsize=12)
         ax.set_title(loading, fontsize=12)
         ax.grid(True, alpha=0.3, which="both")
-    axes[0].set_ylabel("Energy relative to 250 m step [%]", fontsize=12)
+    axes[0].set_ylabel("Energy relative to 250 m step (%)", fontsize=12)
     axes[1].legend(loc="upper right", fontsize=7, ncol=2, title="section")
     fig.tight_layout()
     _savefig(fig, output_dir, "energy_relative_to_250m", version)
@@ -253,7 +253,7 @@ def plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, output_d
                         yerr=[[cf.loc[250] - cf.loc[1000]], [cf.loc[50] - cf.loc[250]]],
                         fmt="^", ms=8, color="grey", ecolor="grey", capsize=3, zorder=4,
                         label="flat control")
-    ax_mid.set_ylabel("Loaded consumption\n[kWh/km]", fontsize=11)
+    ax_mid.set_ylabel("Loaded consumption\n(kWh/km)", fontsize=11)
     ax_mid.grid(True, alpha=0.25)
     ax_mid.legend(loc="upper left", fontsize=9, framealpha=0.9)
     plt.setp(ax_mid.get_xticklabels(), visible=False)
@@ -272,12 +272,12 @@ def plot_sensitivity_and_knee(sens_df, knee_df, feats, df, cand_grades, output_d
     ax_bot.scatter(subK.grade_pct, subK.knee_link_length_m, marker="D", s=55, zorder=4,
                    facecolors=COL_KNEE, edgecolors="black", linewidths=0.6, alpha=0.9,
                    label="loaded knee")
-    ax_bot.set_ylabel("Knee link\nlength [m]", fontsize=11, color=COL_KNEE)
+    ax_bot.set_ylabel("Knee link\nlength (m)", fontsize=11, color=COL_KNEE)
     ax_bot.tick_params(axis="y", colors=COL_KNEE)
     ax_bot.set_ylim(0, 500)
     ax_bot.grid(True, alpha=0.25)
     ax_bot.legend(loc="upper left", fontsize=8, framealpha=0.9)
-    ax_bot.set_xlabel("Mean absolute grade [%]", fontsize=12)
+    ax_bot.set_xlabel("Mean absolute grade (%)", fontsize=12)
 
     ax_top.set_xlim(-0.1, x_max)
     _savefig(fig, output_dir, "sensitivity_and_knee", version)
@@ -300,8 +300,8 @@ def plot_knee_overview(curves, sections, output_dir, version=None):
     ax.set_xscale("log")
     ax.set_xticks(link_lengths)
     ax.set_xticklabels([str(x) for x in link_lengths], rotation=45, fontsize=8)
-    ax.set_xlabel("Max. allowed link length [m]", fontsize=12)
-    ax.set_ylabel("Energy consumption [kWh/km]", fontsize=12)
+    ax.set_xlabel("Max. allowed link length (m)", fontsize=12)
+    ax.set_ylabel("Energy consumption (kWh/km)", fontsize=12)
     ax.grid(True, alpha=0.3, which="both")
     ax.legend(loc="upper right", fontsize=6, ncol=3)
     fig.tight_layout()

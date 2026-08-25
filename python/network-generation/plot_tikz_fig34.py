@@ -84,7 +84,7 @@ def schreibe_fig3(df, knee, cand, pfad):
     # Marker zeigen die zwoelf diskreten Aufloesungsstufen
     bunt = "\n".join(
         kurve_tex(s, f"{hi[s][0]}, line width=1.1pt") +
-        f"\n\\addlegendentry{{{hi[s][1]} ({g:.1f}\\,\\%)}}"
+        f"\n\\addlegendentry{{{hi(s)[1]} ({g:.1f}\\,\\%)}}"
         for s, g in zip(secs, gx) if s in hi)
 
     # Horizontaler Boxplot der 20 Loaded-Knees auf der Linklaengen-Achse
@@ -135,8 +135,8 @@ def schreibe_fig3(df, knee, cand, pfad):
 % --- Zeile 1: relative Verbrauchs-Aufloesungs-Kurven (loaded)
 \\nextgroupplot[height=3.3cm, xmode=log, xmin=47, xmax=1060,
   xtick={{50,100,250,500,1000}}, xticklabels={{50,100,250,500,1000}},
-  minor xtick={{}}, xlabel={{Maximum link length [m]}},
-  ylabel={{Deviation from 250\\,m grid [\\%]}},
+  minor xtick={{}}, xlabel={{Maximum link length (m)}},
+  ylabel={{Deviation from 250\\,m grid (\\%)}},
   ymin={y2min:.1f}, ymax={y2max:.1f},
   legend style={{at={{(0.02,0.03)}}, anchor=south west}}]
 \\addplot[densely dotted, black, no marks, line width=0.7pt]
@@ -147,8 +147,8 @@ def schreibe_fig3(df, knee, cand, pfad):
 % --- Zeile 2: Spanne 50-1000 m vs. Steigung (Fit-Gerade seit V12
 % entfernt, User-Entscheid 2026-08-05: Trend steckt in den Punkten)
 \\nextgroupplot[height=2.4cm, xmin=-0.15, xmax={x_max:.2f},
-  ymin=0, ymax=36, xlabel={{Mean absolute grade [\\%]}},
-  ylabel={{50--1000\\,m span [\\%]}},
+  ymin=0, ymax=36, xlabel={{Mean absolute grade (\\%)}},
+  ylabel={{50--1000\\,m span (\\%)}},
   legend style={{at={{(0.02,0.97)}}, anchor=north west}}]
 \\addplot[only marks, mark=diamond*, mark size=2.2pt, color=black,
   fill=black] coordinates {{
@@ -186,8 +186,8 @@ def schreibe_fig4(dec, pfad):
 \\begin{{axis}}[
   width=0.86\\columnwidth, scale only axis, axis equal image,
   xmin={-lim:.1f}, xmax={lim:.1f}, ymin={-lim:.1f}, ymax={lim:.1f},
-  xlabel={{Simulated energy change vs.\\ 250\\,m grid [\\%]}},
-  ylabel={{Static model change vs.\\ 250\\,m grid [\\%]}},
+  xlabel={{Simulated energy change vs.\\ 250\\,m grid (\\%)}},
+  ylabel={{Static model change vs.\\ 250\\,m grid (\\%)}},
   tick label style={{font=\\scriptsize}},
   label style={{font=\\footnotesize}},
   legend style={{at={{(0.02,0.98)}}, anchor=north west,

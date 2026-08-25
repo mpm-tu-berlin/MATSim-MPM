@@ -622,8 +622,8 @@ def _plot_energy_vs_link_length(results_df, ax, x_scale="log"):
 
     if x_scale == "log":
         ax.set_xscale("log")
-    ax.set_xlabel("Max. allowed link length [m]", fontsize=12)
-    ax.set_ylabel("Energy consumption [kWh/km]", fontsize=12)
+    ax.set_xlabel("Max. allowed link length (m)", fontsize=12)
+    ax.set_ylabel("Energy consumption (kWh/km)", fontsize=12)
     ax.legend(loc="best", fontsize=9)
     ax.grid(True, alpha=0.3, which="both")
     ax.set_xticks(LINK_LENGTHS)

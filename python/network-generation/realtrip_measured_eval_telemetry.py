@@ -234,8 +234,8 @@ def main():
             ax.plot(grid / 1000.0, zm, color="#555555", lw=1.0, label="measured")
             ax.plot(grid / 1000.0, zn, color="#C0392B", lw=1.0,
                     label=f"network {L} m")
-            ax.set_xlabel("Distance [km]", fontsize=11)
-            ax.set_ylabel("Elevation [m]", fontsize=11)
+            ax.set_xlabel("Distance (km)", fontsize=11)
+            ax.set_ylabel("Elevation (m)", fontsize=11)
             ax.grid(True, alpha=0.25)
             ax.legend(loc="best", fontsize=9)
             fig.tight_layout()

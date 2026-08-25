@@ -120,8 +120,8 @@ def plot_location(nvt, dense, corpus, sx, sy, sb, sk, lon0, lat0,
     if not drawn_net:
         print("  keine Fahrt an dieser Stelle gefunden")
         return None
-    ax.set_xlabel("Weg entlang der Fahrt, 0 = Zielkoordinate [m]")
-    ax.set_ylabel("Höhe [m]")
+    ax.set_xlabel("Weg entlang der Fahrt, 0 = Zielkoordinate (m)")
+    ax.set_ylabel("Höhe (m)")
     ax.set_title(f"{lon0:.4f}/{lat0:.4f} — {n_plotted} Durchfahrten, "
                  f"graue Bänder = als Bauwerk geflaggt", fontsize=9)
     ax.grid(alpha=0.3); ax.legend(fontsize=8)

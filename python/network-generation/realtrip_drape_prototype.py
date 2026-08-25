@@ -206,7 +206,7 @@ def main():
         ax.plot(s[~coupled] / 1000.0, z_net[~coupled], "v", ms=6, color="black",
                 label="entkoppelt (Struktur)")
     ax.set_xlim(args.km[0], args.km[1])
-    ax.set_xlabel("Bogenlänge entlang der Route [km]")
+    ax.set_xlabel("Bogenlänge entlang der Route (km)")
     ax.set_ylabel("Höhe [m ü. NN]")
     ax.set_title(f"Bayes-Drapierung Prototyp — Route {args.trip}, "
                  f"km {args.km[0]:.0f}–{args.km[1]:.0f}")

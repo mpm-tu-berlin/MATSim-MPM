@@ -649,8 +649,8 @@ def plot_span(df_row, prof, corridor_cache, out_dir, context_m=PLOT_CONTEXT_M):
     if inw.any():
         ax.plot((ns[inw] - s_lo) / 1000.0, np.interp(ns[inw], ss, zfin), ".",
                 ms=4, color="k", label="Netzknoten")
-    ax.set_xlabel("Bogenlänge relativ zum Bauwerksbeginn [km]")
-    ax.set_ylabel("Höhe [m]")
+    ax.set_xlabel("Bogenlänge relativ zum Bauwerksbeginn (km)")
+    ax.set_ylabel("Höhe (m)")
     flags = [k for k in ("F2_anchor_at_edge", "F5_too_short", "F6_fallback",
                          "F7_grade_implausible") if bool(df_row.get(k))]
     ax.set_title(f"{df_row['span_id']}  {df_row['kind']}  "

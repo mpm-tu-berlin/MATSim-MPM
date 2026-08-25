@@ -234,7 +234,7 @@ def _plot(label, outdir, version, s_net, z_net, s_al, z_al,
     ax.axhline(0, color="0.6", lw=0.7)
     ax.plot(gs_m / 1000.0, gg_m, color=C_MEAS, lw=0.9, label="Messung")
     ax.plot(gs_n / 1000.0, gg_n, color=C_NET, lw=1.0, label="Netz")
-    ax.set_ylabel("Steigung [%] (250-m-Basis)")
+    ax.set_ylabel("Steigung (%) (250-m-Basis)")
     ax.legend(loc="upper right", fontsize=8)
     ax.grid(alpha=0.3)
 
@@ -243,8 +243,8 @@ def _plot(label, outdir, version, s_net, z_net, s_al, z_al,
         grid = np.arange(s_[0], s_[-1], 250.0)
         dz = np.diff(np.interp(grid, s_, z_))
         ax.plot(grid[1:] / 1000.0, np.cumsum(np.maximum(dz, 0.0)), color=c_, lw=1.3, label=lab)
-    ax.set_ylabel("kumulierter Anstieg [m]")
-    ax.set_xlabel("Bogenlänge entlang der Route [km]")
+    ax.set_ylabel("kumulierter Anstieg (m)")
+    ax.set_xlabel("Bogenlänge entlang der Route (km)")
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3)
 
@@ -268,7 +268,7 @@ def _overview_plot(df, outdir, version):
     axes[0].grid(alpha=0.3, axis="x")
 
     axes[1].barh(y, d["energie_ueberschuss_kWh_pro_km"], color="#d62728")
-    axes[1].set_xlabel("Energie-Äquivalent [kWh/km]")
+    axes[1].set_xlabel("Energie-Äquivalent (kWh/km)")
     axes[1].set_title("Mehrverbrauch durch Scheinsteigung")
     axes[1].grid(alpha=0.3, axis="x")
 

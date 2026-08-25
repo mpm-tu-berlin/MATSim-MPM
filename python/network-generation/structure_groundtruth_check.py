@@ -261,8 +261,8 @@ def plot_struct(rt, row, grid, z_net_g, z_meas_g, base, ivals, out_dir,
                    alpha=0.12, lw=0)
     ax.axvline(0.0, color="0.4", ls=":", lw=0.8)
     ax.axvline((s1 - s0) / 1000.0, color="0.4", ls=":", lw=0.8)
-    ax.set_xlabel("Bogenlänge relativ zum Bauwerksbeginn [km]")
-    ax.set_ylabel("Höhe [m]")
+    ax.set_xlabel("Bogenlänge relativ zum Bauwerksbeginn (km)")
+    ax.set_ylabel("Höhe (m)")
     ax.set_title(f"{row['struct_id']}  {row['kind']}  L={row['len_m']:.0f} m  "
                  f"Fehler Anker {row['dev_at_s0_m']:+.2f}/{row['dev_at_s1_m']:+.2f} m, "
                  f"Deck max |{row['dev_max_abs_m']:.2f}| m, "
