@@ -393,6 +393,68 @@ def _self_proximity_ok(path_nodes, nodes, min_sep_m=2000.0, min_dist_m=1200.0):
     return not np.any(np.abs(s[pairs[:, 0]] - s[pairs[:, 1]]) > min_sep_m)
 
 
+def select_sections_geo(df, coarse_nodes, sigma_tol=0.0015):
+    """Geo-diverse Auswahl (2026-08-25): pro Quantil alle gueltigen Kandidaten
+    mit |sigma_g - Quantilwert| <= sigma_tol betrachten und darunter den
+    waehlen, der den minimalen Abstand zu den bereits gewaehlten Sektionen
+    maximiert (greedy farthest point, Mittelpunkt aus Start-/Endknoten).
+    Erste Auswahl (Q5) wie bisher der sigma_g-naechste Kandidat. Faellt die
+    Toleranzmenge leer aus, rueckt der sigma_g-naechste gueltige Kandidat nach
+    (dann wie select_sections). Verhindert nebenbei Doppel-Korridore wie
+    q55/q60 im Lauf 20260817_V3.
+    Returns dict {f"q{q}": row_index} for each quantile.
+    """
+    selected = {}
+    valid_cache = {}
+
+    def _is_valid(i):
+        if i not in valid_cache:
+            nodes_seq = df.loc[i, "node_list"].split(";")
+            valid_cache[i] = (len(set(nodes_seq)) == len(nodes_seq)
+                              and _self_proximity_ok(nodes_seq, coarse_nodes))
+        return valid_cache[i]
+
+    def _midpoint(i):
+        a = coarse_nodes[str(df.loc[i, "start_node"])]
+        b = coarse_nodes[str(df.loc[i, "end_node"])]
+        return (0.5 * (a["x"] + b["x"]), 0.5 * (a["y"] + b["y"]))
+
+    print(f"\n--- Selected sections (quantile-based, geo-diverse, "
+          f"tol={sigma_tol}) ---")
+    for q in QUANTILES:
+        q_val = df["sigma_g"].quantile(q / 100.0)
+        order = (df["sigma_g"] - q_val).abs().sort_values().index
+        pool = [i for i in order
+                if abs(df.loc[i, "sigma_g"] - q_val) <= sigma_tol
+                and i not in selected.values() and _is_valid(i)]
+        chosen_by = "geo"
+        if not pool:
+            idx = next((i for i in order
+                        if i not in selected.values() and _is_valid(i)), None)
+            chosen_by = "fallback-nearest"
+        elif not selected:
+            idx = pool[0]
+            chosen_by = "nearest (erste Wahl)"
+        else:
+            pts = [_midpoint(i) for i in selected.values()]
+            idx = max(pool, key=lambda i: min(
+                hypot(_midpoint(i)[0] - px, _midpoint(i)[1] - py)
+                for px, py in pts))
+        if idx is None:
+            print(f"  Q{q:>3d}: KEIN gueltiger Kandidat — uebersprungen!")
+            continue
+        selected[f"q{q}"] = idx
+        row = df.loc[idx]
+        d_min = (min(hypot(_midpoint(idx)[0] - px, _midpoint(idx)[1] - py)
+                     for px, py in (_midpoint(i) for i in selected.values()
+                                    if i != idx)) / 1000
+                 if len(selected) > 1 else float("nan"))
+        print(f"  Q{q:>3d} (target={q_val:.3f}): sigma_g={row['sigma_g']:.3f}  "
+              f"|d|={abs(row['sigma_g'] - q_val):.4f}  Pool={len(pool)}  "
+              f"minDist={d_min:.0f} km  [{chosen_by}]")
+    return selected
+
+
 def select_sections(df, coarse_nodes):
     """Select sections at each quantile in QUANTILES of sigma_g.
 
@@ -796,6 +858,12 @@ if __name__ == "__main__":
                           "(Default: germany_network_250m_V2.xml.gz)")
     _ap.add_argument("--run-dir", default=None,
                      help="Ausgabeordner (Default: zeitgestempelt unter data/)")
+    _ap.add_argument("--selection", choices=["quantile", "geo"],
+                     default="quantile",
+                     help="quantile = sigma_g-naechster Kandidat (Original); "
+                          "geo = geo-diverse Auswahl innerhalb --sigma-tol")
+    _ap.add_argument("--sigma-tol", type=float, default=0.0015,
+                     help="sigma_g-Toleranz der geo-diversen Auswahl")
     _cli = _ap.parse_args()
     if _cli.network:
         COARSE_NETWORK = FINE_NETWORK = _cli.network
@@ -858,7 +926,10 @@ if __name__ == "__main__":
     print(f"Paths with valid features: {n_total_paths}")
 
     # --- Step 5: Select quantile sections ---
-    selected = select_sections(df, coarse_nodes)
+    if _cli.selection == "geo":
+        selected = select_sections_geo(df, coarse_nodes, _cli.sigma_tol)
+    else:
+        selected = select_sections(df, coarse_nodes)
 
     # Kennzahlen fuer nachgelagerte Auswertung (Knie-vs-Topografie-Scatter):
     # alle Kandidaten + die selektierten Sektionen mit Quantil-Label.
