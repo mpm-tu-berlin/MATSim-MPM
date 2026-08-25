@@ -59,6 +59,13 @@ N_ITERATIONS       = 50        # number of randomised corridor-building iteratio
 # 20 Sektionen gleichmaessig ueber die sigma_g-Quantile (User 2026-07-06)
 QUANTILES = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 97]
 
+# Selbstannaeherungs-Schwelle der Gueltigkeitspruefung (CLI --min-self-dist).
+# 1200 m stammt aus der Zeit des reinen 500-m-Korridorfilters (Befund
+# 2026-07-06); seit dem 150-m-Dijkstra-Schlauch mit 2-km-Waypoints und der
+# 5-%-Laengenpruefung im Varianten-Generator (2026-07-07) reicht theoretisch
+# 2 x 150 m + Reserve. Default bleibt 1200 fuer Reproduzierbarkeit.
+SELF_MIN_DIST_M = 1200.0
+
 # Color palette for all quantiles (blue → orange → red gradient)
 _PALETTE = ["#2196F3", "#FF9800", "#E53935", "#C62828", "#AD1457", "#6A1B9A", "#4A148C"]
 COLORS = {f"q{q}": _PALETTE[i % len(_PALETTE)] for i, q in enumerate(QUANTILES)}
@@ -411,7 +418,8 @@ def select_sections_geo(df, coarse_nodes, sigma_tol=0.0015):
         if i not in valid_cache:
             nodes_seq = df.loc[i, "node_list"].split(";")
             valid_cache[i] = (len(set(nodes_seq)) == len(nodes_seq)
-                              and _self_proximity_ok(nodes_seq, coarse_nodes))
+                              and _self_proximity_ok(nodes_seq, coarse_nodes,
+                                                     min_dist_m=SELF_MIN_DIST_M))
         return valid_cache[i]
 
     def _midpoint(i):
@@ -472,7 +480,8 @@ def select_sections(df, coarse_nodes):
             # als Teststrecke unbrauchbar, jeder Router kuerzt die Schleife ab
             # (Befund 2026-07-06: q15/q25 des Runs 130433)
             valid_cache[i] = (len(set(nodes_seq)) == len(nodes_seq)
-                              and _self_proximity_ok(nodes_seq, coarse_nodes))
+                              and _self_proximity_ok(nodes_seq, coarse_nodes,
+                                                     min_dist_m=SELF_MIN_DIST_M))
         return valid_cache[i]
 
     print(f"\n--- Selected sections (quantile-based) ---")
@@ -864,7 +873,11 @@ if __name__ == "__main__":
                           "geo = geo-diverse Auswahl innerhalb --sigma-tol")
     _ap.add_argument("--sigma-tol", type=float, default=0.0015,
                      help="sigma_g-Toleranz der geo-diversen Auswahl")
+    _ap.add_argument("--min-self-dist", type=float, default=SELF_MIN_DIST_M,
+                     help="Selbstannaeherungs-Schwelle [m] der Gueltigkeits"
+                          "pruefung (s. Kommentar bei SELF_MIN_DIST_M)")
     _cli = _ap.parse_args()
+    SELF_MIN_DIST_M = _cli.min_self_dist
     if _cli.network:
         COARSE_NETWORK = FINE_NETWORK = _cli.network
 
@@ -934,6 +947,10 @@ if __name__ == "__main__":
     # Kennzahlen fuer nachgelagerte Auswertung (Knie-vs-Topografie-Scatter):
     # alle Kandidaten + die selektierten Sektionen mit Quantil-Label.
     df.drop(columns=["node_list"]).to_csv(run_dir / "candidate_paths_features.csv", index=False)
+    # Alle Kandidaten-Knotenlisten mitschreiben (2026-08-25): erlaubt Offline-
+    # Analyse von Auswahlvarianten/Gueltigkeitsfiltern ohne Neulauf
+    df[["path_id", "node_list"]].to_csv(
+        run_dir / "candidate_node_lists.csv.gz", index=False, compression="gzip")
     sel_rows = []
     for label, idx in selected.items():
         r = df.loc[idx].drop(labels=["node_list"]).to_dict()
