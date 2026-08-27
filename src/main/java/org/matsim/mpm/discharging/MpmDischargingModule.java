@@ -53,17 +53,30 @@ public final class MpmDischargingModule extends AbstractModule {
         // Debug-CSV-Pfad im Output-Verzeichnis (wird lazy geoeffnet, da
         // OutputDirectoryHierarchy das Verzeichnis beim Start loescht/neu anlegt)
         String outputDir = getConfig().controller().getOutputDirectory();
-        Path debugCsvPath = Path.of(outputDir).resolve("resistance_debug.csv");
+        // Benchmark-Schalter: -Dmpm.resistanceDebugCsv=off unterdrueckt die
+        // Debug-CSV (Wall-Clock-Messung; bei Flottenlaeufen dominiert sonst IO)
+        Path debugCsvPath = "off".equals(System.getProperty("mpm.resistanceDebugCsv"))
+                ? null : Path.of(outputDir).resolve("resistance_debug.csv");
 
         // QSim-Factory schreibt die Debug-CSV. Die Routing-Factory (Named-Binding,
         // injiziert in MpmEvNetworkRoutingProvider) ist physikalisch identisch,
         // aber OHNE CSV -> Router-Schaetzrows kontaminieren die Debug-Datei nicht
         // mehr mit identischer vehicleId (C1).
-        bind(DriveEnergyConsumption.Factory.class)
-                .toInstance(consumptionFactory(calib, debugCsvPath));
-        bind(DriveEnergyConsumption.Factory.class)
-                .annotatedWith(Names.named(ROUTING_FACTORY))
-                .toInstance(consumptionFactory(calib, null));
+        // Benchmark-Schalter: -Dmpm.energyModel=constant bindet das einfache
+        // Konstantverbrauchsmodell als Wall-Clock-Referenz (Discussion-Kap.)
+        if ("constant".equals(System.getProperty("mpm.energyModel"))) {
+            DriveEnergyConsumption.Factory constantFactory = ev -> new BetDriveEnergyConsumption();
+            bind(DriveEnergyConsumption.Factory.class).toInstance(constantFactory);
+            bind(DriveEnergyConsumption.Factory.class)
+                    .annotatedWith(Names.named(ROUTING_FACTORY))
+                    .toInstance(constantFactory);
+        } else {
+            bind(DriveEnergyConsumption.Factory.class)
+                    .toInstance(consumptionFactory(calib, debugCsvPath));
+            bind(DriveEnergyConsumption.Factory.class)
+                    .annotatedWith(Names.named(ROUTING_FACTORY))
+                    .toInstance(consumptionFactory(calib, null));
+        }
 
         bind(TemperatureService.class).toInstance(linkId -> 15);// XXX fixed temperature 15 oC
         // Nebenverbrauch: kalibrierte Konstantleistung P_aux [W] fuer alle Fahrzeuge der Gruppe.
@@ -167,7 +180,7 @@ public final class MpmDischargingModule extends AbstractModule {
                         ev.getId(), vehicle.getType().getId(), vehicleMaxSpeedMs, vehicleMaxSpeedMs * 3.6);
             }
 
-            return new MpmDynamicBetDriveEnergyConsumption(
+            MpmDynamicBetDriveEnergyConsumption base = new MpmDynamicBetDriveEnergyConsumption(
                     mass, payload, calib.tractionEfficiency, rollingCEff, aeroFa,
                     calib.inertiaC,
                     calib.recupEfficiency, maxRecupPowerW, 0.15,
@@ -175,6 +188,20 @@ public final class MpmDischargingModule extends AbstractModule {
                     vehicleMaxSpeedMs,
                     debugCsvPath, ev.getId().toString()
             );
+            // Rekuperation auf freien Batterie-Headroom klemmen: eine volle
+            // Batterie kann bergab nichts aufnehmen (Rest in die Reibbremse).
+            // Ohne Klemme wirft der EV-Contrib "Charge outside allowed range",
+            // sobald ein voll geladenes Fahrzeug rekuperiert.
+            return (link, travelTime, linkEnterTime) -> {
+                double energyJ = base.calcEnergyConsumption(link, travelTime, linkEnterTime);
+                if (energyJ < 0) {
+                    double headroomJ = ev.getBattery().getCapacity() - ev.getBattery().getCharge();
+                    if (-energyJ > headroomJ) {
+                        energyJ = -Math.max(headroomJ, 0.0);
+                    }
+                }
+                return energyJ;
+            };
         };
     }
 
