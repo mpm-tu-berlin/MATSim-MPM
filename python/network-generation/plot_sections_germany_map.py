@@ -171,7 +171,7 @@ def make_map(routes, rings, clip_path, dem=None, dem_extent=None, dx=None, dy=No
         "pdf.fonttype": 42,
     })
 
-    width = 3.5
+    width = 2.8  # = 0.8 * \columnwidth (IEEEtran), 1:1-Druckmassstab
     height = width * (y_max - y_min) / (x_max - x_min)
     fig, ax = plt.subplots(figsize=(width, height))
     ax.set_xlim(x_min, x_max)
@@ -199,7 +199,7 @@ def make_map(routes, rings, clip_path, dem=None, dem_extent=None, dx=None, dy=No
                           orientation="vertical")
         cb.set_ticks([0, 1000, 2000, 3000])
         cax.yaxis.set_label_position("left")
-        cb.set_label("Elevation (m)", fontsize=6.5, labelpad=3)
+        cb.set_label("Elevation (m a.s.l.)", fontsize=6.5, labelpad=3)
         cb.ax.tick_params(labelsize=6, length=2, pad=1)
         cb.outline.set_linewidth(0.4)
     else:
@@ -240,15 +240,28 @@ def make_map(routes, rings, clip_path, dem=None, dem_extent=None, dx=None, dy=No
         arrow = None
         if dist > 33_000.0:
             arrow = dict(arrowstyle="-", color=route_color, linewidth=0.5,
-                         shrinkA=0, shrinkB=0)
-        boxstyle = ("circle,pad=0.18" if "/" not in text
-                    else "round,pad=0.15,rounding_size=0.6")
-        ax.annotate(text, (lon[k], lat[k]), xytext=(bx, by),
-                    textcoords="data", fontsize=6.0, fontweight="bold",
-                    color=route_color, ha="center", va="center", zorder=6,
-                    arrowprops=arrow,
-                    bbox=dict(boxstyle=boxstyle, facecolor="white",
-                              edgecolor=route_color, linewidth=0.6))
+                         shrinkA=4.4, shrinkB=0)  # an der Kreiskante beginnen
+        if "/" in text:  # Doppel-Badge (Variante orig): Rundbox wie bisher
+            ax.annotate(text, (lon[k], lat[k]), xytext=(bx, by),
+                        textcoords="data", fontsize=6.0, fontweight="bold",
+                        color=route_color, ha="center", va="center", zorder=6,
+                        arrowprops=arrow,
+                        bbox=dict(boxstyle="round,pad=0.15,rounding_size=0.6",
+                                  facecolor="white", edgecolor=route_color,
+                                  linewidth=0.6))
+            continue
+        # Kreis (Marker) und Ziffern getrennt: der annotate-bbox-Kreis folgt
+        # der Zeilenbox inkl. Unterlaengenraum, die Ziffern saessen ~0.65 pt
+        # zu hoch. Textversatz -0.65 pt zentriert optisch (Rest < 0.1 pt).
+        if arrow is not None:
+            ax.annotate("", (lon[k], lat[k]), xytext=(bx, by),
+                        textcoords="data", arrowprops=arrow, zorder=6)
+        ax.plot(bx, by, marker="o", ms=8.7, mfc="white", mec=route_color,
+                mew=0.6, zorder=6)
+        ax.annotate(text, (bx, by), xytext=(0.0, -0.65),
+                    textcoords="offset points", fontsize=6.0,
+                    fontweight="bold", color=route_color,
+                    ha="center", va="center", zorder=7)
 
     # Massstabsbalken 100 km unten rechts (leere Ecke suedoestlich)
     bar_m = 100_000.0
