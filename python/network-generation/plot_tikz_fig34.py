@@ -36,12 +36,12 @@ def paare(xs, ys, dx=2, dy=2, je_zeile=5):
 
 
 def schreibe_fig3(df, knee, cand, pfad):
-    """Zweizeilige Kernfigur, Variante A2 (2026-08-04): relative
+    """Einzeilige Kernfigur (User-Entscheid 2026-08-27): relative
     Verbrauchs-Aufloesungs-Kurven (3 Sektionen, log-x, horizontaler
-    Knie-Boxplot auf der Linklaengen-Achse) / Spanne vs. Steigung mit
-    Fit-Gerade. Histogramm entfernt (Zahlen im Text); Empty-Knees
-    (Kneedle auf fast flacher Kurve = Rauschen) bewusst nicht enthalten.
-    cand wird nicht mehr genutzt (Signatur wegen main() beibehalten)."""
+    Knie-Boxplot auf der Linklaengen-Achse). Spannen-Panel entfernt
+    (Zahlen stehen im Text); Empty-Knees (Kneedle auf fast flacher
+    Kurve = Rauschen) bewusst nicht enthalten. cand wird nicht mehr
+    genutzt (Signatur wegen main() beibehalten)."""
     kl = knee[knee.loading == "loaded"].dropna(
         subset=["knee_link_length_m"]).sort_values("g_abs_mean")
     gx = kl.g_abs_mean.values * 100.0
@@ -58,10 +58,6 @@ def schreibe_fig3(df, knee, cand, pfad):
         e250 = cons(sec, "loaded", 250)
         return [(L, (cons(sec, "loaded", L) / e250 - 1.0) * 100.0)
                 for L in laengen]
-
-    def spanne(sec, loading):
-        return ((cons(sec, loading, 50) - cons(sec, loading, 1000))
-                / cons(sec, loading, 250) * 100.0)
 
     # Nur drei repraesentative Kurven (User-Entscheid 2026-08-04):
     # flachste/mediane/steilste Sektion; kein Grau-Spaghetti, kein
@@ -84,7 +80,7 @@ def schreibe_fig3(df, knee, cand, pfad):
     # Marker zeigen die zwoelf diskreten Aufloesungsstufen
     bunt = "\n".join(
         kurve_tex(s, f"{hi[s][0]}, line width=1.1pt") +
-        f"\n\\addlegendentry{{{hi(s)[1]} ({g:.1f}\\,\\%)}}"
+        f"\n\\addlegendentry{{{hi[s][1]} route ({g:.1f}\\,\\%)}}"
         for s, g in zip(secs, gx) if s in hi)
 
     # Horizontaler Boxplot der 20 Loaded-Knees auf der Linklaengen-Achse
@@ -109,34 +105,29 @@ def schreibe_fig3(df, knee, cand, pfad):
         f"(axis cs:{kmin:.0f},{ym - wh:.1f}) -- (axis cs:{kmin:.0f},{ym + wh:.1f});",
         f"\\draw[{fb}, line width=0.6pt] "
         f"(axis cs:{kmax:.0f},{ym - wh:.1f}) -- (axis cs:{kmax:.0f},{ym + wh:.1f});",
-        f"\\node[{fb}, font=\\scriptsize, anchor=west] "
-        f"at (axis cs:{kmax + 10:.0f},{ym:.1f}) {{loaded knees}};",
+        f"\\node[{fb}, font=\\scriptsize, anchor=west, align=left] "
+        f"at (axis cs:{kmax + 10:.0f},{ym:.1f}) "
+        f"{{knees from\\\\loaded trucks}};",
     ])
 
-    sp_l = paare(gx, [spanne(s, "loaded") for s in secs], dy=1)
-    sp_e = paare(gx, [spanne(s, "empty") for s in secs], dy=1)
-
     tex = f"""% Auto-generiert von plot_tikz_fig34.py aus
-% energy_results_summary.csv / knee_points.csv /
-% candidate_paths_features.csv (Run 182750). Nicht von Hand editieren.
-% Variante A2 (2026-08-04): Kurven-Panel (3 Sektionen + Knie-Boxplot)
-% + Spannen-Panel; Histogramm entfernt (Zahlen im Text, Schiefe steckt
-% in der Punktdichte des Spannen-Panels). Seit V11 monochrom
-% (Graustufen + Marker-Formen, User-Entscheid 2026-08-05).
+% energy_results_summary.csv / knee_points.csv. Nicht von Hand editieren.
+% Einpaneilig seit 2026-08-27 (User-Entscheid): Spannen-Panel entfernt,
+% Zahlen stehen im Text. Monochrom seit V11 (Graustufen + Marker-Formen,
+% User-Entscheid 2026-08-05).
 \\begin{{tikzpicture}}
-\\begin{{groupplot}}[group style={{group size=1 by 2, vertical sep=26pt}},
+\\begin{{axis}}[
   width=0.84\\columnwidth, scale only axis,
   tick label style={{font=\\scriptsize}},
   label style={{font=\\footnotesize}},
   legend style={{font=\\scriptsize, draw=none, fill=white,
     fill opacity=0.85, text opacity=1}},
   legend cell align=left, grid=major, grid style={{black!12}},
-]
-% --- Zeile 1: relative Verbrauchs-Aufloesungs-Kurven (loaded)
-\\nextgroupplot[height=3.3cm, xmode=log, xmin=47, xmax=1060,
+  height=3.3cm, xmode=log, xmin=47, xmax=1060,
   xtick={{50,100,250,500,1000}}, xticklabels={{50,100,250,500,1000}},
   minor xtick={{}}, xlabel={{Maximum link length (m)}},
-  ylabel={{Deviation from 250\\,m grid (\\%)}},
+  ylabel={{Consumption deviation\\\\from 250\\,m grid (\\%)}},
+  ylabel style={{align=center}},
   ymin={y2min:.1f}, ymax={y2max:.1f},
   legend style={{at={{(0.02,0.03)}}, anchor=south west}}]
 \\addplot[densely dotted, black, no marks, line width=0.7pt]
@@ -144,23 +135,7 @@ def schreibe_fig3(df, knee, cand, pfad):
 \\addlegendentry{{250\\,m calibration scale}}
 {bunt}
 {box}
-% --- Zeile 2: Spanne 50-1000 m vs. Steigung (Fit-Gerade seit V12
-% entfernt, User-Entscheid 2026-08-05: Trend steckt in den Punkten)
-\\nextgroupplot[height=2.4cm, xmin=-0.15, xmax={x_max:.2f},
-  ymin=0, ymax=36, xlabel={{Mean absolute grade (\\%)}},
-  ylabel={{50--1000\\,m span (\\%)}},
-  legend style={{at={{(0.02,0.97)}}, anchor=north west}}]
-\\addplot[only marks, mark=diamond*, mark size=2.2pt, color=black,
-  fill=black] coordinates {{
-{sp_l}
-}};
-\\addlegendentry{{loaded}}
-\\addplot[only marks, mark=x, mark size=2.2pt, color=black!50,
-  line width=0.8pt] coordinates {{
-{sp_e}
-}};
-\\addlegendentry{{empty}}
-\\end{{groupplot}}
+\\end{{axis}}
 \\end{{tikzpicture}}
 """
     pfad.write_text(tex, encoding="utf-8")
@@ -226,17 +201,23 @@ def main():
 
     df = pd.read_csv(DATA / "energy_results_summary.csv")
     knee = pd.read_csv(DATA / "knee_points.csv")
-    dec = pd.read_csv(DATA / "grade_decomposition.csv")
     cand = (pd.read_csv(sel / "candidate_paths_features.csv")
             ["g_abs_mean"] * 100.0).values
 
     v3 = naechste_version("sensitivity_knee_tikz")
     out3 = DATA / f"sensitivity_knee_tikz_V{v3}.tex"
     schreibe_fig3(df, knee, cand, out3)
-    v4 = naechste_version("decomposition_validity_tikz")
-    out4 = DATA / f"decomposition_validity_tikz_V{v4}.tex"
-    schreibe_fig4(dec, out4)
-    print(f"TikZ: {out3.name}, {out4.name}")
+    namen = [out3.name]
+    # Fig. 4 (Zerlegungs-Validitaet) gehoert zum gestrichenen Kap. V-C;
+    # nur erzeugen, wenn der Sweep die Zerlegung mitgeliefert hat.
+    dec_csv = DATA / "grade_decomposition.csv"
+    if dec_csv.exists():
+        dec = pd.read_csv(dec_csv)
+        v4 = naechste_version("decomposition_validity_tikz")
+        out4 = DATA / f"decomposition_validity_tikz_V{v4}.tex"
+        schreibe_fig4(dec, out4)
+        namen.append(out4.name)
+    print("TikZ: " + ", ".join(namen))
 
 
 if __name__ == "__main__":
