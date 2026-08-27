@@ -29,6 +29,7 @@ import matplotlib.patheffects as pe
 import numpy as np
 import pandas as pd
 import rasterio
+from rasterio.warp import calculate_default_transform, reproject, Resampling
 from matplotlib.colors import LightSource, LinearSegmentedColormap, Normalize
 from matplotlib.cm import ScalarMappable
 from matplotlib.path import Path as MplPath
@@ -93,10 +94,9 @@ HYPSO_VMAX = 3000
 
 
 def load_routes(run_dir: Path):
-    """Liest die 20 Sektionen und liefert [(nr, quantil, lons, lats), ...]."""
+    """Liest die 20 Sektionen; Koordinaten bleiben in EPSG:4839 (Meter)."""
     node_lists = pd.read_csv(run_dir / "selected_sections_node_lists.csv")
     order = {f"q{q}": i + 1 for i, q in enumerate(QUANTILES)}  # 1 = flachste
-    tf = Transformer.from_crs("EPSG:4839", "EPSG:4326", always_xy=True)
     routes = []
     for _, row in node_lists.iterrows():
         sec = row["section"]
@@ -109,8 +109,7 @@ def load_routes(run_dir: Path):
                 elem.clear()
         ids = row["node_list"].split(";")
         xy = np.array([coords[i] for i in ids if i in coords])
-        lon, lat = tf.transform(xy[:, 0], xy[:, 1])
-        routes.append((order[sec], sec, np.asarray(lon), np.asarray(lat)))
+        routes.append((order[sec], sec, xy[:, 0], xy[:, 1]))
     routes.sort(key=lambda r: r[0])
     return routes
 
@@ -119,10 +118,13 @@ def germany_paths(border_geojson: Path):
     """MultiPolygon -> (Liste der Ring-Arrays, Compound-MplPath zum Clippen)."""
     gj = json.loads(border_geojson.read_text(encoding="utf-8"))
     polys = gj["geometry"]["coordinates"]  # MultiPolygon
+    tf = Transformer.from_crs("EPSG:4326", "EPSG:4839", always_xy=True)
     rings, vertices, codes = [], [], []
     for poly in polys:
         for ring in poly:  # Ring 0 = aussen, weitere = Loecher
             arr = np.asarray(ring)
+            gx, gy = tf.transform(arr[:, 0], arr[:, 1])
+            arr = np.column_stack([gx, gy])
             rings.append(arr)
             vertices.append(arr)
             codes.append([MplPath.MOVETO] + [MplPath.LINETO] * (len(arr) - 2)
@@ -133,23 +135,33 @@ def germany_paths(border_geojson: Path):
 
 
 def load_dem(dem_tif: Path):
+    """Warpt das GMRT-DEM (EPSG:4326) auf ein regelmaessiges EPSG:4839-Raster."""
+    dst_crs = "EPSG:4839"
     with rasterio.open(dem_tif) as src:
-        dem = src.read(1).astype(float)
-        b = src.bounds
+        transform, w, h = calculate_default_transform(
+            src.crs, dst_crs, src.width, src.height, *src.bounds)
+        dem = np.full((h, w), np.nan, dtype=np.float32)
+        reproject(rasterio.band(src, 1), dem,
+                  dst_transform=transform, dst_crs=dst_crs,
+                  resampling=Resampling.bilinear, dst_nodata=np.nan)
     dem = np.where(np.isnan(dem), 0.0, dem)
-    extent = (b.left, b.right, b.bottom, b.top)
-    # Pixelgroesse in Metern fuer den Hillshade
-    lat_mid = 0.5 * (b.bottom + b.top)
-    dx = (b.right - b.left) / dem.shape[1] * 111_320 * math.cos(math.radians(lat_mid))
-    dy = (b.top - b.bottom) / dem.shape[0] * 111_320
-    return dem, extent, dx, dy
+    extent = (transform.c, transform.c + transform.a * w,
+              transform.f + transform.e * h, transform.f)
+    dx, dy = transform.a, -transform.e  # Pixelgroesse in Metern
+    return dem.astype(float), extent, dx, dy
 
 
 def make_map(routes, rings, clip_path, dem=None, dem_extent=None, dx=None, dy=None,
              out_stem=None, label_offsets=LABEL_OFFSETS, label_text=LABEL_TEXT):
-    lon_min, lon_max = 5.6, 15.35
-    lat_min, lat_max = 47.1, 55.25
-    lat_mid = 0.5 * (lat_min + lat_max)
+    # Kartenausdehnung aus der Landesgrenze (EPSG:4839, Meter)
+    all_xy = np.concatenate(rings)
+    pad = 15_000.0
+    x_min, x_max = all_xy[:, 0].min() - pad, all_xy[:, 0].max() + pad
+    y_min, y_max = all_xy[:, 1].min() - pad, all_xy[:, 1].max() + pad
+    # Badge-Offsets sind historisch in Grad; hier in Meter umrechnen
+    deg_x, deg_y = 69_900.0, 111_320.0  # 1 Grad lon (bei 51.2 N) / lat
+    label_offsets = {k: (ox * deg_x, oy * deg_y)
+                     for k, (ox, oy) in label_offsets.items()}
 
     plt.rcParams.update({
         "font.family": "serif",
@@ -160,12 +172,11 @@ def make_map(routes, rings, clip_path, dem=None, dem_extent=None, dx=None, dy=No
     })
 
     width = 3.5
-    height = width * (lat_max - lat_min) / ((lon_max - lon_min)
-                                            * math.cos(math.radians(lat_mid)))
+    height = width * (y_max - y_min) / (x_max - x_min)
     fig, ax = plt.subplots(figsize=(width, height))
-    ax.set_xlim(lon_min, lon_max)
-    ax.set_ylim(lat_min, lat_max)
-    ax.set_aspect(1.0 / math.cos(math.radians(lat_mid)))
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+    ax.set_aspect("equal")  # konforme Projektion: Deutschland unverzerrt
     ax.axis("off")
 
     clip = PathPatch(clip_path, transform=ax.transData, facecolor="none",
@@ -183,11 +194,12 @@ def make_map(routes, rings, clip_path, dem=None, dem_extent=None, dx=None, dy=No
         im = ax.imshow(rgb, extent=dem_extent, origin="upper",
                        interpolation="bilinear", zorder=1, rasterized=True)
         im.set_clip_path(clip)
-        cax = ax.inset_axes([0.02, 0.10, 0.028, 0.28])
+        cax = ax.inset_axes([0.045, 0.02, 0.025, 0.21])
         cb = fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cax,
                           orientation="vertical")
         cb.set_ticks([0, 1000, 2000, 3000])
-        cb.set_label("Elevation (m)", fontsize=6.5, labelpad=10)
+        cax.yaxis.set_label_position("left")
+        cb.set_label("Elevation (m)", fontsize=6.5, labelpad=3)
         cb.ax.tick_params(labelsize=6, length=2, pad=1)
         cb.outline.set_linewidth(0.4)
     else:
@@ -198,10 +210,12 @@ def make_map(routes, rings, clip_path, dem=None, dem_extent=None, dx=None, dy=No
     for arr in rings:
         ax.plot(arr[:, 0], arr[:, 1], color="0.25", lw=0.6, zorder=3)
 
+    tf_city = Transformer.from_crs("EPSG:4326", "EPSG:4839", always_xy=True)
     for name, (lon, lat) in CITIES.items():
+        cx, cy = tf_city.transform(lon, lat)
         dx_pt, dy_pt, ha = CITY_LABEL_OFFSETS.get(name, (2.5, -1.5, "left"))
-        ax.plot(lon, lat, marker="o", ms=1.8, mfc="0.15", mec="none", zorder=4)
-        ax.annotate(name, (lon, lat), xytext=(dx_pt, dy_pt),
+        ax.plot(cx, cy, marker="o", ms=1.8, mfc="0.15", mec="none", zorder=4)
+        ax.annotate(name, (cx, cy), xytext=(dx_pt, dy_pt),
                     textcoords="offset points", fontsize=5.5, style="italic",
                     color="0.25", ha=ha, zorder=4,
                     path_effects=[pe.withStroke(linewidth=1.2, foreground="white",
@@ -217,15 +231,14 @@ def make_map(routes, rings, clip_path, dem=None, dem_extent=None, dx=None, dy=No
         if text is None:
             continue
         mid = len(lon) // 2
-        off = label_offsets.get(nr, (0.28, 0.18))
+        off = label_offsets.get(nr, (19_600.0, 20_000.0))
         bx, by = lon[mid] + off[0], lat[mid] + off[1]
         # Anker = nahester Routenpunkt zum Badge; Leaderlinie nur bei Distanz
-        cosl = math.cos(math.radians(by))
-        d2 = ((lon - bx) * cosl) ** 2 + (lat - by) ** 2
+        d2 = (lon - bx) ** 2 + (lat - by) ** 2
         k = int(np.argmin(d2))
         dist = math.sqrt(d2[k])
         arrow = None
-        if dist > 0.30:
+        if dist > 33_000.0:
             arrow = dict(arrowstyle="-", color=route_color, linewidth=0.5,
                          shrinkA=0, shrinkB=0)
         boxstyle = ("circle,pad=0.18" if "/" not in text
@@ -238,12 +251,11 @@ def make_map(routes, rings, clip_path, dem=None, dem_extent=None, dx=None, dy=No
                               edgecolor=route_color, linewidth=0.6))
 
     # Massstabsbalken 100 km unten rechts (leere Ecke suedoestlich)
-    bar_km = 100
-    bar_deg = bar_km / (111.32 * math.cos(math.radians(lat_mid)))
-    x0, y0 = lon_max - 0.4 - bar_deg, lat_min + 0.25
-    ax.plot([x0, x0 + bar_deg], [y0, y0], color="0.15", lw=1.2,
+    bar_m = 100_000.0
+    x0, y0 = x_max - 30_000.0 - bar_m, y_min + 28_000.0
+    ax.plot([x0, x0 + bar_m], [y0, y0], color="0.15", lw=1.2,
             solid_capstyle="butt", zorder=6)
-    ax.annotate(f"{bar_km} km", (x0 + bar_deg / 2, y0), xytext=(0, 2.5),
+    ax.annotate("100 km", (x0 + bar_m / 2, y0), xytext=(0, 2.5),
                 textcoords="offset points", ha="center", fontsize=6,
                 color="0.15", zorder=6)
 
