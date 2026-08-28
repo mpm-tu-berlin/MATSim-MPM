@@ -4,7 +4,6 @@
                     xsi:schemaLocation="http://www.matsim.org/files/dtd https://www.matsim.org/files/dtd/vehicleDefinitions_v2.0.xsd">
 
 	<!-- === Testfahrzeug: Volvo FH 42T E (EEA-ID: 0x0030...DAAD) === -->
-	<!-- Quelle: interne Stammdaten, Zeilen 4-5 (Regional Delivery) -->
 	<!-- Fahrzeugmasse: 18166 kg | CdxA: 5.515 m² | RRC: 0.00375 | RatedPower: 467 kW | BatKap: 464.3 kWh -->
 
 	<vehicleType id="BET_FH42TE_RD_low">

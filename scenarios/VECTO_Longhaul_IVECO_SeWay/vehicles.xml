@@ -4,7 +4,6 @@
                     xsi:schemaLocation="http://www.matsim.org/files/dtd https://www.matsim.org/files/dtd/vehicleDefinitions_v2.0.xsd">
 
 	<!-- === Testfahrzeug: IVECO S-eWay (EEA-ID: 0X03BF134A613B9524DC32BB26A13AB7B0B31AD74086EC7D927DA614801EB23271) === -->
-	<!-- Quelle: interne Stammdaten, Zeilen 17-18 (Long Haul) -->
 	<!-- Fahrzeugmasse: 19282 kg | CdxA: 5.515 m² | RRC: 0.00565 | RatedPower: 851 kW | BatKap: ~558 kWh -->
 
 	<vehicleType id="BET_IVECO_SEWAY_LH_low">
