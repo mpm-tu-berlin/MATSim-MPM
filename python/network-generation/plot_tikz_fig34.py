@@ -117,7 +117,7 @@ def schreibe_fig3(df, knee, cand, pfad):
 % User-Entscheid 2026-08-05).
 \\begin{{tikzpicture}}
 \\begin{{axis}}[
-  width=0.84\\columnwidth, scale only axis,
+  width=0.78\\columnwidth, scale only axis,
   tick label style={{font=\\scriptsize}},
   label style={{font=\\footnotesize}},
   legend style={{font=\\scriptsize, draw=none, fill=white,
@@ -127,7 +127,7 @@ def schreibe_fig3(df, knee, cand, pfad):
   xtick={{50,100,250,500,1000}}, xticklabels={{50,100,250,500,1000}},
   minor xtick={{}}, xlabel={{Maximum link length (m)}},
   ylabel={{Consumption deviation\\\\from 250\\,m grid (\\%)}},
-  ylabel style={{align=center}},
+  ylabel style={{align=center}}, ylabel shift=-3pt,
   ymin={y2min:.1f}, ymax={y2max:.1f},
   legend style={{at={{(0.02,0.03)}}, anchor=south west}}]
 \\addplot[densely dotted, black, no marks, line width=0.7pt]
