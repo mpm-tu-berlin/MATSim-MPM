@@ -4,7 +4,6 @@
                     xsi:schemaLocation="http://www.matsim.org/files/dtd https://www.matsim.org/files/dtd/vehicleDefinitions_v2.0.xsd">
 
 	<!-- === BET G5 (VECTO Group 5, 2 RRC-Varianten) === -->
-	<!-- Quelle: interne Stammdaten, Blatt PEV_gekuerzt (Regional Delivery) -->
 
 	<vehicleType id="BET_G5_RRC48_RD_low">
 		<description>BET G5 (RRC=0.0048), Payload 2600 kg (VECTO Regional Delivery)</description>
