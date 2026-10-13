@@ -1,6 +1,8 @@
 package org.matsim.mpm.routing;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -9,10 +11,13 @@ import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.network.Network;
 import org.matsim.api.core.v01.population.PopulationFactory;
 import org.matsim.contrib.ev.EvConfigGroup;
+import org.matsim.core.config.ConfigGroup;
 import org.matsim.contrib.ev.discharging.AuxEnergyConsumption;
 import org.matsim.contrib.ev.discharging.DriveEnergyConsumption;
 import org.matsim.contrib.ev.fleet.ElectricFleetSpecification;
 import org.matsim.contrib.ev.infrastructure.ChargingInfrastructureSpecification;
+import org.matsim.mpm.stats.ChargerWaitingTimeTracker;
+import org.matsim.mpm.stats.RouteDetourTracker;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.groups.RoutingConfigGroup;
 import org.matsim.core.config.groups.RoutingConfigGroup.AccessEgressType;
@@ -25,6 +30,7 @@ import org.matsim.core.router.costcalculators.TravelDisutilityFactory;
 import org.matsim.core.router.util.LeastCostPathCalculator;
 import org.matsim.core.router.util.LeastCostPathCalculatorFactory;
 import org.matsim.core.router.util.TravelTime;
+import org.matsim.core.trafficmonitoring.FreeSpeedTravelTime;
 
 import com.google.inject.Inject;
 import com.google.inject.Provider;
@@ -75,6 +81,12 @@ public class MpmEvNetworkRoutingProvider implements Provider<RoutingModule> {
     @Inject
     private AuxEnergyConsumption.Factory auxConsumptionFactory;
 
+    @Inject
+    private ChargerWaitingTimeTracker chargerWaitingTimeTracker;
+
+    @Inject
+    private RouteDetourTracker routeDetourTracker;
+
     /**
      * This is the older (and still more standard) constructor, where the routingMode and the resulting mode were the
      * same.
@@ -121,18 +133,26 @@ public class MpmEvNetworkRoutingProvider implements Provider<RoutingModule> {
             }
         }
 
-        // the travel time & disutility refer to the routing mode:
+        // Use free-flow travel time capped at truck max speed (65 km/h) for deterministic routing.
+        // This ensures planned leg travel times match actual QSim driving times.
+        TravelTime travelTime = (link, time, person, vehicle) ->
+                link.getLength() / Math.min(MpmEvNetworkRoutingModule.MAX_VEHICLE_SPEED, link.getFreespeed(time));
+
         TravelDisutilityFactory travelDisutilityFactory = this.travelDisutilityFactories.get(routingMode);
         if (travelDisutilityFactory == null) {
             throw new RuntimeException("No TravelDisutilityFactory bound for mode " + routingMode + ".");
         }
-        TravelTime travelTime = travelTimes.get(routingMode);
-        if (travelTime == null) {
-            throw new RuntimeException("No TravelTime bound for mode " + routingMode + ".");
-        }
 
         LeastCostPathCalculator routeAlgo = leastCostPathCalculatorFactory.createPathCalculator(filteredNetwork,
                 travelDisutilityFactory.createTravelDisutility(travelTime), travelTime);
+
+        // Load rest areas from file if configured (optional — null restAreasFile preserves old behavior).
+        List<RestAreaSpecification> restAreas = new ArrayList<>();
+        MpmRoutingConfigGroup mpmCfg = (MpmRoutingConfigGroup) config.getModules().get(MpmRoutingConfigGroup.GROUP_NAME);
+        if (mpmCfg != null && mpmCfg.restAreasFile != null) {
+            new RestAreaReader(restAreas).parse(
+                    ConfigGroup.getInputFileURL(config.getContext(), mpmCfg.restAreasFile));
+        }
 
         // the following again refers to the (transport)mode, since it will determine the mode of the leg on the network:
         if (!routingConfigGroup.getAccessEgressType().equals(AccessEgressType.none)) {
@@ -141,7 +161,9 @@ public class MpmEvNetworkRoutingProvider implements Provider<RoutingModule> {
             return new MpmEvNetworkRoutingModule(mode, filteredNetwork,
                     DefaultRoutingModules.createPureNetworkRouter(mode, populationFactory, filteredNetwork, routeAlgo),
                     electricFleetSpecification, chargingInfrastructureSpecification, travelTime,
-                    driveConsumptionFactory, auxConsumptionFactory, EvConfigGroup.get(config));
+                    driveConsumptionFactory, auxConsumptionFactory, EvConfigGroup.get(config),
+                    chargerWaitingTimeTracker, restAreas,
+                    routeDetourTracker);
         }
     }
 }
