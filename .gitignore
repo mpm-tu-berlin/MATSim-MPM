@@ -61,7 +61,10 @@ python/calibration/~$*
 *.tif
 cache/
 python/network-generation/__pycache__/
-python/network-generation/data/
+python/network-generation/data/*
+!python/network-generation/data/README.md
+python/network-generation/cache/
+python/network-generation/old/
 
 # Lokale Benchmark-/Testartefakte (nicht committen), gilt für alte und neue Lage (scenarios/BETs/tests/)
 scenarios/german_etruck_network_z.xml.gz
@@ -69,3 +72,7 @@ scenarios/BETs/**/BET_Vehicles_100k*.xml.gz
 scenarios/BETs/**/BET_Vehicles_XL.xml.gz
 scenarios/BETs/**/BET_plans_100k.xml.gz
 scenarios/BETs/**/config_bench*_nc*.xml
+
+# Alte consumption_test-Artefakte (netgen-Branch)
+/scenarios/BETs/consumption_test/1_BET_Test_plans.xml.gz
+scenarios/BETs/consumption_test/*.xml.gz

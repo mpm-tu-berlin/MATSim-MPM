@@ -1,0 +1,17 @@
+osmnx
+geopandas
+pandas
+numpy
+scipy
+shapely
+rasterio
+networkx
+tqdm
+fiona
+pyproj
+folium
+branca
+matplotlib
+rich
+lxml
+pyogrio
