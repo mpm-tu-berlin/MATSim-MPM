@@ -62,3 +62,10 @@ python/calibration/~$*
 cache/
 python/network-generation/__pycache__/
 python/network-generation/data/
+
+# Lokale Benchmark-/Testartefakte (nicht committen), gilt für alte und neue Lage (scenarios/BETs/tests/)
+scenarios/german_etruck_network_z.xml.gz
+scenarios/BETs/**/BET_Vehicles_100k*.xml.gz
+scenarios/BETs/**/BET_Vehicles_XL.xml.gz
+scenarios/BETs/**/BET_plans_100k.xml.gz
+scenarios/BETs/**/config_bench*_nc*.xml
