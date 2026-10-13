@@ -1,0 +1,6 @@
+optuna
+pandas
+matplotlib
+numpy
+plotly
+scikit-learn

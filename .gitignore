@@ -24,3 +24,55 @@ hs_err_pid*
 # IntelliJ
 /.idea/
 *.iml
+
+# MATSim Debug-Ausgaben
+resistance_debug.csv
+dependency-reduced-pom.xml
+
+# Reale Truck-Fahrten — DATENSCHUTZ: niemals committen/pushen
+scenarios/19t_BET_G5/
+scenarios/24t_BET_G5_100km/
+scenarios/43t_BET_G5/
+# Realfahrten-Kalibrierung (Skript + Ergebnisse enthalten sensible Sollwerte aus Realdaten)
+python/calibration/scripts/optimize_multi_bet_g5.py
+python/calibration/scripts/analyze_real_validation.py
+python/calibration/scripts/results/
+python/calibration/REAL_VALIDATION_PLAN.md
+python/calibration/REVIEW_FINDINGS_2026-06.md
+
+# Paper-2-Arbeitsdokumente (nicht veröffentlichen)
+TTE_Gliederung_Paper2*.md
+PAPER2_STATUS.md
+
+# Python-Kalibrierung
+python/calibration/.venv/
+python/calibration/results/
+python/calibration/__pycache__/
+python/calibration/**/__pycache__/
+python/calibration/*.db
+python/calibration/*.db-journal
+python/calibration/nul
+python/calibration/resistance_debug.csv
+python/calibration/data/
+python/calibration/~$*
+
+# Netzgenerierung: große Rasterquellen (DTM), OSM-/Overpass-Cache, Python-Cache,
+# Daten (Sektionsnetze, GPKG, Zwischenstände — nie committen)
+*.tif
+cache/
+python/network-generation/__pycache__/
+python/network-generation/data/*
+!python/network-generation/data/README.md
+python/network-generation/cache/
+python/network-generation/old/
+
+# Lokale Benchmark-/Testartefakte (nicht committen), gilt für alte und neue Lage (scenarios/BETs/tests/)
+scenarios/german_etruck_network_z.xml.gz
+scenarios/BETs/**/BET_Vehicles_100k*.xml.gz
+scenarios/BETs/**/BET_Vehicles_XL.xml.gz
+scenarios/BETs/**/BET_plans_100k.xml.gz
+scenarios/BETs/**/config_bench*_nc*.xml
+
+# Alte consumption_test-Artefakte (netgen-Branch)
+/scenarios/BETs/consumption_test/1_BET_Test_plans.xml.gz
+scenarios/BETs/consumption_test/*.xml.gz

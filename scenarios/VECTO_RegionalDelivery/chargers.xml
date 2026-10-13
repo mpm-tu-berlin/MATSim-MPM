@@ -1,0 +1,6 @@
+<!DOCTYPE chargers SYSTEM "http://matsim.org/files/dtd/chargers_v1.dtd">
+
+<!-- Dummy-Charger, wird nicht benutzt (Fahrzeuge schaffen die 100km ohne Laden) -->
+<chargers>
+	<charger id="dummy" link="0" type="DC" plug_power="720.0" plug_count="1"/>
+</chargers>

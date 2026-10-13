@@ -4,31 +4,31 @@
 	<module name="ev">
 		<param name="auxDischargeTimeStep" value="10"/>
 		<param name="chargeTimeStep" value="5"/>
-		<param name="chargersFile" value="BETs_Chargers_limited.xml"/>
+		<param name="chargersFile" value="BETs_Chargers_test.xml"/>
 		<param name="timeProfiles" value="true"/>
 		<param name="enforceChargingInteractionDuration" value="true"/>
 	</module>
 
 	<module name="vehicles">
-		<param name="vehiclesFile" value="eTrucks_Vehicle.xml"/>
+		<param name="vehiclesFile" value="10_BETs_Test_Vehicles.xml.gz"/>
 	</module>
 
 	<module name="global">
 		<param name="randomSeed" value="4711"/>
-		<param name="coordinateSystem" value="Atlantis"/>
+		<param name="coordinateSystem" value="EPSG:4839"/>
 		<param name= "numberOfThreads" value= "8" />
 	</module>
 
 	<module name="network">
-		<param name="inputNetworkFile" value="../../../german_etruck_network.xml.gz"/>
+		<param name="inputNetworkFile" value="märkisch-oderland_max_1000m_long_smoothened_not_merged_0_05.xml.gz"/>
 	</module>
 
 	<module name="plans">
-		<param name="inputPlansFile" value="BET_test_plans_queuing.xml"/>
+		<param name="inputPlansFile" value="10_BETs_Test_plans.xml.gz"/>
 	</module>
 
 	<module name="controller">
-		<param name="outputDirectory" value="./output/BETs/BETs_queue_test"/>
+		<param name="outputDirectory" value="./output/BETs/10_BETs_Test"/>
 		<param name="firstIteration" value="0"/>
 		<param name="lastIteration" value="10"/>
 		<param name="eventsFileFormat" value="xml"/>

@@ -1,3 +1,11 @@
+# ============================================================================
+# HINWEIS (2026-06): Fuer die DTM-Pipeline ist dieses Skript OPTIONAL/LEGACY.
+# Skript 04 (assign_heights_along_corridors) glaettet die Hoehen jetzt bereits
+# AUFLÖSUNGSUNABHÄNGIG auf einem dichten Master-Korridorprofil UND linearisiert
+# Bruecken/Tunnel (OSM bridge/tunnel). Ein zusaetzlicher Lauf von 05 danach wuerde
+# DOPPELT glaetten. 05 bleibt nutzbar fuer Netze OHNE Kantengeometrie (nur Knoten)
+# oder als separate Glaettungs-Sensitivitaet.
+# ============================================================================
 import gzip
 import xml.etree.ElementTree as ET
 import networkx as nx
@@ -10,19 +18,24 @@ import warnings
 # ==============================
 # Konfiguration
 # ==============================
-INPUT_FILE  = r"data\germany_max_1000m_long.xml.gz"
-OUTPUT_FILE = r"data\germany_max_1000m_long_smoothened_merged_0_05.xml.gz"
+INPUT_FILE  = r"data\Germany_max_unlimited_long_V0.xml.gz"
+OUTPUT_FILE = r"data\Germany_max_unlimited_long_smoothened_not_merged_0_05.xml.gz"
 
-# Glättung (Spline)
+# Glättung (Spline) – SANFT, seit die Höhen direkt & rauscharm aus dem LiDAR-DTM
+# kommen (Skript 04, sample_heights). Früher diente die Glättung der Unterdrückung
+# des ~2 m KD-Tree-Rauschens (RMS 3 m) – das entfällt jetzt. Ziel ist nur noch
+# sanftes Glätten kurzwelliger Bare-Earth-Artefakte (Damm-/Brücken-Übergänge),
+# OHNE echtes Terrain zu löschen. Kleinerer RMS = weniger Glättung (sanfter):
+#   0.5 = sehr sanft (nur Sub-Meter-Jitter) · 1.0 = sanft (Damm-Skala) · 3.0 = alt/aggressiv
 SMOOTH_METHOD = "spline"
 SPLINE_S = None            # None = auto (siehe SPLINE_TARGET_RMS), sonst fester Wert
-SPLINE_TARGET_RMS = 3      # Ziel-RMS in m
+SPLINE_TARGET_RMS = 1.0    # Ziel-RMS [m] – sanft (war 3.0 für KD-Tree-Rauschen)
 
-DEBUG_PATH_PRINTS = True
+DEBUG_PATH_PRINTS = False
 
 # --- Zusammenführen von Links wenn Unterschied sehr klein (optional) ---
-MERGE_LINKS  = True   # <— Schalter: True = zusammenfügen, False = überspringen
-GRADE_EPS    = 0.0005  # max. mittlere Steigung |Δz|/L (z. B. 0.01 %)
+MERGE_LINKS  = False   # <— Schalter: True = zusammenfügen, False = überspringen
+GRADE_EPS    = 0.08  # max. mittlere Steigung |Δz|/L (z. B. 0.01 %); Autobahnen max 6%; Bundestraßen bis 8%  laut RAS-Q-2019
 PRESERVE_IDS = False  # neue ID = "L1+L2+..."; bei True: nimm ID des ersten Links
 
 # --- Map-Export (optional) ---
@@ -35,6 +48,14 @@ CRS_INPUT = "auto"         # "auto" | "epsg:4326" | "epsg:25833"
 MAX_POINTS_PER_SECTION = 1000
 SHOW_SECTION_POPUPS = False
 # ==============================
+
+import argparse as _ap
+_parser = _ap.ArgumentParser(description="Glättet Höhenprofile eines MATSim-Netzwerks")
+_parser.add_argument("--input",  default=INPUT_FILE,  help="Eingabe-Netzwerk (.xml.gz)")
+_parser.add_argument("--output", default=OUTPUT_FILE, help="Ausgabe-Netzwerk (.xml.gz)")
+_args, _ = _parser.parse_known_args()
+INPUT_FILE  = _args.input
+OUTPUT_FILE = _args.output
 
 # ------------------------------
 # Datei einlesen
@@ -417,7 +438,7 @@ for nid, data in nodes.items():
         if "z" in elem.attrib:
             del elem.attrib["z"]
 
-out_path = Path(OUTPUT_FILE)
+out_path = Path(OUTPUT_FILE)  # wird ggf. durch --output CLI-Argument überschrieben
 out_path.parent.mkdir(parents=True, exist_ok=True)
 
 xml_bytes = ET.tostring(root, encoding="utf-8")

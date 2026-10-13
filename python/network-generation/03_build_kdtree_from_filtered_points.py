@@ -1,4 +1,13 @@
 # build_kdtree_from_gpkg_epsg4326.py
+#
+# ============================================================================
+# DEPRECATED (2026-06): Diese KD-Tree/npz-Hoehenstufe wird nicht mehr benoetigt.
+# Skript 04 sampelt die Hoehen jetzt DIREKT und CRS-korrekt aus dem LiDAR-DTM
+# (load_dtm / sample_heights), ohne npz-Punktwolke. Der hier gebaute KD-Tree
+# arbeitete im GRAD-Raum (anisotrop, 1 deg lon != 1 deg lat) + float32 -> ~2 m
+# Hoehenrauschen, vereinzelt Mehrmeter-Ausreisser an Bruecken/Parallelfahrbahnen.
+# Nur noch fuer Altlasten/Referenz aufheben; fuer neue Netze NICHT verwenden.
+# ============================================================================
 import os
 # Oversubscription vermeiden (stabilere Auslastung)
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -20,9 +29,9 @@ except Exception:
 # Parameter
 # =========================
 # Beispiel: direkt das 3D-Straßen-GPKG verwenden:
-gpkg_path    = r"data\Märkisch-Oderland_3d_raster_clamped.gpkg"  # Eingabe (Punkte ODER Linien)
+gpkg_path    = r"data\germany_3d_raster_clamped_DF.gpkg"  # Eingabe (Punkte ODER Linien)
 layer_name   = None               # None = automatisch sinnvolle Layerwahl
-output_path  = r"data\Märkisch-Oderland_kdtree_from_roads3d_epsg4326.npz"
+output_path  = r"data\germany_3d_raster_clamped_DF_kdtree_from_roads3d_epsg4326.npz"
 height_col   = None               # Falls 2D-Geometrie: mögliche Höhen-Spalte (z.B. "z")
 
 # KDTree-Parameter
@@ -172,10 +181,21 @@ def extract_points_from_lines_gdf(gdf: gpd.GeoDataFrame):
 # Main
 # =========================
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Baue KDTree aus 3D-GPKG")
+    parser.add_argument("--input",  default=gpkg_path,   help="Pfad zur Eingabe-GPKG-Datei")
+    parser.add_argument("--output", default=output_path, help="Ausgabepfad für NPZ-Datei")
+    parser.add_argument("--layer",  default=layer_name,  help="Layername im GPKG (None = automatisch)")
+    args = parser.parse_args()
+
+    in_path  = args.input
+    out_path = args.output
+    lyr_name = args.layer or None
+
     # Layer wählen / lesen
-    lyr = layer_name or auto_pick_layer(gpkg_path)
-    print(f"Öffne: {gpkg_path}  |  Layer: {lyr or '(Standard)'}")
-    gdf = read_any_layer(gpkg_path, layer=lyr)
+    lyr = lyr_name or auto_pick_layer(in_path)
+    print(f"Öffne: {in_path}  |  Layer: {lyr or '(Standard)'}")
+    gdf = read_any_layer(in_path, layer=lyr)
     print(f"Features: {len(gdf):,}  |  Geometrietypen: {set(gdf.geometry.geom_type)}  |  CRS: {gdf.crs}")
 
     # Nach WGS84 reprojizieren (KDTree wird in EPSG:4326 gebaut)
@@ -205,12 +225,12 @@ def main():
 
     # Speichern – Koordinaten + Höhen genügen; Tree bei Bedarf neu aufbauen
     np.savez_compressed(
-        output_path,
+        out_path,
         coords=coords_deg.astype(np.float32, copy=False),
         heights=heights.astype(np.float32, copy=False),
         crs="EPSG:4326"
     )
-    print(f"Gespeichert: {output_path}")
+    print(f"Gespeichert: {out_path}")
     print("Hinweis: Zum Abfragen später den KDTree aus 'coords' neu bauen und den Index in 'heights' verwenden.")
 
 if __name__ == "__main__":
