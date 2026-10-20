@@ -36,7 +36,7 @@ _SCRIPT_DIR = Path(__file__).parent
 _NETGEN_DIR = _SCRIPT_DIR.parents[2] / "MATSim-MPM-netgen" / "python" / "network-generation"
 
 DATA_DIR = _NETGEN_DIR / "data" / "HoLa-Truck-Heights"
-NETWORK = _NETGEN_DIR / "data" / "germany_network_250m_V2.xml.gz"
+NETWORK = _NETGEN_DIR / "data" / "germany_network_250m_V4.xml.gz"
 DTM_PATH = _SCRIPT_DIR / "data" / "DTM Germany 20m v3b by Sonny.tif"
 DETAILED_GPKG = _NETGEN_DIR / "data" / "germany_detailed_sorted_DF.gpkg"
 ROAD_PROFILE_CSV = _NETGEN_DIR / "data" / "germany_dense_heights.csv"

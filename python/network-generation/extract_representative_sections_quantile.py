@@ -48,8 +48,8 @@ from tqdm import tqdm
 # basierte auf V0_smoothed mit KD-Tree-Hoehen. Pfadsuche und Export nutzen
 # jetzt DASSELBE 250-m-Netz (kein separates Fein-Netz mehr noetig; der
 # Sweep-Generator braucht nur Korridor+Endpunkte der Referenz).
-COARSE_NETWORK = r"data\germany_network_250m_V2.xml.gz"   # for path search
-FINE_NETWORK   = r"data\germany_network_250m_V2.xml.gz"   # for final export
+COARSE_NETWORK = r"data\germany_network_250m_V4.xml.gz"   # for path search
+FINE_NETWORK   = r"data\germany_network_250m_V4.xml.gz"   # for final export
 
 TARGET_LENGTH_M    = 100_000   # target section length
 LENGTH_TOLERANCE_M = 2_000     # +/- tolerance around target
@@ -864,7 +864,7 @@ if __name__ == "__main__":
     _ap = _argparse.ArgumentParser()
     _ap.add_argument("--network", default=None,
                      help="MATSim-Netz fuer Pfadsuche UND Export "
-                          "(Default: germany_network_250m_V2.xml.gz)")
+                          "(Default: germany_network_250m_V4.xml.gz)")
     _ap.add_argument("--run-dir", default=None,
                      help="Ausgabeordner (Default: zeitgestempelt unter data/)")
     _ap.add_argument("--selection", choices=["quantile", "geo"],

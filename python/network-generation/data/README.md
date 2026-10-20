@@ -48,3 +48,17 @@ Run the scripts in order to regenerate all intermediate and output files:
 05_smooth_matsim_network.py
     → Germany_max_*_smoothened_*.xml.gz
 ```
+## Tracked network: `germany_network_250m_V4.xml.gz`
+
+The only generated file kept in git is the current Germany network
+`germany_network_250m_V4.xml.gz` (32 MB, 484,010 nodes with z, 735,129 links,
+max link length 250 m, EPSG:4839). Built on 2026-10-19 by Script 01 (Geofabrik
+extract `germany-latest.osm.pbf`, OSM data as of 2026-10-17) and Script 04
+(DTM Germany 20m v3b by Sonny, corridor smoothing, bridge/tunnel linearisation).
+The dense roadway height profile `germany_dense_heights_V4.csv` (432 MB) and the
+GPKGs are not tracked; regenerate them with the pipeline.
+
+**License / attribution:** the network is derived from OpenStreetMap data,
+© OpenStreetMap contributors, licensed under the Open Database License (ODbL),
+https://www.openstreetmap.org/copyright. Elevations come from the DTM by Sonny
+(https://sonny.4lima.de/, CC BY 4.0).

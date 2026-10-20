@@ -56,6 +56,9 @@ REFS = {
     "dense_V2": ("dense", _NETGEN / "data" / "germany_dense_heights_V2.zip"),
     # V3 = V2 + Halbpixel-Fix der DTM-Abtastung (Commit 153fa3d). Der Vergleich
     # net_V2 gegen net_V3 quantifiziert den Fix am produktiven Netz.
+    # V4 (2026-10-19) = Neubau aus Geofabrik-PBF (OSM 2026-10-17) nach Datenverlust;
+    # Hoehenpipeline identisch zu V3 (dense-Abgleich: MAE 1 cm, 99,99 % <= 2 m).
+    "net_V4": ("net", _NETGEN / "data" / "germany_network_250m_V4.xml.gz"),
     "net_V3": ("net", _NETGEN / "data" / "germany_network_250m_V3.xml.gz"),
     "net_V2": ("net", _NETGEN / "data" / "germany_network_250m_V2.xml.gz"),
     "net_V1": ("net", _NETGEN / "data" / "germany_network_250m_V1.xml.gz"),

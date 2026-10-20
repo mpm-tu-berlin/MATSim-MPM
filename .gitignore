@@ -63,6 +63,7 @@ cache/
 python/network-generation/__pycache__/
 python/network-generation/data/*
 !python/network-generation/data/README.md
+!python/network-generation/data/germany_network_250m_V4.xml.gz
 python/network-generation/cache/
 python/network-generation/old/
 
