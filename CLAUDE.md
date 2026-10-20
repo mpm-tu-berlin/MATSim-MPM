@@ -93,7 +93,7 @@ Scripts run **in sequence** (numbered 01–05); `run_04_parallel.py` parallelise
 
 | Script | Input | Output | Purpose |
 |--------|-------|--------|---------|
-| `01_save_filtered_osm_locally.py` | OSM (via osmnx) | `germany_simplified_DF.gpkg`, `germany_detailed_sorted_DF.gpkg` | Download + sort OSM edges; match simplified to detailed segments |
+| `01_save_filtered_osm_locally.py` | **Geofabrik-PBF** (`--source pbf`, Default; Download + lokales Filtern via pyosmium) oder Overpass (`--source overpass`, nur kleine Gebiete) | `germany_simplified_DF.gpkg`, `germany_detailed_sorted_DF.gpkg`, `germany-latest.osm.pbf(.source.txt)` | Download + sort OSM edges; match simplified to detailed segments |
 | `02_generate_3d_roads_from_osm.py.py` | `.gpkg` files | 3D road geometry | **DEPRECATED (2026-06)** – Höhen kommen jetzt direkt aus dem DTM in 04 |
 | `03_build_kdtree_from_filtered_points.py` | DTM `.tif` files (in `data/`) | `*.npz` | **DEPRECATED (2026-06)** – KD-Tree arbeitete im Grad-Raum (anisotrop) + float32; ersetzt durch direktes DTM-Sampling in 04 |
 | `04_build_matsim_network_from_local_osm_and_kdtree.py` | `.gpkg` + **DTM `.tif`** | `Germany_max_*_long_V0.xml.gz` | Build MATSim XML network with 3D nodes; splits long links. Höhen via direktem bilinearem DTM-Sampling (`load_dtm`/`sample_heights`), kein npz mehr |
@@ -103,7 +103,7 @@ Scripts run **in sequence** (numbered 01–05); `run_04_parallel.py` parallelise
 - `DTM Germany 20m v3b by Sonny.tif` – primary elevation source
 - `DTM Germany 50m v3b by Sonny.tif` – fallback
 
-**Script 01 key logic:** Downloads both simplified and non-simplified OSM graphs, normalizes `reversed` flags, then iterates through simplified edges to find matching detailed sub-segments in order. This sorted detailed result becomes the network backbone.
+**Script 01 key logic:** Loads both simplified and non-simplified OSM graphs, normalizes `reversed` flags, then iterates through simplified edges to find matching detailed sub-segments in order. This sorted detailed result becomes the network backbone. **Since 2026-10 the default source is a Geofabrik PBF extract** (`download_geofabrik` → `filter_pbf_to_osm` on the `highway` classes of `DEFAULT_HIGHWAY_FILTER` → `ox.graph_from_xml`), because overpass-api.de blocks automated bulk downloads (184 tiles for Germany). Provenance (URL, server Last-Modified, MD5) is written to `<pbf>.source.txt`. Region boundary is the extract's clipping (border-crossing ways complete, like `truncate_by_edge=True`); `--area` only names the outputs. Overpass path kept for small areas (`--source overpass`).
 
 **Script 04 key logic:** Enforces `max_allowed_link_length` by recursively splitting long simplified edges at detailed segment boundaries. Elevation is assigned via **direct bilinear DTM sampling** (`load_dtm`/`sample_heights`, CRS-correct EPSG:4326→DTM-CRS, thread-safe, block + tiled paths) — replaces the old anisotropic degree-space KDTree/npz lookup. By default heights use **`assign_heights_along_corridors`**: per corridor the DTM is sampled densely (~`sample_step_m`) along the road geometry, the profile is gently smoothed once (`smooth_rms_m`, resolution-independent), **bridge/tunnel spans are linearised** between the at-grade ends (OSM `bridge`/`tunnel`, avoids bare-earth valley/mountain artifacts), and node z is read at each arc-length position. This folds Script 05's smoothing into 04. Only OSM (`.gpkg`, topology) + DTM (`.tif`, elevation) are needed.
 

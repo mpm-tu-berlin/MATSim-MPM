@@ -1,6 +1,108 @@
 import osmnx as ox
 import pandas as pd
 from tqdm import tqdm
+import os
+import re
+import hashlib
+import datetime as _dt
+
+# Geofabrik-Extrakt (vertrauenswuerdige Quelle, taeglich aktualisiert, datiert).
+GEOFABRIK_GERMANY_URL = "https://download.geofabrik.de/europe/germany-latest.osm.pbf"
+DEFAULT_HIGHWAY_FILTER = '["highway"~"motorway|motorway_link|trunk|trunk_link|primary|primary_link"]'
+
+
+def _highway_regex_from_filter(highway_types):
+    """Overpass-Filter '["highway"~"a|b|c"]' -> kompilierter Regex ueber den highway-Wert.
+    Damit bleibt die Strassenklassen-Definition EINE Stelle (highway_types), egal ob
+    Overpass oder PBF-Eingang genutzt wird."""
+    m = re.search(r'\["highway"~"([^"]+)"\]', highway_types)
+    if not m:
+        raise ValueError(f"highway_types nicht als Overpass-Regex-Filter erkennbar: {highway_types}")
+    return re.compile(f"^(?:{m.group(1)})$")
+
+
+def download_geofabrik(url=GEOFABRIK_GERMANY_URL, dest="data/germany-latest.osm.pbf",
+                       chunk_mb=16, verify_md5=True):
+    """Laedt einen Geofabrik-PBF-Extrakt (streaming) nach `dest` und schreibt eine
+    Herkunftsdatei `<dest>.source.txt` (URL, Last-Modified des Servers, MD5,
+    Download-Zeitpunkt). Liegt `dest` schon vor, wird nichts geladen.
+    Rueckgabe: Pfad zum PBF."""
+    import requests
+    if os.path.exists(dest) and os.path.getsize(dest) > 0:
+        print(f"PBF vorhanden, kein Download: {dest}")
+        return dest
+    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+    part = dest + ".part"
+    print(f"Lade {url} -> {dest} ...")
+    with requests.get(url, stream=True, timeout=(30, 300),
+                      headers={"User-Agent": "MATSim-MPM network-generation (requests)"}) as r:
+        r.raise_for_status()
+        total = int(r.headers.get("Content-Length", 0))
+        last_mod = r.headers.get("Last-Modified", "")
+        md5 = hashlib.md5()
+        with open(part, "wb") as fh, tqdm(total=total, unit="B", unit_scale=True, desc="PBF") as bar:
+            for chunk in r.iter_content(chunk_size=chunk_mb * 1024 * 1024):
+                fh.write(chunk)
+                md5.update(chunk)
+                bar.update(len(chunk))
+    md5_hex = md5.hexdigest()
+    os.replace(part, dest)   # Download ist komplett; erst sichern, dann pruefen
+    if verify_md5:
+        ref = None
+        try:
+            txt = requests.get(url + ".md5", timeout=60).text.split()
+            if txt and re.fullmatch(r"[0-9a-f]{32}", txt[0].strip()):
+                ref = txt[0].strip()
+        except Exception as e:  # Netz-/Proxy-Fehler: nur warnen, Download bleibt
+            print(f"WARNUNG: MD5-Datei nicht abrufbar ({e})")
+        if ref is None:
+            print(f"WARNUNG: keine gueltige Server-MD5 erhalten; Download-MD5 = {md5_hex}")
+        elif ref != md5_hex:
+            os.remove(dest)
+            raise RuntimeError(f"MD5 stimmt nicht: Server {ref}, Download {md5_hex}; Datei verworfen")
+        else:
+            print(f"MD5 geprueft: {md5_hex}")
+    try:   # OSM-Datenstand aus dem PBF-Header (unabhaengig vom Server-Datum)
+        import osmium
+        osm_ts = osmium.FileProcessor(dest).header.get("osmosis_replication_timestamp")
+    except Exception:
+        osm_ts = ""
+    with open(dest + ".source.txt", "w", encoding="utf-8") as fh:
+        fh.write(f"url: {url}\nlast_modified_server: {last_mod}\nmd5: {md5_hex}\n"
+                 f"osm_data_timestamp: {osm_ts}\n"
+                 f"downloaded_utc: {_dt.datetime.now(_dt.timezone.utc).isoformat(timespec='seconds')}\n"
+                 f"size_bytes: {os.path.getsize(dest)}\n")
+    return dest
+
+
+def filter_pbf_to_osm(pbf_path, out_osm, highway_types=DEFAULT_HIGHWAY_FILTER):
+    """Filtert einen OSM-PBF-Extrakt auf die Strassenklassen aus `highway_types`
+    (ways mit passendem highway-Tag + alle von ihnen referenzierten Knoten) und
+    schreibt das Ergebnis als OSM-XML (.osm oder .osm.bz2), das `ox.graph_from_xml`
+    lesen kann. Entspricht fachlich dem Overpass-Query
+    `way["highway"~"..."](poly);>;` aus dem bisherigen Download-Pfad.
+    Rueckgabe: Pfad der gefilterten Datei."""
+    import osmium
+    rx = _highway_regex_from_filter(highway_types)
+    if os.path.exists(out_osm) and os.path.getmtime(out_osm) >= os.path.getmtime(pbf_path):
+        print(f"Gefilterte OSM-Datei vorhanden: {out_osm}")
+        return out_osm
+    print(f"Filtere {pbf_path} auf {rx.pattern} -> {out_osm} ...")
+    n_ways = 0
+    # BackReferenceWriter: schreibt die hinzugefuegten Ways und zieht die referenzierten
+    # Knoten in einem zweiten Lesedurchlauf automatisch aus `ref_src` nach.
+    with osmium.BackReferenceWriter(out_osm, ref_src=pbf_path, overwrite=True) as writer:
+        fp = osmium.FileProcessor(pbf_path, osmium.osm.WAY).with_filter(osmium.filter.KeyFilter("highway"))
+        for way in tqdm(fp, desc="Ways filtern", unit="way"):
+            if rx.match(way.tags.get("highway", "")):
+                writer.add(way)
+                n_ways += 1
+    print(f"{n_ways} Ways uebernommen -> {out_osm}")
+    with open(out_osm + ".source.txt", "w", encoding="utf-8") as fh:
+        fh.write(f"pbf: {pbf_path}\nhighway_filter: {highway_types}\nways: {n_ways}\n"
+                 f"filtered_utc: {_dt.datetime.now(_dt.timezone.utc).isoformat(timespec='seconds')}\n")
+    return out_osm
+
 
 def get_first_edge(gdf):
     """Gibt die erste Zeile und deren Index zurück."""
@@ -363,20 +465,38 @@ def _sort_detailed_fast(gdf_edges_simplified, gdf_edges_detailed, total_detailed
 
 
 def build_region(area="Germany", bbox=None, out_prefix=None,
-                 highway_types='["highway"~"motorway|motorway_link|trunk|trunk_link|primary|primary_link"]',
-                 sort_impl="fast"):
+                 highway_types=DEFAULT_HIGHWAY_FILTER,
+                 sort_impl="fast", pbf_path=None, filtered_osm=None):
     """Laedt OSM-Strassennetz (simplified + detailed) fuer eine Region und schreibt
     zwei GPKGs (simplified + detailed_sorted). Region entweder per Ortsname `area`
     ODER `bbox`=(west, south, east, north). `out_prefix` bestimmt die Ausgabepfade
-    (Default: data/<area>). Damit ist die Pipeline regional wiederverwendbar."""
+    (Default: data/<area>). Damit ist die Pipeline regional wiederverwendbar.
+
+    Datenquelle:
+    - `pbf_path=None`: Overpass-API via osmnx (historischer Weg). Seit 2026-10 sperrt
+      overpass-api.de automatisierte Massenabfragen (184 Kacheln fuer Deutschland)
+      aus; fuer grosse Gebiete nicht mehr nutzbar.
+    - `pbf_path` gesetzt: lokaler OSM-Extrakt (z. B. Geofabrik, s. download_geofabrik),
+      per filter_pbf_to_osm auf `highway_types` gefiltert (Datei `filtered_osm`,
+      Default <pbf_path ohne Endung>_highways.osm.bz2), dann ox.graph_from_xml.
+      Gebietsgrenze ist dann der Zuschnitt des Extrakts (Geofabrik: grenzkreuzende
+      Ways bleiben vollstaendig, entspricht truncate_by_edge=True); `area`/`bbox`
+      dienen nur noch der Benennung."""
     if out_prefix is None:
         base = (area.split(',')[0].lower() if area else "region")
         out_prefix = f"data/{base}"
     output_file_simplified = f"{out_prefix}_simplified_DF"
     output_file_detailed_sorted = f"{out_prefix}_detailed_sorted_DF"
 
+    if pbf_path is not None:
+        if filtered_osm is None:
+            filtered_osm = re.sub(r"\.osm\.pbf$|\.pbf$", "", pbf_path) + "_highways.osm.bz2"
+        filtered_osm = filter_pbf_to_osm(pbf_path, filtered_osm, highway_types)
+
     def _fetch(simplify, retain_all, truncate_by_edge):
-        """OSM-Abruf via osmnx. Die vier steuerbaren Optionen und ihre Bedeutung:
+        """OSM-Abruf via osmnx. Bei `pbf_path`: Graph aus der gefilterten lokalen
+        OSM-XML-Datei (truncate_by_edge entfaellt, s. Docstring von build_region).
+        Sonst Overpass. Die vier steuerbaren Optionen und ihre Bedeutung:
 
         - network_type="drive": fahrbare Strassen. Praktisch INERT, weil ein
           custom_filter gesetzt ist und in osmnx Vorrang hat; nur Fallback.
@@ -397,6 +517,8 @@ def build_region(area="Germany", bbox=None, out_prefix=None,
         Wichtig: retain_all und truncate_by_edge sind ORTHOGONAL. Grenzuebergaenge
         'bis zur Bundesgrenze' kommen von truncate_by_edge, NICHT von retain_all.
         """
+        if pbf_path is not None:
+            return ox.graph.graph_from_xml(filtered_osm, simplify=simplify, retain_all=retain_all)
         if bbox is not None:
             return ox.graph.graph_from_bbox(
                 bbox=bbox, network_type="drive", simplify=simplify,
@@ -669,4 +791,24 @@ def build_region(area="Germany", bbox=None, out_prefix=None,
 
 
 if __name__ == "__main__":
-    build_region(area="Germany", out_prefix="data/germany")
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="OSM-Strassennetz (simplified + detailed_sorted) als GPKG erzeugen. "
+                    "Default-Quelle: Geofabrik-PBF (lokal gefiltert). Overpass nur noch fuer kleine Gebiete.")
+    parser.add_argument("--source", choices=["pbf", "overpass"], default="pbf")
+    parser.add_argument("--pbf", default="data/germany-latest.osm.pbf",
+                        help="Pfad zum OSM-PBF-Extrakt; fehlt er, wird --pbf-url geladen")
+    parser.add_argument("--pbf-url", default=GEOFABRIK_GERMANY_URL)
+    parser.add_argument("--filtered-osm", default=None,
+                        help="Zwischendatei der gefilterten Strassenklassen (.osm.bz2); Default neben dem PBF")
+    parser.add_argument("--area", default="Germany", help="Ortsname (Overpass) bzw. Namensbasis")
+    parser.add_argument("--out-prefix", default="data/germany")
+    parser.add_argument("--highway-filter", default=DEFAULT_HIGHWAY_FILTER)
+    args = parser.parse_args()
+
+    if args.source == "pbf":
+        pbf = download_geofabrik(args.pbf_url, args.pbf)
+        build_region(area=args.area, out_prefix=args.out_prefix, highway_types=args.highway_filter,
+                     pbf_path=pbf, filtered_osm=args.filtered_osm)
+    else:
+        build_region(area=args.area, out_prefix=args.out_prefix, highway_types=args.highway_filter)
